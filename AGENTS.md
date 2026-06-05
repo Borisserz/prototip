@@ -68,10 +68,10 @@ Phase 7 — Streamlit UI + интеграция. ✅ Готово
 Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. ✅ Готово
 
 ## Следующий спринт
-- DashboardAgent: несколько графиков на одном экране.
+- **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка "📈 Дашборды" в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
 - Telegram-бот.
 - Расширение датасета и новых типов графиков (scatter, waterfall, area и др.).
-- Дополнительные улучшения по запросу.
+- Дополнительные улучшения по запросу (PlannerAgent и т.д.).
 
 ## Команды
 - Установка: `pip install -r requirements.txt`

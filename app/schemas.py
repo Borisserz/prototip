@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from core.models import ChartSpec
@@ -118,3 +121,82 @@ class PresentationRequest(BaseModel):
     include_title: bool = True
     include_recommendations: bool = True
     # для изображений/CSV в будущем можно добавить base64 или пути, но для Phase тонкий
+
+
+# === Dashboard (Phase next sprint) ===
+# Контракты для DashboardAgent: комплексный дашборд из нескольких ChartSpec + KPI + insights.
+# Следует spec-first: LLM возвращает спецификации, рендер — детерминированный viz/.
+# Все тексты на русском. Переиспользуем ChartSpec из core (не дублируем).
+# data + source_sql добавлены для рендера в UI (build_chart) и отладки без повторных дорогостоящих вызовов.
+
+
+class KpiCard(BaseModel):
+    """KPI-карточка для верхней части дашборда."""
+
+    name: str = Field(..., description="Название метрики на русском, напр. 'Общая задолженность'")
+    value: float | str = Field(..., description="Значение: число или уже отформатированная строка")
+    unit: str = Field("", description="Единица измерения, напр. 'Br', '%', 'регионов'")
+    change: float | None = Field(
+        None, description="Относительное изменение в % (положительное — рост)"
+    )
+    change_period: str | None = Field(
+        None, description="Период изменения, напр. 'к предыдущему месяцу'"
+    )
+
+
+class DashboardLayout(BaseModel):
+    """Рекомендация по расположению элементов дашборда (для будущего UI/рендера)."""
+
+    type: Literal["kpi_top_grid", "two_column", "tabs", "single_column"] = Field(
+        "kpi_top_grid", description="Тип лейаута"
+    )
+    columns: int = Field(2, ge=1, le=4, description="Число колонок для графиков")
+
+
+class DashboardRequest(BaseModel):
+    """Вход для DashboardAgent."""
+
+    question: str = Field(
+        ...,
+        min_length=5,
+        description="Естественный вопрос пользователя на русском, напр. 'Дашборд по задолженности по регионам'",
+    )
+    data: list[dict] | None = Field(
+        None,
+        description="Опциональные данные (records). Если None — агент самостоятельно вызовет DataAgent для получения.",
+    )
+    max_charts: int = Field(4, ge=1, le=6, description="Максимальное число графиков в дашборде")
+    include_kpi: bool = Field(True, description="Включать ли KPI-карточки")
+
+
+class DashboardResult(BaseModel):
+    """Выход DashboardAgent: полный структурированный дашборд."""
+
+    title: str = Field(..., description="Заголовок дашборда на русском")
+    summary: str = Field(..., description="Краткое саммари (2-4 предложения)")
+    kpi_cards: list[KpiCard] = Field(
+        default_factory=list, description="KPI-карточки (если запрошены)"
+    )
+    charts: list[ChartSpec] = Field(
+        default_factory=list,
+        description="Список спецификаций графиков (3-5 шт.). Рендер через viz/charts.py",
+    )
+    layout: DashboardLayout = Field(
+        default_factory=DashboardLayout, description="Рекомендуемый layout"
+    )
+    insights: list[str] = Field(
+        default_factory=list,
+        description="3-6 аналитических инсайтов на русском (высокоуровневые по всему дашборду)",
+    )
+    data: list[dict] = Field(
+        default_factory=list,
+        description="Данные (records) использованные для построения дашборда (для рендера графиков в UI без перезапроса LLM/DataAgent)",
+    )
+    source_sql: str | None = Field(
+        None,
+        description="SQL запрос (если известен), использованный для получения данных (для отладки/экспорта)",
+    )
+    generated_at: datetime = Field(default_factory=datetime.now)
+    reasoning: str = Field(
+        ..., description="Обоснование выбора графиков, layout, KPI (для отладки и прозрачности)"
+    )

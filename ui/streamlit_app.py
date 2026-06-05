@@ -22,6 +22,7 @@ import streamlit as st  # noqa: E402
 
 # Импорт ядра — только здесь
 from app.orchestrator import Orchestrator  # noqa: E402
+from app.schemas import DashboardRequest, DashboardResult  # noqa: E402
 from viz.charts import build_chart  # noqa: E402
 
 # Константы для формы презентации (используются в UI и могут тестироваться)
@@ -63,7 +64,7 @@ def main() -> None:
         "Всё работает оффлайн через Ollama."
     )
 
-    tab_charts, tab_pres = st.tabs(["📊 Графики", "📑 Презентация"])
+    tab_charts, tab_dash, tab_pres = st.tabs(["📊 Графики", "📈 Дашборды", "📑 Презентация"])
 
     with tab_charts:
         st.caption(
@@ -177,6 +178,71 @@ def main() -> None:
                 st.write(f"**Строк в результате:** {len(result.data)}")
                 if result.png_path:
                     st.write(f"**PNG:** `{result.png_path}`")
+
+    # === Новая вкладка Дашборды (plan step 3): один вопрос → KPI grid + layout-driven multi-chart + polish ===
+    with tab_dash:
+        st.markdown(
+            "**Комплексный дашборд (KPI + несколько взаимосвязанных графиков на одном экране)**"
+        )
+
+        # Примеры (как в charts, но dashboard-oriented)
+        st.write("**Примеры дашбордов (нажмите):**")
+        dcol1, dcol2, dcol3 = st.columns(3)
+        dash_examples = [
+            "Дашборд по задолженности по регионам",
+            "Ключевые метрики и динамика начислений в г. Минск",
+            "Сравнение структуры налогов по видам (доли + тренды)",
+        ]
+        if dcol1.button(dash_examples[0], use_container_width=True, key="d1"):
+            st.session_state["dash_question"] = dash_examples[0]
+            st.rerun()
+        if dcol2.button(dash_examples[1], use_container_width=True, key="d2"):
+            st.session_state["dash_question"] = dash_examples[1]
+            st.rerun()
+        if dcol3.button(dash_examples[2], use_container_width=True, key="d3"):
+            st.session_state["dash_question"] = dash_examples[2]
+            st.rerun()
+
+        with st.form("dash_form", clear_on_submit=False):
+            dash_q = st.text_input(
+                "Вопрос для дашборда (на русском)",
+                value=st.session_state.get("dash_question", "Дашборд по задолженности по регионам"),
+                key="dash_q_input",
+            )
+            submitted_dash = st.form_submit_button(
+                "Построить дашборд", type="primary", use_container_width=True
+            )
+
+        # Настройки в expander (как в pres)
+        with st.expander("Настройки дашборда"):
+            dash_max = st.slider("Макс. графиков", 2, 6, 4, key="dash_max")
+            dash_kpi = st.checkbox("Включать KPI-карточки", value=True, key="dash_kpi")
+
+        if submitted_dash and dash_q.strip():
+            st.session_state["dash_question"] = dash_q.strip()
+            req = DashboardRequest(
+                question=dash_q.strip(), max_charts=dash_max, include_kpi=dash_kpi
+            )
+
+            with st.status(
+                "Генерация дашборда (Data + Analyst + композиция LLM)...", expanded=True
+            ) as status:
+                try:
+                    o = get_orchestrator()
+                    # Предпочтительно через оркестратор (reuse agents + логи)
+                    dash_res = o.dashboard(
+                        req.question, max_charts=req.max_charts, include_kpi=req.include_kpi
+                    )
+                    st.session_state["last_dashboard"] = dash_res
+                    status.update(label="Дашборд готов", state="complete")
+                except Exception as e:
+                    st.error(f"Ошибка: {e}")
+                    status.update(label="Ошибка", state="error")
+
+        # Рендер результата (если есть)
+        if "last_dashboard" in st.session_state:
+            dash_res = st.session_state["last_dashboard"]
+            _render_dashboard(dash_res)  # defined below
 
     # Закрываем вкладку графиков. Весь оригинальный код графиков выше — без изменений.
 
@@ -369,6 +435,141 @@ def main() -> None:
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
+
+
+def _render_dashboard(res: DashboardResult) -> None:
+    """Рендер DashboardResult в Streamlit (KPI + layout grid + polish).
+    Reuses build_chart + plotly (live), st.metric/columns/tabs/expanders per plan.
+    Требует res.data для чартов (добавлено в schemas/agent).
+    """
+    import pandas as pd  # local to avoid top bloat if not needed
+
+    st.subheader(res.title)
+    st.write(res.summary)
+
+    # KPI row (st.metric + columns; polish с Br/дескрипшенами)
+    if res.kpi_cards:
+        n = min(len(res.kpi_cards), 4)
+        kcols = st.columns(n)
+        for i, kpi in enumerate(res.kpi_cards):
+            with kcols[i % n]:
+                delta = f"{kpi.change:+.1f}%" if getattr(kpi, "change", None) is not None else None
+                help_txt = getattr(kpi, "change_period", None) or ""
+                # value может быть float (compute) или str (LLM + format); metric справится
+                st.metric(
+                    label=kpi.name,
+                    value=kpi.value,
+                    delta=delta,
+                    delta_color="normal",
+                    help=help_txt,
+                )
+        st.divider()
+
+    # Charts grid, respect layout (columns or tabs fallback)
+    if res.charts and getattr(res, "data", None):
+        df = pd.DataFrame(res.data)
+        n_cols = max(1, min(getattr(res.layout, "columns", 2), 3))
+        layout_type = getattr(res.layout, "type", "kpi_top_grid")
+
+        if "tab" in layout_type:
+            # Простая tabs версия
+            tab_names = [c.title[:40] for c in res.charts]
+            ctabs = st.tabs(tab_names)
+            for i, spec in enumerate(res.charts):
+                with ctabs[i]:
+                    try:
+                        fig = build_chart(df, spec)
+                        st.plotly_chart(fig, use_container_width=True, key=f"dash_tab_{i}")
+                        if getattr(spec, "insights", None):
+                            st.caption(" | ".join(spec.insights[:2]))
+                    except Exception as e:
+                        st.warning(f"Ошибка рендера графика {i}: {e}")
+        else:
+            # Grid по columns (kpi_top_grid / two_column / single)
+            chart_cols = st.columns(n_cols)
+            for i, spec in enumerate(res.charts):
+                c = chart_cols[i % n_cols]
+                with c:
+                    try:
+                        fig = build_chart(df, spec)
+                        st.caption(spec.title)
+                        st.plotly_chart(fig, use_container_width=True, key=f"dash_grid_{i}")
+                        if getattr(spec, "rationale", None):
+                            with st.expander("Почему этот тип?", expanded=False):
+                                st.write(spec.rationale)
+                    except Exception as e:
+                        st.warning(f"График {i}: {e}")
+    elif res.charts:
+        st.info(
+            "Спецификации графиков есть, но нет данных для рендера (нужен data в DashboardResult)."
+        )
+
+    # Post-gen editor (типы) + client filters (демо) — cool UX без лишних LLM (plan step4)
+    with st.expander("Редактор / фильтры (post-gen твики, без пере-LLM)", expanded=False):
+        st.caption("Меняйте тип — перерендер live через build_chart. Фильтры — клиентские на data.")
+        for i, spec in enumerate(res.charts):
+            opts = [
+                "horizontal_bar",
+                "bar",
+                "donut",
+                "line",
+                "grouped_bar",
+                "stacked_bar",
+                "heatmap",
+            ]
+            try:
+                idx = opts.index(spec.chart_type) if spec.chart_type in opts else 0
+            except Exception:
+                idx = 0
+            new_t = st.selectbox(
+                f"Тип #{i + 1} '{spec.title[:25]}'", opts, index=idx, key=f"dash_edit_{i}"
+            )
+            if new_t != spec.chart_type:
+                spec.chart_type = new_t
+        if st.button("Применить изменения к графикам", key="dash_apply_edit"):
+            st.rerun()
+
+        if getattr(res, "data", None):
+            regs = sorted({d.get("region") for d in res.data if d.get("region")})
+            sel_regs = st.multiselect(
+                "Фильтр по регионам (демо)", regs, default=regs, key="dash_filt"
+            )
+            if sel_regs and len(sel_regs) < len(regs):
+                st.caption(
+                    f"Выбрано {len(sel_regs)} регионов — в полной версии графики обновятся на slice данных."
+                )
+
+    # Insights + reasoning (как в single chart + pres polish)
+    if res.insights:
+        st.subheader("Инсайты дашборда")
+        for ins in res.insights:
+            st.markdown(f"- {ins}")
+
+    with st.expander("Почему именно такой дашборд? (reasoning + отладка)", expanded=False):
+        st.write(getattr(res, "reasoning", ""))
+        if getattr(res, "source_sql", None):
+            st.code(res.source_sql, language="sql")
+        st.caption(
+            f"Сгенерировано: {getattr(res, 'generated_at', '')} | layout={getattr(res.layout, 'type', '')}"
+        )
+
+    # Actions (cool UX)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Экспорт спецификаций (JSON)", key="dash_json"):
+            import json
+
+            st.download_button(
+                "Скачать dashboard.json",
+                data=json.dumps(res.model_dump(), ensure_ascii=False, indent=2, default=str),
+                file_name="dashboard.json",
+                mime="application/json",
+            )
+    with c2:
+        if st.button("Добавить в презентацию (демо)", key="dash_to_pres"):
+            st.info(
+                "В будущем: интеграция с PresentationAgent (один слайд или несколько из дашборда). Пока используйте вкладку Презентация."
+            )
 
 
 if __name__ == "__main__":

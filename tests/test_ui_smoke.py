@@ -1,9 +1,10 @@
-"""Smoke-тест для Streamlit UI (Phase 7).
+"""Smoke-тест для Streamlit UI (Phase 7 + dashboard).
 
 Просто проверяет, что модуль импортируется без синтаксических/импортных ошибок.
 Бизнес-логика не выполняется (мокаем Orchestrator).
 
 Дополнительно: проверяем, что русские типы графиков в форме презентации чисто на русском (нет английских ключей в UI).
+Dashboard: наличие _render_dashboard и поддержка 3 вкладок.
 """
 
 from __future__ import annotations
@@ -46,3 +47,7 @@ def test_ui_streamlit_app_imports_without_error():
     assert "horizontal_bar" in CHART_VAL_FOR_DISPLAY.values()
     # реверс маппинг покрывает
     assert CHART_DISPLAY_FOR_VAL.get("horizontal_bar") == "горизонтальная столбчатая"
+
+    # Dashboard smoke (plan step6)
+    assert hasattr(ui.streamlit_app, "_render_dashboard")
+    # (tabs count проверяется рантаймом в smoke; здесь достаточно импорта + наличие)

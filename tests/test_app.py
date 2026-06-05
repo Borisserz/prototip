@@ -66,3 +66,38 @@ def test_generate_presentation_endpoint():
         data = resp.json()
         assert "pptx_path" in data
         assert data["num_slides"] >= 3
+
+
+def test_generate_dashboard_endpoint():
+    """POST /generate_dashboard принимает payload и возвращает DashboardResult (мок агента)."""
+    from unittest.mock import MagicMock, patch
+
+    payload = {
+        "question": "Дашборд по задолженности по регионам",
+        "max_charts": 3,
+        "include_kpi": True,
+        "data": None,
+    }
+
+    with patch("app.agents.dashboard_agent.DashboardAgent") as mock_da:
+        mock_instance = MagicMock()
+        # Минимальный валидный DashboardResult
+        mock_instance.run.return_value = MagicMock(
+            title="Дашборд тест",
+            summary="summary",
+            kpi_cards=[],
+            charts=[],
+            layout=MagicMock(type="kpi_top_grid", columns=2),
+            insights=["i1"],
+            data=[],
+            source_sql=None,
+            reasoning="test",
+        )
+        mock_da.return_value = mock_instance
+
+        resp = client.post("/generate_dashboard", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "title" in data
+        assert "charts" in data
+        assert data.get("layout", {}).get("type") == "kpi_top_grid"

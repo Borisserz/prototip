@@ -18,8 +18,9 @@ import pandas as pd
 
 from app.agents.analyst_agent import AnalystAgent
 from app.agents.chart_agent import ChartAgent
+from app.agents.dashboard_agent import DashboardAgent
 from app.agents.data_agent import DataAgent
-from app.schemas import AskResult, SqlResult
+from app.schemas import AskResult, DashboardResult, SqlResult
 from core.llm import setup_logging
 from viz.charts import build_chart, export_png
 
@@ -35,6 +36,7 @@ class Orchestrator:
         self.data_agent = DataAgent()
         self.analyst_agent = AnalystAgent()
         self.chart_agent = ChartAgent()
+        self.dashboard_agent = DashboardAgent()
         self.out_dir = Path("out")
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -113,3 +115,28 @@ class Orchestrator:
         elapsed = int((time.time() - start) * 1000)
         logger.info(f"[Orchestrator] end: png={bool(png_path)} ({elapsed}ms)")
         return result
+
+    def dashboard(
+        self,
+        question: str,
+        max_charts: int = 4,
+        include_kpi: bool = True,
+        data: list[dict] | None = None,
+    ) -> DashboardResult:
+        """Единая точка для дашбордов (peer к ask). Переиспользует sub-агентов оркестратора + DashboardAgent.
+
+        data можно передать, чтобы избежать повторного DataAgent (для UX фильтров/кэша).
+        """
+        start = time.time()
+        logger.info(f"[Orchestrator] dashboard start: question={question[:60]}... max={max_charts}")
+        from app.schemas import DashboardRequest
+
+        req = DashboardRequest(
+            question=question, max_charts=max_charts, include_kpi=include_kpi, data=data
+        )
+        res = self.dashboard_agent.run(req)
+        elapsed = int((time.time() - start) * 1000)
+        logger.info(
+            f"[Orchestrator] dashboard end: charts={len(res.charts)} kpis={len(res.kpi_cards)} ({elapsed}ms)"
+        )
+        return res

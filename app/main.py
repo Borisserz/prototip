@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.schemas import PresentationRequest, PresentationResult
+from app.schemas import DashboardRequest, DashboardResult, PresentationRequest, PresentationResult
 
 app = FastAPI(
     title="prototip BI",
@@ -76,3 +76,14 @@ def generate_presentation(payload: PresentationRequest) -> PresentationResult:
         include_title=payload.include_title,
         include_recommendations=payload.include_recommendations,
     )
+
+
+@app.post("/generate_dashboard", response_model=DashboardResult, tags=["dashboard"])
+def generate_dashboard(payload: DashboardRequest) -> DashboardResult:
+    """Генерация дашборда (KPI + несколько ChartSpec + layout + insights) по одному вопросу.
+    Thin: логика в DashboardAgent (с reuse Data/Analyst/Chart).
+    """
+    from app.agents.dashboard_agent import DashboardAgent
+
+    da = DashboardAgent()
+    return da.run(payload)

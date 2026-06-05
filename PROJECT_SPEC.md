@@ -75,7 +75,7 @@ SQL по этим данным выполняется через DuckDB прям
   README, e2e-тесты.
 
 ## Следующий спринт
-- DashboardAgent: несколько графиков на одном экране.
+- DashboardAgent: несколько графиков на одном экране (KPI + ChartSpec[] + layout; с UI рендером в Streamlit grid/tabs, API, sub-agent reuse, client polish). Реализован + интегрирован.
 - Telegram-бот.
 - Расширение датасета и новых типов графиков (scatter, waterfall, area и др.).
 - Дополнительные улучшения по запросу.
