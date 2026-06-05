@@ -79,9 +79,9 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         fig = px.line(dff, x=x, y=y, color=color, markers=True)
     elif ctype == "horizontal_bar":
         # Для horizontal_bar: категория (регион) на Y, значение на X (orientation h)
-        # Сортируем для рейтинга (largest top)
+        # Сортируем по убыванию, чтобы largest на top (для "Топ-N")
         if color is None and len(dff) > 1:
-            dff = dff.sort_values(y, ascending=True)
+            dff = dff.sort_values(y, ascending=False)
         fig = px.bar(dff, x=y, y=x, color=color, orientation="h")
     elif ctype == "donut":
         fig = px.pie(dff, names=x, values=y, hole=0.55)

@@ -21,7 +21,6 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 # Импорт ядра — только здесь
-from app.agents.presentation_agent import PresentationAgent  # noqa: E402
 from app.orchestrator import Orchestrator  # noqa: E402
 from viz.charts import build_chart  # noqa: E402
 
@@ -161,75 +160,149 @@ def main() -> None:
     # Закрываем вкладку графиков. Весь оригинальный код графиков выше — без изменений.
 
     with tab_pres:
-        st.markdown(
-            "**Генерация презентации (несколько вопросов → .pptx со слайдами, графиками и выводами)**"
+        st.markdown("**Генерация презентации — структурированная форма (Phase 6/7)**")
+
+        # Режим
+        mode = st.radio(
+            "Режим ввода",
+            ["По вопросам", "Свободная тема", "Одним предложением"],
+            horizontal=True,
+            key="pres_mode",
         )
 
-        questions_text = st.text_area(
-            "Вопросы для презентации (по одному на строку)",
-            value="""Структура налогов по видам (доли)
-Какие регионы имеют наибольшую задолженность по НДС?
-Динамика начислений подоходного налога в г. Минск по месяцам?""",
-            height=120,
-            key="pres_questions_text",
-            help="Каждый вопрос будет обработан полностью (SQL + анализ + график). Общее время: ~30-60 сек на вопрос.",
+        overall_theme = st.text_input(
+            "Общая тема презентации (опционально, для свободного режима)",
+            value="Налоговая аналитика РБ 2024",
+            key="pres_theme",
         )
 
+        # Динамические блоки вопросов через session_state
+        if "pres_questions" not in st.session_state:
+            st.session_state["pres_questions"] = [
+                {"text": "Структура налогов по видам (доли)", "chart_type": "авто", "note": ""},
+                {
+                    "text": "Топ-3 региона по задолженности",
+                    "chart_type": "horizontal_bar",
+                    "note": "",
+                },
+            ]
+
+        st.write("**Вопросы (добавляйте/редактируйте в блоках):**")
+        to_remove = []
+        for i, qblock in enumerate(st.session_state["pres_questions"]):
+            with st.expander(f"Вопрос {i + 1}", expanded=True):
+                qblock["text"] = st.text_area(
+                    "Текст вопроса",
+                    value=qblock.get("text", ""),
+                    key=f"qtext_{i}",
+                    height=60,
+                )
+                qblock["chart_type"] = st.selectbox(
+                    "Предпочтительный тип графика",
+                    ["авто", "line", "bar", "donut", "horizontal_bar"],
+                    index=["авто", "line", "bar", "donut", "horizontal_bar"].index(
+                        qblock.get("chart_type", "авто")
+                    ),
+                    key=f"qtype_{i}",
+                )
+                qblock["note"] = st.text_input(
+                    "Заметка (опционально)", value=qblock.get("note", ""), key=f"qnote_{i}"
+                )
+                if st.button("Удалить", key=f"qdel_{i}"):
+                    to_remove.append(i)
+
+        for i in sorted(to_remove, reverse=True):
+            st.session_state["pres_questions"].pop(i)
+
+        if st.button("Добавить вопрос", key="qadd"):
+            st.session_state["pres_questions"].append(
+                {"text": "", "chart_type": "авто", "note": ""}
+            )
+            st.rerun()
+
+        # file_uploader (демо, не используется в генерации пока)
+        st.file_uploader(
+            "Доп. изображения / CSV (демо, не влияет на генерацию)",
+            accept_multiple_files=True,
+            type=["png", "jpg", "csv"],
+            key="pres_files",
+        )
+
+        # Настройки
+        with st.expander("Настройки презентации"):
+            num_slides = st.slider("Число слайдов", 4, 12, 7, key="pres_num")
+            include_title = st.checkbox("Включать титул", value=True, key="pres_title")
+            include_recs = st.checkbox("Включать рекомендации", value=True, key="pres_recs")
+
+        # Кнопка генерации — thin: собираем payload и постим в API (или fallback direct)
         if st.button("Сгенерировать презентацию", type="primary", use_container_width=True):
-            questions = [line.strip() for line in questions_text.splitlines() if line.strip()]
-
-            if not questions:
-                st.warning("Введите хотя бы один вопрос (по одному на строку).")
+            qlist = [
+                {
+                    "text": q["text"],
+                    "chart_type": q["chart_type"] if q["chart_type"] != "авто" else None,
+                    "note": q["note"],
+                }
+                for q in st.session_state["pres_questions"]
+                if q["text"].strip()
+            ]
+            if not qlist:
+                st.warning("Добавьте хотя бы один вопрос.")
             else:
-                with st.status(
-                    f"Генерация презентации из {len(questions)} вопросов (каждый ~30-60 сек)...",
-                    expanded=True,
-                ) as status:
+                payload = {
+                    "mode": mode,
+                    "overall_theme": overall_theme or None,
+                    "questions": qlist,
+                    "num_slides": num_slides,
+                    "include_title": include_title,
+                    "include_recommendations": include_recs,
+                }
+                with st.spinner("Генерация через API / прямой вызов..."):
                     try:
-                        status.write("Обрабатываемые вопросы:")
-                        for i, q in enumerate(questions, 1):
-                            status.write(f"  {i}. {q}")
+                        import httpx
 
-                        pa = PresentationAgent()
-                        pres_res = pa.run(questions)
+                        try:
+                            r = httpx.post(
+                                "http://127.0.0.1:8000/generate_presentation",
+                                json=payload,
+                                timeout=300,
+                            )
+                            r.raise_for_status()
+                            data = r.json()
+                            pptx_path = data.get("pptx_path")
+                            nslides = data.get("num_slides", 0)
+                        except Exception:
+                            # fallback direct (если uvicorn не запущен)
+                            from app.agents.presentation_agent import PresentationAgent
+
+                            pa = PresentationAgent()
+                            qs = [q["text"] for q in qlist]
+                            pres_res = pa.run(qs[:num_slides])
+                            pptx_path = pres_res.pptx_path
+                            nslides = pres_res.num_slides
 
                         st.session_state["last_pres"] = {
-                            "num_slides": pres_res.num_slides,
-                            "pptx_path": pres_res.pptx_path,
+                            "pptx_path": pptx_path,
+                            "num_slides": nslides,
                         }
-
-                        status.update(
-                            label=f"Презентация готова! Слайдов: {pres_res.num_slides}",
-                            state="complete",
-                        )
+                        st.success(f"Готово! Слайдов: {nslides}")
                     except Exception as e:
-                        status.update(label="Ошибка при генерации презентации", state="error")
-                        st.error(
-                            "Не удалось сгенерировать презентацию. "
-                            "Убедитесь, что Ollama запущен с моделью qwen2.5-coder:7b-instruct, "
-                            "данные доступны и вопросы корректны. "
-                            f"Детали: {str(e)[:300]}"
-                        )
+                        st.error(f"Ошибка генерации: {e}")
 
-        # Показ предыдущего результата (чтобы не исчезал при rerun)
+        # Результат + download (session)
         if "last_pres" in st.session_state:
             pres = st.session_state["last_pres"]
-            st.success(f"Презентация готова: {pres['num_slides']} слайдов.")
-
-            pptx_path = pres.get("pptx_path")
-            if pptx_path and Path(pptx_path).exists():
-                with open(pptx_path, "rb") as f:
-                    pptx_bytes = f.read()
-
+            st.success(f"Презентация готова: {pres.get('num_slides', 0)} слайдов.")
+            ppath = pres.get("pptx_path")
+            if ppath and Path(ppath).exists():
+                with open(ppath, "rb") as f:
+                    b = f.read()
                 st.download_button(
-                    label="📥 Скачать презентацию (.pptx)",
-                    data=pptx_bytes,
+                    "📥 Скачать .pptx",
+                    data=b,
                     file_name="presentation.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
-            else:
-                st.warning("Файл презентации не найден на диске.")
 
 
 if __name__ == "__main__":

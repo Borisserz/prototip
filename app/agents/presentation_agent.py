@@ -25,6 +25,7 @@ from app.agents.base import BaseAgent
 from app.schemas import AskResult, DeckNarrative, PresentationInput, PresentationResult
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
+from viz.style import format_number_ru
 
 # Ensure central logging (idempotent) — after imports to satisfy linter
 setup_logging()
@@ -175,24 +176,61 @@ class PresentationAgent(BaseAgent):
             color=FOOTER_COLOR,
         )
 
-        # === 4. Обзор ===
+        # === 4. Обзор (заполненный: карточки + текст + разделители) ===
         slide = prs.slides.add_slide(blank_layout)
         self._add_title_text(
-            slide, "Обзор", top=Inches(0.3), font_size=28, bold=True, color=DARK_BLUE
+            slide, "Обзор", top=Inches(0.2), font_size=26, bold=True, color=DARK_BLUE
         )
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.0), Inches(12.3), Inches(5.5))
+
+        # accent header bar
+        bar = slide.shapes.add_shape(1, Inches(0.5), Inches(0.85), Inches(12.3), Inches(0.08))
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = DARK_BLUE
+        bar.line.fill.background()
+
+        # main overview text (card-like)
+        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.1), Inches(12.3), Inches(3.5))
         tf = txBox.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         p.text = narrative.overview
-        p.font.size = Pt(14)
+        p.font.size = Pt(13)
         p.font.name = "Arial"
         p.font.color.rgb = GRAY
+
+        # simple metric cards row (из первого результата если есть)
+        if results and results[0].data:
+            try:
+                first_data = results[0].data
+                total_acc = sum(d.get("accrued", 0) for d in first_data[:5])
+                card1 = slide.shapes.add_textbox(Inches(0.5), Inches(4.8), Inches(3.8), Inches(1.3))
+                ctf = card1.text_frame
+                cp = ctf.paragraphs[0]
+                cp.text = "Объём начислений (выборка)"
+                cp.font.size = Pt(10)
+                cp.font.bold = True
+                cp.font.name = "Arial"
+                cp.font.color.rgb = DARK_BLUE
+                cp = ctf.add_paragraph()
+                cp.text = format_number_ru(total_acc, suffix="Br")
+                cp.font.size = Pt(16)
+                cp.font.bold = True
+                cp.font.name = "Arial"
+            except Exception:
+                pass
+
+        # divider line
+        div = slide.shapes.add_shape(1, Inches(0.5), Inches(6.3), Inches(12.3), Inches(0.02))
+        div.fill.solid()
+        div.fill.fore_color.rgb = RGBColor(200, 200, 200)
+        div.line.fill.background()
+
+        # footer
         self._add_centered_text(
             slide,
             "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
             top=Inches(7.0),
-            font_size=10,
+            font_size=9,
             color=FOOTER_COLOR,
         )
 
@@ -369,25 +407,47 @@ class PresentationAgent(BaseAgent):
             color=FOOTER_COLOR,
         )
 
-        # === 8. Рекомендации ===
+        # === 8. Рекомендации (карточки + нумерация + разделители) ===
         slide = prs.slides.add_slide(blank_layout)
         self._add_title_text(
-            slide, "Рекомендации", top=Inches(0.3), font_size=28, bold=True, color=DARK_BLUE
+            slide, "Рекомендации", top=Inches(0.2), font_size=26, bold=True, color=DARK_BLUE
         )
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.0), Inches(12.3), Inches(5.0))
-        tf = txBox.text_frame
-        tf.word_wrap = True
-        for i, r in enumerate(narrative.recommendations):
-            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-            p.text = f"• {r}"
-            p.font.size = Pt(14)
-            p.font.name = "Arial"
-            p.space_before = Pt(6)
+
+        # accent bar
+        bar = slide.shapes.add_shape(1, Inches(0.5), Inches(0.85), Inches(12.3), Inches(0.08))
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = DARK_BLUE
+        bar.line.fill.background()
+
+        # cards for each rec
+        y_pos = 1.1
+        for i, r in enumerate(narrative.recommendations, 1):
+            # card bg
+            card = slide.shapes.add_shape(1, Inches(0.5), Inches(y_pos), Inches(12.3), Inches(1.1))
+            card.fill.solid()
+            card.fill.fore_color.rgb = RGBColor(240, 245, 250)
+            card.line.color.rgb = RGBColor(200, 210, 220)
+
+            # number + text
+            tbox = slide.shapes.add_textbox(
+                Inches(0.7), Inches(y_pos + 0.15), Inches(11.9), Inches(0.9)
+            )
+            ttf = tbox.text_frame
+            ttf.word_wrap = True
+            tp = ttf.paragraphs[0]
+            tp.text = f"{i}. {r}"
+            tp.font.size = Pt(13)
+            tp.font.name = "Arial"
+            tp.font.color.rgb = GRAY
+
+            y_pos += 1.25
+
+        # footer
         self._add_centered_text(
             slide,
             "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
             top=Inches(7.0),
-            font_size=10,
+            font_size=9,
             color=FOOTER_COLOR,
         )
 

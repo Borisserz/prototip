@@ -96,3 +96,25 @@ class DeckNarrative(BaseModel):
     recommendations: list[str] = Field(
         ..., min_length=2, max_length=4, description="2-4 конкретные рекомендации"
     )
+
+
+class QuestionBlock(BaseModel):
+    """Один блок вопроса из формы UI."""
+
+    text: str = Field(..., min_length=5)
+    chart_type: str | None = Field(
+        None, description="Предпочтительный тип: авто/line/bar/donut/horizontal_bar"
+    )
+    note: str | None = None
+
+
+class PresentationRequest(BaseModel):
+    """Payload для POST /generate_presentation (от UI формы)."""
+
+    mode: str = Field(..., description="По вопросам | Свободная тема | Одним предложением")
+    overall_theme: str | None = Field(None)
+    questions: list[QuestionBlock] = Field(default_factory=list)
+    num_slides: int = Field(5, ge=3, le=12)
+    include_title: bool = True
+    include_recommendations: bool = True
+    # для изображений/CSV в будущем можно добавить base64 или пути, но для Phase тонкий

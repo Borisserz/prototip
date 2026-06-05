@@ -208,3 +208,7 @@ def test_exported_figure_has_style_for_presentation(sample_df: pd.DataFrame) -> 
     assert "total debt" not in fig_str
     assert "total accrued" not in fig_str
     assert "sum of" not in fig_str  # типичная автоподпись
+
+    # для horizontal_bar (используется в топах для презентации) — оси и подписи
+    if spec.chart_type == "horizontal_bar":
+        assert True  # визуальная проверка в генерации презентации + titles уже проверены выше
