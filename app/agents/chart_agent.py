@@ -22,7 +22,7 @@ logger = logging.getLogger("ChartAgent")
 FEW_SHOT_CHART = """
 Правила выбора типа графика (используй точно):
 - Если в вопросе время/месяц/период/динамика/тренд → "line" (x=period, color=region часто)
-- Сравнение категорий/регионов по одному значению → "bar" или "horizontal_bar" (для рейтинга top)
+- Сравнение категорий/регионов по одному значению, топ-N, рейтинг, "наибольш", "задолженности по регионам" → "horizontal_bar" (x=region, y=debt или total_debt/accrued; строго horizontal_bar для рейтингов, НЕ bar)
 - Несколько серий (налоги/регионы) → "grouped_bar" или "stacked_bar"
 - Доли/структура/проценты → "donut" (x=tax_type или region, y=accrued)
 - Один ключевой показатель (сумма/итог) → "kpi"
@@ -35,6 +35,10 @@ Q: Динамика начислений по регионам
 Пример 2:
 Q: Структура налогов по видам (доли)
 → type=donut, x=tax_type, y=accrued, title=..., rationale="доли → donut"
+
+Пример 3 (рейтинг):
+Q: Топ-3 региона по задолженности
+ type=horizontal_bar, x=region, y=total_debt, title="Топ-3 региона по задолженности", rationale="рейтинг/топ по задолженности → horizontal_bar"
 """
 
 

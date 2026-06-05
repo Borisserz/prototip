@@ -54,12 +54,24 @@ def format_number_ru(value: float | int, decimals: int = 0, suffix: str = "Br") 
 
 def get_russian_label(col: str) -> str:
     """Русские подписи для осей/легенды по колонкам датасета + fallback.
-    Устойчиво к агрегированным именам (total_debt, sum_debt и т.п.).
+    Устойчиво к агрегированным именам (total_debt, sum_debt, debt_total и т.п.).
+    В fallback всегда используем нормализованный c (не сырой col с английским title()).
     """
     if not col:
         return ""
     c = str(col).lower().strip()
-    # нормализация агрегированных колонок
+    # нормализация вариантов алиасов (включая reverse total_debt etc)
+    c = (
+        c.replace("total_debt", "debt")
+        .replace("debt_total", "debt")
+        .replace("sum_debt", "debt")
+        .replace("totaldebt", "debt")
+        .replace("total_accrued", "accrued")
+        .replace("sum_accrued", "accrued")
+        .replace("total_paid", "paid")
+        .replace("sum_paid", "paid")
+    )
+    # префикс-стрип для оставшихся агг
     for prefix in ("total_", "sum_", "avg_", "mean_", "count_"):
         if c.startswith(prefix):
             c = c[len(prefix) :]
@@ -76,8 +88,17 @@ def get_russian_label(col: str) -> str:
     }
     if c in mapping:
         return mapping[c]
-    # fallback с очисткой
-    return col.replace("_", " ").title()
+    # fallback: используем нормализованный c, не оригинальный col (предотвращает "Total Debt")
+    cleaned = c.replace("_", " ").title()
+    # анти-english last resort
+    cl = cleaned.lower()
+    if "total debt" in cl or "debt total" in cl or cl.strip() == "debt":
+        return "Задолженность, Br"
+    if "total accrued" in cl or "accrued total" in cl:
+        return "Начислено, Br"
+    if "total paid" in cl or "paid total" in cl:
+        return "Уплачено, Br"
+    return cleaned
 
 
 def add_source_footer(fig: go.Figure, text: str) -> go.Figure:
@@ -167,3 +188,10 @@ def apply_common_style(fig: go.Figure, spec: Any) -> go.Figure:
     )
 
     return fig
+
+
+def make_ru_ticktext(tickvals: list[float | int], suffix: str = "Br") -> list[str]:
+    """Возвращает отформатированные ticktext в русском компактном стиле (без SI B/M).
+    Использовать с tickvals=... для осей, чтобы избежать "14B" в PNG/фигурах.
+    """
+    return [format_number_ru(v, suffix=suffix) for v in tickvals]

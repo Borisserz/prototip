@@ -24,6 +24,24 @@ import streamlit as st  # noqa: E402
 from app.orchestrator import Orchestrator  # noqa: E402
 from viz.charts import build_chart  # noqa: E402
 
+# Константы для формы презентации (используются в UI и могут тестироваться)
+# Чисто русские лейблы в дропдауне (AGENTS: весь пользовательский текст на русском)
+CHART_DISPLAY_OPTIONS: list[str] = [
+    "авто",
+    "линейная",
+    "столбчатая",
+    "круговая",
+    "горизонтальная столбчатая",
+]
+CHART_VAL_FOR_DISPLAY: dict[str, str | None] = {
+    "авто": None,
+    "линейная": "line",
+    "столбчатая": "bar",
+    "круговая": "donut",
+    "горизонтальная столбчатая": "horizontal_bar",
+}
+CHART_DISPLAY_FOR_VAL: dict[str | None, str] = {v: k for k, v in CHART_VAL_FOR_DISPLAY.items()}
+
 
 @st.cache_resource(show_spinner=False)
 def get_orchestrator() -> Orchestrator:
@@ -48,6 +66,9 @@ def main() -> None:
     tab_charts, tab_pres = st.tabs(["📊 Графики", "📑 Презентация"])
 
     with tab_charts:
+        st.caption(
+            "Для предпочтительного типа графика (напр. горизонтальная столбчатая) и точного числа слайдов используйте вкладку «📑 Презентация»."
+        )
         # Примеры для быстрого демо (логика графиков без изменений)
         st.write("**Примеры вопросов (нажмите, чтобы подставить):**")
         col1, col2, col3, col4 = st.columns(4)
@@ -177,9 +198,10 @@ def main() -> None:
         )
 
         # Динамические блоки вопросов через session_state
+        # chart_type храним как internal (None="авто") или str из ChartType; UI всегда показывает чисто русские лейблы
         if "pres_questions" not in st.session_state:
             st.session_state["pres_questions"] = [
-                {"text": "Структура налогов по видам (доли)", "chart_type": "авто", "note": ""},
+                {"text": "Структура налогов по видам (доли)", "chart_type": None, "note": ""},
                 {
                     "text": "Топ-3 региона по задолженности",
                     "chart_type": "horizontal_bar",
@@ -197,14 +219,19 @@ def main() -> None:
                     key=f"qtext_{i}",
                     height=60,
                 )
-                qblock["chart_type"] = st.selectbox(
+                current_val = qblock.get("chart_type")
+                current_disp = (
+                    CHART_DISPLAY_FOR_VAL.get(current_val, "авто")
+                    if current_val is not None
+                    else "авто"
+                )
+                chosen_disp = st.selectbox(
                     "Предпочтительный тип графика",
-                    ["авто", "line", "bar", "donut", "horizontal_bar"],
-                    index=["авто", "line", "bar", "donut", "horizontal_bar"].index(
-                        qblock.get("chart_type", "авто")
-                    ),
+                    CHART_DISPLAY_OPTIONS,
+                    index=CHART_DISPLAY_OPTIONS.index(current_disp),
                     key=f"qtype_{i}",
                 )
+                qblock["chart_type"] = CHART_VAL_FOR_DISPLAY[chosen_disp]
                 qblock["note"] = st.text_input(
                     "Заметка (опционально)", value=qblock.get("note", ""), key=f"qnote_{i}"
                 )
@@ -215,10 +242,20 @@ def main() -> None:
             st.session_state["pres_questions"].pop(i)
 
         if st.button("Добавить вопрос", key="qadd"):
-            st.session_state["pres_questions"].append(
-                {"text": "", "chart_type": "авто", "note": ""}
-            )
+            st.session_state["pres_questions"].append({"text": "", "chart_type": None, "note": ""})
             st.rerun()
+
+        # Динамическая метка ожидаемого числа слайдов (для UX, пока backend может не точно соблюдать)
+        num_valid = len(
+            [q for q in st.session_state["pres_questions"] if q.get("text", "").strip()]
+        )
+        expected = (
+            5 + num_valid
+        )  # титул + обзор + темы + N вопросов + ключевые выводы + рекомендации
+        st.caption(
+            f"Ожидаемое число слайдов: ~{expected} (титул+обзор+темы + {num_valid} вопросов + выводы + рекомендации). "
+            "Слайдер ниже задаёт целевое; при несовпадении будет применяться срез/приложение (см. улучшения)."
+        )
 
         # file_uploader (демо, не используется в генерации пока)
         st.file_uploader(
@@ -239,7 +276,9 @@ def main() -> None:
             qlist = [
                 {
                     "text": q["text"],
-                    "chart_type": q["chart_type"] if q["chart_type"] != "авто" else None,
+                    "chart_type": q[
+                        "chart_type"
+                    ],  # None для авто, иначе internal str (line/bar/...)
                     "note": q["note"],
                 }
                 for q in st.session_state["pres_questions"]
@@ -256,7 +295,27 @@ def main() -> None:
                     "include_title": include_title,
                     "include_recommendations": include_recs,
                 }
-                with st.spinner("Генерация через API / прямой вызов..."):
+                # minimal wire for uploader (demo): save files to out/, mention in UI (будут использоваться в appendix позже)
+                uploaded_names = []
+                try:
+                    ufs = st.session_state.get("pres_files") or []
+                    for uf in ufs if isinstance(ufs, (list, tuple)) else ([ufs] if ufs else []):
+                        if uf is not None and hasattr(uf, "name"):
+                            op = Path("out") / f"demo_upload_{uf.name}"
+                            op.parent.mkdir(parents=True, exist_ok=True)
+                            op.write_bytes(uf.getvalue())
+                            uploaded_names.append(uf.name)
+                except Exception:
+                    pass
+                if uploaded_names:
+                    st.caption(
+                        f"Демо-файлы сохранены: {', '.join(uploaded_names)} (для будущих appendix-слайдов)"
+                    )
+
+                status_text = (
+                    "Генерация через API / прямой вызов (долгие вызовы LLM ~30с+ на вопрос)..."
+                )
+                with st.status(status_text, expanded=True) as status:
                     try:
                         import httpx
 
@@ -275,8 +334,13 @@ def main() -> None:
                             from app.agents.presentation_agent import PresentationAgent
 
                             pa = PresentationAgent()
-                            qs = [q["text"] for q in qlist]
-                            pres_res = pa.run(qs[:num_slides])
+                            # передаём полные блоки с prefs + настройки, чтобы exact count + prefs respected
+                            pres_res = pa.run(
+                                qlist,
+                                num_slides=num_slides,
+                                include_title=include_title,
+                                include_recommendations=include_recs,
+                            )
                             pptx_path = pres_res.pptx_path
                             nslides = pres_res.num_slides
 
@@ -284,8 +348,10 @@ def main() -> None:
                             "pptx_path": pptx_path,
                             "num_slides": nslides,
                         }
+                        status.update(label=f"Готово! Слайдов: {nslides}", state="complete")
                         st.success(f"Готово! Слайдов: {nslides}")
                     except Exception as e:
+                        status.update(label="Ошибка", state="error")
                         st.error(f"Ошибка генерации: {e}")
 
         # Результат + download (session)

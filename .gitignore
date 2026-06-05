@@ -150,6 +150,8 @@ Thumbs.db
 # Generated artifacts
 out/
 pres_slide_*.png
+*.patch
+run.log
 
 # Grok / AI session
 .skills/

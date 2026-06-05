@@ -63,5 +63,16 @@ def generate_presentation(payload: PresentationRequest) -> PresentationResult:
         questions = ["Структура налогов по видам (доли)"]  # fallback
 
     pa = PresentationAgent()
-    # можно передать настройки, но текущий PresentationAgent использует дефолт; для Phase ок
-    return pa.run(questions[: payload.num_slides])
+    # Передаём полный payload (вопросы с prefs + настройки) — агент сам сделает exact count + respect includes/prefs
+    # Для free/expand используем list[str] если нет блоков; run поддерживает оба
+    q_for_agent = (
+        payload.questions
+        if payload.questions and any(getattr(q, "text", "") for q in payload.questions)
+        else questions
+    )
+    return pa.run(
+        q_for_agent,
+        num_slides=payload.num_slides,
+        include_title=payload.include_title,
+        include_recommendations=payload.include_recommendations,
+    )

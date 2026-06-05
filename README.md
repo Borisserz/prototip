@@ -82,3 +82,12 @@ export_png → out/chart_*.png (и AskResult)
 Всё через Pydantic контракты (никаких голых dict между модулями). Локально, Ollama qwen2.5-coder:7b-instruct, temperature=0 + structured output.
 
 См. AGENTS.md, PROJECT_SPEC.md, out/ (png + pptx), core/llm.py, viz/charts.py.
+
+## Улучшения (последний спринт)
+- **Красивые графики везде (в т.ч. в .pptx)**: исправлена ориентация horizontal_bar (категории слева Y, значения снизу X, largest сверху), force цвет из PALETTE[0] (не чёрный), value labels с Br compact, тик-форматтер без SI "B", get_russian_label усилен (total_debt/debt_total/... → "Задолженность, Br" + анти-english fallback). Hover очищен от сырых алиасов. (viz/style.py, charts.py)
+- **ChartAgent FEW_SHOT ужесточён**: "Топ/рейтинг/задолженности по регионам" → всегда horizontal_bar.
+- **Структурированная форма в UI (Презентация)**: динамические блоки с чисто русскими типами ("горизонтальная столбчатая" и т.д. — нет English leak в dropdown), per-q prefs, заметки, num_slides slider, include_title/recs, uploader (демо сохраняет в out/). Ожидаемое число слайдов live. (ui/streamlit_app.py)
+- **Exact slide count + respect includes/prefs**: PresentationAgent.run расширен (принимает list[dict]/QuestionBlock + num_slides + includes). Условные титул/рекомендации, ранний срез qs под target, appendix-слайды если <, prefs оверрайдят chart_type в ребилде + в подписи "Диаграмма: ...". В endpoint и UI fallback передаётся полный payload. (app/agents/presentation_agent.py, main.py, ui)
+- **Прочее**: прогресс через st.status, polish Br/стиль, тесты покрывают hbar exact + prefs+count, ruff/pytest зелёные. README/AGENTS обновлены. Готово к next (Dashboard/Telegram).
+
+Генерация "идеально": slider=7 + 2 вопроса с prefs horizontal_bar/donut → PPTX ровно 7 слайдов, графики RU+Br+цвет+layout правильный, нет "Total Debt"/чёрных баров.

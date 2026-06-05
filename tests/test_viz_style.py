@@ -48,7 +48,13 @@ def test_get_russian_label_dataset_cols() -> None:
     assert get_russian_label("debt") == "Задолженность, Br"
     assert get_russian_label("total_debt") == "Задолженность, Br"
     assert get_russian_label("sum_debt") == "Задолженность, Br"
-    assert get_russian_label("foo_bar") == "Foo Bar"  # fallback
+    assert get_russian_label("debt_total") == "Задолженность, Br"
+    assert get_russian_label("total_accrued") == "Начислено, Br"
+    assert get_russian_label("foo_bar") == "Foo Bar"  # fallback cleaned (no English leak)
+    # анти-english даже в fallback
+    # "debt" слово может остаться в fallback для weird, но фраза Total Debt не должна
+    assert get_russian_label("weird_total_debt_col") != "Total Debt"
+    assert get_russian_label("total_debt") != "Total Debt"
 
 
 def test_palette_has_eight_colorblind_colors() -> None:

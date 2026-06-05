@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -85,17 +86,65 @@ class PresentationAgent(BaseAgent):
             system="Ты — точный аналитик презентаций. Выдавай только валидный JSON по схеме DeckNarrative. Тексты на русском.",
         )
 
-    def run(self, questions: list[str]) -> PresentationResult:
+    def run(
+        self,
+        questions: list[str] | list[dict] | list | PresentationInput,
+        num_slides: int | None = None,
+        include_title: bool = True,
+        include_recommendations: bool = True,
+    ) -> PresentationResult:
         """Собрать презентацию по списку вопросов с DeckNarrative и улучшенной структурой.
 
+        Поддерживает list[str], list[dict с text/chart_type/note] (из UI payload) или PresentationInput.
+        num_slides + include_* позволяют строить exact кол-во слайдов (с appendix если нужно).
+        Для pref: если дан chart_type в блоке — оверрайдим spec.chart_type перед ребилдом (уважаем выбор пользователя).
         Для каждого вопроса вызывает Orchestrator.ask(),
-        использует данные + chart_spec для стилизованного PNG (без заголовка графика).
+        использует данные + chart_spec для стилизованного PNG (без заголовка графика, pres_slide_ png).
         После всех — один structured вызов для DeckNarrative.
         """
         start = time.time()
-        logger.info(f"[PresentationAgent] start: questions={len(questions)}")
-        if not questions:
+        # нормализация входа (поддержка prefs из формы)
+        qlist: list[dict] = []
+        if isinstance(questions, PresentationInput):
+            qlist = [{"text": q} for q in questions.questions]
+        elif questions and isinstance(questions[0], dict):
+            qlist = questions  # type: ignore[assignment]
+        else:
+            qlist = [{"text": q} for q in (questions or [])]
+        qs: list[str] = [q.get("text", str(q)) for q in qlist if str(q.get("text", "")).strip()]
+        # prefs по индексу (для оверрайда chart_type и caption)
+        prefs: dict[int, str | None] = {}
+        notes: dict[int, str | None] = {}
+        for _i, qb in enumerate(qlist):
+            if str(qb.get("text", "")).strip():
+                prefs[len(prefs)] = qb.get("chart_type")
+                notes[len(notes)] = qb.get("note")
+        logger.info(
+            f"[PresentationAgent] start: questions={len(qs)} num_slides={num_slides} inc_title={include_title} inc_recs={include_recommendations}"
+        )
+        if not qs:
             raise ValueError("questions не может быть пустым")
+
+        questions = qs  # для обратной совместимости с остальным кодом (narrative, слайды и т.д.)
+
+        # Ранний срез по num_slides (чтобы не тратить LLM на лишние вопросы + для exact count)
+        orig_qlist = list(qlist)
+        if num_slides and num_slides > 0:
+            base_fixed = (1 if include_title else 0) + 2 + 1 + (1 if include_recommendations else 0)
+            max_q = max(0, num_slides - base_fixed)
+            if len(questions) > max_q > 0:
+                questions = questions[:max_q]
+            elif max_q == 0:
+                questions = questions[:1] if questions else []
+            # пересобрать prefs/notes под урезанный список (индексы 0-based для used)
+            prefs = {}
+            notes = {}
+            uidx = 0
+            for qb in orig_qlist:
+                if str(qb.get("text", "")).strip() and uidx < len(questions):
+                    prefs[uidx] = qb.get("chart_type")
+                    notes[uidx] = qb.get("note")
+                    uidx += 1
 
         # lazy import to avoid potential cycle
         from app.orchestrator import Orchestrator
@@ -112,8 +161,9 @@ class PresentationAgent(BaseAgent):
         blank_layout = prs.slide_layouts[6]
 
         # === 1. Собрать результаты по всем вопросам (логика в Orchestrator) ===
+        # (используем все qs; срез/appendix решим по num_slides после)
         results: list[AskResult] = []
-        for q in questions:
+        for q in qs:
             res = orch.ask(q)
             results.append(res)
         logger.info(f"[PresentationAgent] collected {len(results)} results")
@@ -144,37 +194,38 @@ class PresentationAgent(BaseAgent):
                 ],
             )
 
-        # === 3. Титул ===
-        slide = prs.slides.add_slide(blank_layout)
-        self._add_centered_text(
-            slide,
-            "BI-аналитика налогов РБ",
-            top=Inches(1.8),
-            font_size=40,
-            bold=True,
-            color=DARK_BLUE,
-        )
-        self._add_centered_text(
-            slide,
-            "Синтетические данные (демо), Республика Беларусь",
-            top=Inches(3.0),
-            font_size=20,
-            color=GRAY,
-        )
-        self._add_centered_text(
-            slide,
-            datetime.now().strftime("%d.%m.%Y"),
-            top=Inches(3.7),
-            font_size=16,
-            color=GRAY,
-        )
-        self._add_centered_text(
-            slide,
-            "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
-            top=Inches(6.5),
-            font_size=10,
-            color=FOOTER_COLOR,
-        )
+        # === 3. Титул (conditional по include_title) ===
+        if include_title:
+            slide = prs.slides.add_slide(blank_layout)
+            self._add_centered_text(
+                slide,
+                "BI-аналитика налогов РБ",
+                top=Inches(1.8),
+                font_size=40,
+                bold=True,
+                color=DARK_BLUE,
+            )
+            self._add_centered_text(
+                slide,
+                "Синтетические данные (демо), Республика Беларусь",
+                top=Inches(3.0),
+                font_size=20,
+                color=GRAY,
+            )
+            self._add_centered_text(
+                slide,
+                datetime.now().strftime("%d.%m.%Y"),
+                top=Inches(3.7),
+                font_size=16,
+                color=GRAY,
+            )
+            self._add_centered_text(
+                slide,
+                "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
+                top=Inches(6.5),
+                font_size=10,
+                color=FOOTER_COLOR,
+            )
 
         # === 4. Обзор (заполненный: карточки + текст + разделители) ===
         slide = prs.slides.add_slide(blank_layout)
@@ -285,14 +336,32 @@ class PresentationAgent(BaseAgent):
                 slide, header, top=Inches(0.2), font_size=24, bold=True, color=DARK_BLUE
             )
 
-            # Крупный график (ребилд с title="" для отсутствия дублирующего заголовка + полный стиль из viz/style)
+            # Крупный график (ребилд с title="" ... + оверрайд user pref chart_type если передан)
             graph_added = False
             if res.chart_spec and res.data:
                 try:
                     df = pd.DataFrame(res.data)
                     slide_spec = res.chart_spec.model_copy()
+                    # Уважить pref из формы (если был "horizontal_bar" а LLM дал bar и т.п.)
+                    user_pref = prefs.get(idx)
+                    if user_pref:
+                        slide_spec.chart_type = user_pref
                     slide_spec.title = ""  # убираем заголовок графика — его несёт шапка слайда
                     fig = build_chart(df, slide_spec)
+                    # extra: явно убрать title в layout (на случай если apply добавил)
+                    with suppress(Exception):
+                        fig.update_layout(title=dict(text=""))
+                    # убрать дублирующий source annotation из PNG (у слайда свой footer внизу)
+                    try:
+                        if getattr(fig.layout, "annotations", None):
+                            fig.layout.annotations = [
+                                a
+                                for a in (fig.layout.annotations or [])
+                                if "Синтетические" not in str(getattr(a, "text", "") or "")
+                                and "Источник" not in str(getattr(a, "text", "") or "")
+                            ]
+                    except Exception:
+                        pass
                     # экспортируем специально для слайда (гарантируем стиль: палитра, русские лейблы, Br)
                     slide_png = out_dir / f"pres_slide_{idx}_{self._slug(header)}.png"
                     export_png(fig, slide_png, scale=2.0)
@@ -358,13 +427,14 @@ class PresentationAgent(BaseAgent):
                     p.font.size = Pt(10)
                     p.font.name = "Arial"
 
-            # Подпись диаграммы
+            # Подпись диаграммы (используем user_pref если был, иначе из spec)
             p = tf.add_paragraph()
             p.text = ""
             p = tf.add_paragraph()
-            ctype_ru = CHART_TYPE_RU.get(
-                getattr(res.chart_spec, "chart_type", "") if res.chart_spec else "", "диаграмма"
+            ctype_for_ru = prefs.get(idx) or (
+                getattr(res.chart_spec, "chart_type", "") if res.chart_spec else ""
             )
+            ctype_ru = CHART_TYPE_RU.get(ctype_for_ru, "диаграмма")
             p.text = f"Диаграмма: {ctype_ru}"
             p.font.size = Pt(10)
             p.font.name = "Arial"
@@ -407,49 +477,82 @@ class PresentationAgent(BaseAgent):
             color=FOOTER_COLOR,
         )
 
-        # === 8. Рекомендации (карточки + нумерация + разделители) ===
-        slide = prs.slides.add_slide(blank_layout)
-        self._add_title_text(
-            slide, "Рекомендации", top=Inches(0.2), font_size=26, bold=True, color=DARK_BLUE
-        )
-
-        # accent bar
-        bar = slide.shapes.add_shape(1, Inches(0.5), Inches(0.85), Inches(12.3), Inches(0.08))
-        bar.fill.solid()
-        bar.fill.fore_color.rgb = DARK_BLUE
-        bar.line.fill.background()
-
-        # cards for each rec
-        y_pos = 1.1
-        for i, r in enumerate(narrative.recommendations, 1):
-            # card bg
-            card = slide.shapes.add_shape(1, Inches(0.5), Inches(y_pos), Inches(12.3), Inches(1.1))
-            card.fill.solid()
-            card.fill.fore_color.rgb = RGBColor(240, 245, 250)
-            card.line.color.rgb = RGBColor(200, 210, 220)
-
-            # number + text
-            tbox = slide.shapes.add_textbox(
-                Inches(0.7), Inches(y_pos + 0.15), Inches(11.9), Inches(0.9)
+        # === 8. Рекомендации (карточки + нумерация + разделители) — conditional ===
+        if include_recommendations:
+            slide = prs.slides.add_slide(blank_layout)
+            self._add_title_text(
+                slide, "Рекомендации", top=Inches(0.2), font_size=26, bold=True, color=DARK_BLUE
             )
-            ttf = tbox.text_frame
-            ttf.word_wrap = True
-            tp = ttf.paragraphs[0]
-            tp.text = f"{i}. {r}"
-            tp.font.size = Pt(13)
-            tp.font.name = "Arial"
-            tp.font.color.rgb = GRAY
 
-            y_pos += 1.25
+            # accent bar
+            bar = slide.shapes.add_shape(1, Inches(0.5), Inches(0.85), Inches(12.3), Inches(0.08))
+            bar.fill.solid()
+            bar.fill.fore_color.rgb = DARK_BLUE
+            bar.line.fill.background()
 
-        # footer
-        self._add_centered_text(
-            slide,
-            "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
-            top=Inches(7.0),
-            font_size=9,
-            color=FOOTER_COLOR,
-        )
+            # cards for each rec
+            y_pos = 1.1
+            for i, r in enumerate(narrative.recommendations, 1):
+                # card bg
+                card = slide.shapes.add_shape(
+                    1, Inches(0.5), Inches(y_pos), Inches(12.3), Inches(1.1)
+                )
+                card.fill.solid()
+                card.fill.fore_color.rgb = RGBColor(240, 245, 250)
+                card.line.color.rgb = RGBColor(200, 210, 220)
+
+                # number + text
+                tbox = slide.shapes.add_textbox(
+                    Inches(0.7), Inches(y_pos + 0.15), Inches(11.9), Inches(0.9)
+                )
+                ttf = tbox.text_frame
+                ttf.word_wrap = True
+                tp = ttf.paragraphs[0]
+                tp.text = f"{i}. {r}"
+                tp.font.size = Pt(13)
+                tp.font.name = "Arial"
+                tp.font.color.rgb = GRAY
+
+                y_pos += 1.25
+
+            # footer
+            self._add_centered_text(
+                slide,
+                "Источник: Синтетические данные (демо), Республика Беларусь | prototip",
+                top=Inches(7.0),
+                font_size=9,
+                color=FOOTER_COLOR,
+            )
+
+        # === exact/ideal slide count (PLAN A.3/B) + appendix: размещаем ПОСЛЕ всех fixed (title/ov/themes/q/key/recs conditional)
+        # чтобы appendix заполнял до target, не ломая структуру
+        current = len(prs.slides)
+        target = num_slides if (num_slides is not None and num_slides > 0) else current
+        if current < target:
+            for _ in range(target - current):
+                slide = prs.slides.add_slide(blank_layout)
+                self._add_title_text(
+                    slide, "Приложение", top=Inches(0.3), font_size=26, bold=True, color=DARK_BLUE
+                )
+                txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(12.3), Inches(5))
+                tf = txBox.text_frame
+                tf.word_wrap = True
+                p = tf.paragraphs[0]
+                p.text = "Дополнительные материалы и диаграммы (см. основные слайды выше)."
+                p.font.size = Pt(14)
+                p.font.name = "Arial"
+                p.font.color.rgb = GRAY
+                p = tf.add_paragraph()
+                p.text = "Презентация сгенерирована с учётом запрошенного числа слайдов."
+                p.font.size = Pt(12)
+                p.font.name = "Arial"
+                self._add_centered_text(
+                    slide,
+                    f"Источник: Синтетические данные (демо), Республика Беларусь | prototip | слайд {len(prs.slides)}",
+                    top=Inches(7.0),
+                    font_size=9,
+                    color=FOOTER_COLOR,
+                )
 
         prs.save(str(pptx_path))
         elapsed = int((time.time() - start) * 1000)

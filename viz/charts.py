@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 import pandas as pd
@@ -20,9 +21,11 @@ from core.models import ChartSpec
 from .style import (
     CHART_HEIGHT,
     CHART_WIDTH,
+    PALETTE,
     apply_common_style,
     format_number_ru,
     get_russian_label,
+    make_ru_ticktext,
 )
 
 
@@ -78,11 +81,18 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     elif ctype == "line":
         fig = px.line(dff, x=x, y=y, color=color, markers=True)
     elif ctype == "horizontal_bar":
-        # Для horizontal_bar: категория (регион) на Y, значение на X (orientation h)
-        # Сортируем по убыванию, чтобы largest на top (для "Топ-N")
+        # Для horizontal_bar: категория (регион) на Y (слева), значение на X (снизу).
+        # Сортируем по убыванию значения, чтобы largest был сверху.
+        # После px явно задаём categoryorder, чтобы порядок не реверсился plotly'ем.
         if color is None and len(dff) > 1:
             dff = dff.sort_values(y, ascending=False)
         fig = px.bar(dff, x=y, y=x, color=color, orientation="h")
+        # Гарантируем: largest сверху (первая строка dff после desc sort -> top)
+        try:
+            cat_order = dff[x].tolist()
+            fig.update_yaxes(categoryorder="array", categoryarray=cat_order)
+        except Exception:
+            pass
     elif ctype == "donut":
         fig = px.pie(dff, names=x, values=y, hole=0.55)
         fig.update_traces(textinfo="percent+label")
@@ -129,11 +139,15 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     else:
         raise ValueError(f"Неизвестный chart_type: {ctype}")
 
-    # Value labels on bars (подировка: русские числа с Br, цвет из палитры уже в style)
+    # Value labels on bars (русские числа; Br только для денежных колонок debt/accrued/paid)
     if ctype in ("bar", "grouped_bar", "stacked_bar", "horizontal_bar"):
         try:
             if y in dff.columns:
-                texts = [format_number_ru(v, suffix="Br") for v in dff[y]]
+                use_br = (
+                    any(k in str(y).lower() for k in ("debt", "accrued", "paid"))
+                    and "taxpayer" not in str(y).lower()
+                )
+                texts = [format_number_ru(v, suffix="Br" if use_br else "") for v in dff[y]]
                 fig.update_traces(text=texts, textposition="outside", textfont=dict(size=9))
         except Exception:
             pass  # non-fatal
@@ -143,12 +157,56 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         fig = apply_common_style(fig, spec)
 
     # Для horizontal_bar оси в фигуре swapped по смыслу (категория на Y, значение на X),
-    # поэтому переопределяем titles после apply (который использует spec x/y без учёта swap)
+    # поэтому переопределяем titles после apply (который использует spec x/y без учёта swap).
+    # + force palette[0] для single-series (избегаем чёрных/дефолтных баров),
+    # + margin bump чтобы outside value labels не обрезались,
+    # + кастомные тики без английских SI (B/M) через format ru.
     if ctype == "horizontal_bar":
         fig.update_layout(
             xaxis_title=get_russian_label(y),
             yaxis_title=get_russian_label(x),
         )
+        # force цвет для одного ряда (px + colorway иногда даёт чёрный последний из PALETTE)
+        if color is None:
+            with suppress(Exception):
+                fig.update_traces(marker_color=PALETTE[0], marker=dict(color=PALETTE[0]))
+        # margin bump (справа для текста labels на x-axis horizontal bars)
+        with suppress(Exception):
+            fig.update_layout(margin=dict(l=80, r=140, t=80, b=90))
+        # тик-форматтер на value axis (x) без "14B"
+        with suppress(Exception):
+            if y in dff.columns and len(dff) > 0:
+                vals = [v for v in dff[y] if isinstance(v, (int, float))]
+                if vals:
+                    # 5 опорных тиков
+                    mn, mx = min(vals), max(vals)
+                    if mx > mn:
+                        step = (mx - mn) / 4.0
+                        tv = [mn + i * step for i in range(5)]
+                    else:
+                        tv = [mn]
+                    tickvals = [float(v) for v in tv]
+                    ticktext = make_ru_ticktext(
+                        tickvals, suffix=""
+                    )  # без Br на оси для чистоты, на барах есть
+                    fig.update_xaxes(tickvals=tickvals, ticktext=ticktext)
+
+        # очистка hovertemplate от сырых алиасов (total_debt= -> русское) для чистоты PNG/экспорта
+        if ctype in {"bar", "grouped_bar", "stacked_bar", "horizontal_bar", "line"}:
+            for trace in fig.data:
+                ht = getattr(trace, "hovertemplate", None)
+                if ht:
+                    ht = str(ht)
+                    for raw, ru in [
+                        ("total_debt=", "Задолженность, Br="),
+                        ("debt=", "Задолженность, Br="),
+                        ("accrued=", "Начислено, Br="),
+                        ("total_accrued=", "Начислено, Br="),
+                        ("paid=", "Уплачено, Br="),
+                    ]:
+                        ht = ht.replace(raw, ru)
+                    with suppress(Exception):
+                        trace.hovertemplate = ht
 
     # Hover с русским форматом для чисел (упрощённо)
     if ctype in {"bar", "grouped_bar", "stacked_bar", "line", "horizontal_bar"}:

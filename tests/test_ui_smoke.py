@@ -2,6 +2,8 @@
 
 Просто проверяет, что модуль импортируется без синтаксических/импортных ошибок.
 Бизнес-логика не выполняется (мокаем Orchestrator).
+
+Дополнительно: проверяем, что русские типы графиков в форме презентации чисто на русском (нет английских ключей в UI).
 """
 
 from __future__ import annotations
@@ -26,3 +28,21 @@ def test_ui_streamlit_app_imports_without_error():
     # Дополнительно: убеждаемся, что main определена (структура UI на месте)
     assert hasattr(ui.streamlit_app, "main")
     assert callable(ui.streamlit_app.main)
+
+    # Проверка Step 1: русские лейблы в дропдауне (нет "line"/"bar" и т.п. в пользовательском)
+    from ui.streamlit_app import (
+        CHART_DISPLAY_FOR_VAL,
+        CHART_DISPLAY_OPTIONS,
+        CHART_VAL_FOR_DISPLAY,
+    )
+
+    assert all(
+        isinstance(o, str) and o.isascii() is False or o in ("авто",) for o in CHART_DISPLAY_OPTIONS
+    )
+    # "авто" ok, остальные должны содержать кириллицу (русские слова)
+    non_auto = [o for o in CHART_DISPLAY_OPTIONS if o != "авто"]
+    assert all(any("\u0400" <= ch <= "\u04ff" for ch in o) for o in non_auto)
+    assert None in CHART_VAL_FOR_DISPLAY.values()  # авто -> None
+    assert "horizontal_bar" in CHART_VAL_FOR_DISPLAY.values()
+    # реверс маппинг покрывает
+    assert CHART_DISPLAY_FOR_VAL.get("horizontal_bar") == "горизонтальная столбчатая"

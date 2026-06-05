@@ -115,3 +115,72 @@ def test_presentation_live_creates_file_with_slides_and_images():
     assert image_count >= 1, "В презентации должны присутствовать изображения (PNG)"
 
     # clean? no, leave the artifact
+
+
+def test_presentation_respects_prefs_and_exact_count_nonlive():
+    """Non-live: prefs (chart_type) оверрайдятся в ребилде, exact count с num_slides+includes, RU тип в caption."""
+    from unittest.mock import MagicMock, patch
+
+    from app.agents.presentation_agent import PresentationAgent
+    from app.schemas import DeckNarrative
+
+    agent = PresentationAgent()
+    qblocks = [
+        {
+            "text": "Топ-3 региона по задолженности",
+            "chart_type": "horizontal_bar",
+            "note": "pref hbar",
+        },
+        {"text": "Структура по налогам", "chart_type": "donut", "note": ""},
+    ]
+
+    with (
+        patch("app.orchestrator.Orchestrator") as mock_orch,
+        patch("app.agents.presentation_agent.call_structured") as mock_narr,
+        patch("app.agents.presentation_agent.build_chart") as mock_build,
+    ):
+        mock_instance = MagicMock()
+        # разные спек для разных q (LLM мог бы дать bar для топа)
+        fake_ask1 = MagicMock()
+        fake_ask1.png_path = "/tmp/f.png"
+        fake_ask1.data = [{"region": "a", "debt": 1}]
+        fake_ask1.chart_spec = MagicMock(chart_type="bar", title="Топ")
+        fake_ask1.analysis = MagicMock(insights=["i"], key_conclusion="k", anomaly_or_trend=None)
+        fake_ask2 = MagicMock()
+        fake_ask2.png_path = "/tmp/f2.png"
+        fake_ask2.data = [{"tax_type": "x", "accrued": 2}]
+        fake_ask2.chart_spec = MagicMock(chart_type="bar", title="Struct")
+        fake_ask2.analysis = MagicMock(insights=["i2"], key_conclusion="k2", anomaly_or_trend=None)
+        mock_instance.ask.side_effect = [fake_ask1, fake_ask2]
+        mock_orch.return_value = mock_instance
+
+        mock_narr.return_value = DeckNarrative(
+            overview="ov",
+            themes=["t1", "t2"],
+            key_takeaways=["k1", "k2", "k3", "k4"],
+            recommendations=["r1", "r2"],
+        )
+
+        # чтобы не падать на реальном pptx в этом тесте, патчим Presentation
+        with patch("app.agents.presentation_agent.Presentation") as mock_prs:
+            mock_prs_inst = MagicMock()
+            mock_prs_inst.slides.__len__.return_value = 7  # title+ov+themes+2q+key+recs
+            mock_prs_inst.slides.add_slide.return_value = MagicMock()
+            mock_prs.return_value = mock_prs_inst
+
+            res = agent.run(qblocks, num_slides=7, include_title=True, include_recommendations=True)
+
+    assert res.num_slides == 7
+    # build_chart должен был вызываться с оверрайднутым типом (хотя бы 1 раз с horizontal)
+    called_types = []
+    for call in mock_build.call_args_list:
+        sp = call[0][1] if call[0] else call[1].get("spec")
+        if sp:
+            ct = getattr(sp, "chart_type", None) or (
+                sp.get("chart_type") if isinstance(sp, dict) else None
+            )
+            if ct:
+                called_types.append(ct)
+    assert any(ct == "horizontal_bar" for ct in called_types), (
+        f"pref horizontal_bar should override, got {called_types}"
+    )

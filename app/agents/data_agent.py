@@ -55,6 +55,10 @@ SQL: SELECT region, AVG(taxpayers) as avg_taxpayers FROM df GROUP BY region ORDE
 
 Q: Топ-3 региона по задолженности в 2024?
 SQL: SELECT region, SUM(debt) as total_debt FROM df WHERE period LIKE '2024-%' GROUP BY region ORDER BY total_debt DESC LIMIT 3
+
+# Примечание: алиасы total_debt / total_accrued и т.п. — источник возможных английских лейблов в ChartSpec.y.
+# Обработка в viz/style.py:get_russian_label (стрип префиксов + fallback) + в viz/charts (conditional labels).
+# Всегда возвращаем данные с алиасами как есть; RU-лейблы на этапе viz.
 """
 
 
