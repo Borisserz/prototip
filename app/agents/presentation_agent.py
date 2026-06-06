@@ -63,7 +63,7 @@ class PresentationAgent(BaseAgent):
     def _get_deck_narrative(self, questions: list[str], results: list[AskResult]) -> DeckNarrative:
         """Один structured вызов LLM для нарратива презентации (после сбора всех ответов)."""
         summaries: list[str] = []
-        for q, r in zip(questions, results, strict=False):
+        for q, r in zip(questions, results):  # noqa: B905
             conc = (r.analysis.key_conclusion if r.analysis else "") or ""
             anom = (r.analysis.anomaly_or_trend if r.analysis else "") or "нет"
             summaries.append(f"Вопрос: {q}\nКлючевой вывод: {conc}\nАномалия/тренд: {anom}")
@@ -326,7 +326,7 @@ class PresentationAgent(BaseAgent):
         )
 
         # === 6. По слайду на вопрос (с ребилдом графика без заголовка + стиль) ===
-        for idx, (q, res) in enumerate(zip(questions, results, strict=False)):
+        for idx, (q, res) in enumerate(zip(questions, results)):  # noqa: B905
             slide = prs.slides.add_slide(blank_layout)
 
             # Шапка = тема-утверждение (предпочитаем title из ChartSpec)

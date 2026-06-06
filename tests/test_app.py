@@ -58,7 +58,14 @@ def test_generate_presentation_endpoint():
 
     with patch("app.agents.presentation_agent.PresentationAgent") as mock_pa:
         mock_instance = MagicMock()
-        mock_instance.run.return_value = MagicMock(pptx_path="out/pres.pptx", num_slides=6)
+        # Возвращаем объект, совместимый с PresentationResult (наследует AgentResult с reasoning/error)
+        mock_instance.run.return_value = MagicMock(
+            pptx_path="out/pres.pptx",
+            num_slides=6,
+            reasoning="mock presentation",
+            error=None,
+            success=True,
+        )
         mock_pa.return_value = mock_instance
 
         resp = client.post("/generate_presentation", json=payload)
@@ -81,7 +88,7 @@ def test_generate_dashboard_endpoint():
 
     with patch("app.agents.dashboard_agent.DashboardAgent") as mock_da:
         mock_instance = MagicMock()
-        # Минимальный валидный DashboardResult
+        # Минимальный валидный DashboardResult (наследует AgentResult -> нужны reasoning/error как str/None)
         mock_instance.run.return_value = MagicMock(
             title="Дашборд тест",
             summary="summary",
@@ -92,6 +99,8 @@ def test_generate_dashboard_endpoint():
             data=[],
             source_sql=None,
             reasoning="test",
+            error=None,
+            success=True,
         )
         mock_da.return_value = mock_instance
 
