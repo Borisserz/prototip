@@ -226,9 +226,37 @@ def main() -> None:
                     else:
                         _render_planner_result(res)
 
-                    # Показываем план в свёрнутом экспандере (требование v2)
+                    # Улучшенное отображение плана (Planner v2.5)
+                    execution = getattr(res, "_plan_execution", None)
                     plan = getattr(res, "_executed_plan", None)
-                    if plan and getattr(plan, "tasks", None):
+
+                    if execution and isinstance(execution, list):
+                        with st.expander("Что было сделано", expanded=False):
+                            for step in execution:
+                                status = step.get("status", "")
+                                icon = (
+                                    "✅"
+                                    if status == "успешно"
+                                    else "❌"
+                                    if status == "ошибка"
+                                    else "⚠️"
+                                )
+                                deps = (
+                                    f" (зависит от: {', '.join(step.get('depends_on', []))})"
+                                    if step.get("depends_on")
+                                    else ""
+                                )
+                                st.markdown(
+                                    f"**{step.get('num', '?')}. {step.get('agent_name', '?')}** {icon}{deps}"
+                                )
+                                st.markdown(
+                                    f"&nbsp;&nbsp;&nbsp;&nbsp;{step.get('description', '')}"
+                                )
+                                brief = step.get("brief_result")
+                                if brief:
+                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;→ {brief}")
+                    elif plan and getattr(plan, "tasks", None):
+                        # Fallback на старый формат (если _plan_execution почему-то нет)
                         with st.expander("Что было сделано", expanded=False):
                             for i, task in enumerate(plan.tasks, 1):
                                 deps = (
