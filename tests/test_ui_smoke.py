@@ -46,3 +46,6 @@ def test_ui_streamlit_app_imports_without_error():
     assert "_render_unified_action_bar" in src
     assert "GOV_DISCLAIMER" in src
     assert None in CHART_VAL_FOR_DISPLAY.values()
+    assert hasattr(ui.streamlit_app, "_no_viz_user_message")
+    assert hasattr(ui.streamlit_app, "_render_no_viz_only")
+    assert "aria-expanded=\"false\"" in src

@@ -132,7 +132,8 @@ def repair_chart_spec(spec: ChartSpec, data: list[dict], question: str = "") -> 
             updates["y"] = x
             logger.info("[ChartRepair] swapped x/y for horizontal_bar")
 
-    if spec.highlight_category and (updates.get("color") or spec.color):
+    highlight = getattr(spec, "highlight_category", None)
+    if highlight and (updates.get("color") or spec.color):
         updates["highlight_category"] = None
         logger.info("[ChartRepair] cleared highlight_category (color set)")
 

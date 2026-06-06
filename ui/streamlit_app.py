@@ -592,6 +592,26 @@ def _inject_custom_css() -> None:
         [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
             white-space: normal;
         }
+        /* Свёрнутый сайдбар не резервирует полосу слева */
+        section[data-testid="stMain"] {
+            flex: 1 1 auto !important;
+            width: auto !important;
+            min-width: 0 !important;
+            margin-left: 0 !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            overflow: hidden !important;
+            visibility: hidden !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] + section[data-testid="stMain"] {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
+        }
 
         /* ── Pinned dashboard mini-cards ── */
         .pinned-card {
@@ -725,6 +745,67 @@ def _coerce_chart_spec(spec: Any) -> ChartSpec | None:
     if isinstance(spec, dict):
         return ChartSpec.model_validate(spec)
     return None
+
+
+def _no_viz_user_message(res: AskResult) -> str | None:
+    """Текст для пользователя, если визуализация невозможна; иначе None."""
+    data = getattr(res, "data", None) or []
+    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    if _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
+        return None
+    if not data:
+        return (
+            "По выбранным фильтрам данных не найдено. "
+            "Измените регион, период или вид налога и повторите запрос."
+        )
+    if chart_spec is None:
+        return (
+            "Данные получены, но график построить не удалось. "
+            "Попробуйте уточнить формулировку вопроса."
+        )
+    return None
+
+
+def _chart_buildable(data: list[dict], spec: ChartSpec) -> bool:
+    """Проверяет, что график можно построить до показа карточки результата."""
+    if not data or spec is None:
+        return False
+    try:
+        df = pd.DataFrame(data)
+        repaired = repair_chart_spec(spec, data)
+        build_chart(df, repaired)
+        return True
+    except Exception:
+        return False
+
+
+def _render_no_viz_only(res: AskResult, message: str) -> None:
+    """Короткий ответ без анализа и кнопок экспорта."""
+    question = getattr(res, "question", "Результат запроса") or "Результат запроса"
+    st.markdown(
+        f"""
+        <div class="analytics-card-wrap">
+            <div class="analytics-card-header">
+                <h3 class="analytics-title">{html.escape(question)}</h3>
+                <span class="status-badge warn">Нет данных</span>
+            </div>
+            <div class="chart-error-block">
+                <div class="chart-error-icon">!</div>
+                <div>
+                    <div class="chart-error-title">Нет данных для отображения</div>
+                    <div class="chart-error-desc">{html.escape(message)}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_CHART_BUILD_FAIL_MSG = (
+    "Не удалось построить график по полученным данным. "
+    "Попробуйте другой вопрос или смените фильтры в левой панели."
+)
 
 
 def _chart_display_title(chart_spec: ChartSpec | None, fallback: str) -> str:
@@ -1191,11 +1272,6 @@ def _render_chart_block(
         st.image(str(artifact), use_container_width=True)
         return True, last_error
 
-    if last_error or (chart_spec and not data):
-        st.info(
-            "Графическая визуализация недоступна для данного среза данных. "
-            "Ознакомьтесь с текстовыми выводами ниже."
-        )
     return False, last_error
 
 
@@ -1559,9 +1635,6 @@ def _render_analytics_card(
     chart_ok = False
     badge_class = "status-badge"
     badge_text = "Успешно проанализировано"
-    if chart_spec and not data and not _resolve_artifact_path(getattr(res, "png_path", None)):
-        badge_class = "status-badge warn"
-        badge_text = "Только текстовый анализ"
 
     render_spec = chart_spec
     render_data = data
@@ -1569,6 +1642,13 @@ def _render_analytics_card(
         render_spec, render_data = _prepare_ask_chart_render(
             res, chart_spec, data, chart_key=chart_key
         )
+
+    png_artifact = _resolve_artifact_path(getattr(res, "png_path", None))
+    if png_artifact is None and render_spec and not _chart_buildable(render_data, render_spec):
+        _render_no_viz_only(res, _CHART_BUILD_FAIL_MSG)
+        if _is_analyst_mode():
+            _render_technical_details(res)
+        return
 
     with st.container(border=False):
         st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
@@ -1603,14 +1683,21 @@ def _render_analytics_card(
                 enable_drilldown=enable_drilldown,
                 data_explanation=data_expl,
             )
-        elif _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
-            st.image(str(_resolve_artifact_path(res.png_path)), use_container_width=True)
+        elif png_artifact is not None:
+            st.image(str(png_artifact), use_container_width=True)
             chart_ok = True
         else:
             _render_chart_error("Спецификация графика не была сформирована для этого запроса.")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        if chart_ok or render_data or _resolve_artifact_path(getattr(res, "png_path", None)):
+        if not chart_ok and png_artifact is None:
+            st.markdown("</div>", unsafe_allow_html=True)
+            _render_no_viz_only(res, _CHART_BUILD_FAIL_MSG)
+            if _is_analyst_mode():
+                _render_technical_details(res)
+            return
+
+        if chart_ok or render_data or png_artifact is not None:
             _render_unified_action_bar(res, action_key=chart_key or "default")
 
         if render_data and _is_analyst_mode():
@@ -1817,6 +1904,17 @@ def render_assistant_response(
 
     res = _normalize_result(res)
     show_analyst = _is_analyst_mode()
+
+    if isinstance(res, AskResult):
+        no_viz_msg = _no_viz_user_message(res)
+        if no_viz_msg:
+            if show_analyst:
+                render_planner_trace(res, key_prefix=chart_key or "trace", show=True)
+            _render_no_viz_only(res, no_viz_msg)
+            if show_analyst:
+                _render_technical_details(res)
+            return
+
     render_planner_trace(res, key_prefix=chart_key or "trace", show=show_analyst)
 
     if hasattr(res, "success") and not getattr(res, "success", True):

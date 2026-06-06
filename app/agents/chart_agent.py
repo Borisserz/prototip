@@ -150,7 +150,8 @@ class ChartAgent(BaseAgent):
                 "ChartAgent не смог получить спецификацию графика. Проверьте модель Ollama и попробуйте ещё раз."
             ) from e
 
-        if spec.highlight_category and spec.color is not None:
+        highlight = getattr(spec, "highlight_category", None)
+        if highlight and spec.color is not None:
             logger.info(
                 "[ChartAgent] highlight_category сброшен: несовместим с color=%s",
                 spec.color,
