@@ -80,6 +80,25 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         fig = px.bar(dff, x=x, y=y, color=color, barmode="stack")
     elif ctype == "line":
         fig = px.line(dff, x=x, y=y, color=color, markers=True)
+    elif ctype == "area":
+        fig = px.area(dff, x=x, y=y, color=color)
+    elif ctype == "scatter":
+        fig = px.scatter(dff, x=x, y=y, color=color)
+    elif ctype == "waterfall":
+        # Basic waterfall using relative bars or go.Waterfall.
+        # For demo, if data has 'base', use it; else relative bar as approximation.
+        if "base" in dff.columns:
+            fig = go.Figure(
+                go.Bar(
+                    x=dff[x],
+                    y=dff[y],
+                    base=dff["base"],
+                    marker=dict(color=PALETTE[0] if not color else None),
+                )
+            )
+        else:
+            fig = px.bar(dff, x=x, y=y, color=color, barmode="relative")
+        fig.update_layout(barmode="relative")
     elif ctype == "horizontal_bar":
         # Для horizontal_bar: категория (регион) на Y (слева), значение на X (снизу).
         # Сортируем по убыванию значения, чтобы largest был сверху.

@@ -66,27 +66,30 @@ Orchestrator оставлен тонким (только высокоуровн�
 
 ## Порядок реализации (кратко; детали в PROJECT_SPEC.md)
 Phase 0 — каркас проекта и зависимости. ✅ Готово
-Phase 1 — КРАСИВЫЕ ГРАФИКИ: датасет, ChartSpec, единый стиль, фабрика графиков, экспорт в PNG. ✅ Готово
-Phase 2 — DataAgent: NL → SQL по датасету через DuckDB, с самокоррекцией по ошибке. ✅ Готово
+Phase 1 — КРАСИВЫЕ ГРАФИКИ: датасет, ChartSpec, единый стиль, фабрика графиков (в т.ч. area/scatter/waterfall Phase 2), экспорт в PNG. ✅ Готово
+Phase 2 — DataAgent: NL → SQL по датасету через DuckDB, с самокоррекцией по ошибке. ✅ Готово (Phase 2+ обновлён под penalties)
 Phase 3 — AnalystAgent: текстовые выводы по данным. ✅ Готово
-Phase 4 — ChartAgent: модель выбирает тип графика и заполняет ChartSpec. ✅ Готово
+Phase 4 — ChartAgent: модель выбирает тип графика и заполняет ChartSpec. ✅ Готово (Phase 2: усиленные правила/FEW_SHOT для area/scatter/waterfall + "по регионам" color)
 Phase 5 — Orchestrator: единый пайплайн "вопрос → ответ + график". ✅ Готово
-Phase 6 — PresentationAgent: сборка .pptx. ✅ Готово
-Phase 7 — Streamlit UI + интеграция. ✅ Готово
-Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. ✅ Готово
+Phase 6 — PresentationAgent: сборка .pptx. ✅ Готово (поддержка prefs, exact count, from-planner flows)
+Phase 7 — Streamlit UI + интеграция. ✅ Готово (Phase 1/2 polish: Главный агент интерактив, две render path)
+Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. ✅ Готово (продолжаем расширять детальные тесты)
 
-## Следующий спринт
-- **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка "📈 Дашборды" в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
-- **PlannerAgent** (подготовка завершена): иерархическая мультиагентная оркестрация. Проект приведён к чистой архитектуре:
-  - Унифицированные модели в `app/agents/models.py` (AgentResult + Task/Plan/AgentCall).
-  - `BaseAgent` + `AgentRegistry`/`AgentExecutor`.
-  - Все агенты возвращают AgentResult с заполненным `reasoning`.
-  - Orchestrator облегчён (высокоуровневые методы + executor).
-  - Логирование и наблюдаемость унифицированы.
-  - viz/ и PresentationAgent/ChartAgent — минимально затронуты (готовы к доработке).
-- Telegram-бот.
-- Расширение датасета и новых типов графиков (scatter, waterfall, area и др.).
-- Дополнительные улучшения по запросу.
+Эволюция: после Phase 8 добавлены DashboardAgent (полная интеграция) + PlannerAgent v2.5+ (иерархическая оркестрация с интерактивом в UI).
+
+## Следующий спринт / Текущее состояние (post Phase 2 polish + audit refresh)
+- **DashboardAgent** (реализован + UI интегрирован + Planner-ready): комплексный дашборд (KPI + 3–5 ChartSpec + layout + insights + data/source_sql). Полная интеграция в "📈 Дашборды" (st.metric, layout-driven plotly, "Настройка графиков" редактор типов + client filters, "Выводы", "в презентацию", export JSON). В Главном агенте — clean textual (только title/summary/insights + "полные в JSON").
+- **PlannerAgent v2.5+** (Главный агент, полностью интерактивный, Phase 1+2 завершены + hardening):
+  - generate_plan (сильный промпт + FEW_SHOT для размытых "сводка", self-correction, repair).
+  - _repair_plan, _validate, _assess_quality, _topological_sort, _invoke_agent (defensive shapes + context data/source_sql по depends_on), _execute_plan (graceful per-task).
+  - UI: preview плана + редактирование (select agent + text desc per task), "Выполнить план" (st.status с реальными шагами), чистый текстовый рендер результатов (без inline графиков/дашбордов — "график не надо вот показывать"), свёрнутый "Что было сделано" (шаги + briefs + статусы), "Скачать trace выполнения (JSON)" (полный: executed_plan + plan_execution + specs + data + penalties + timing), кнопки итерации ("🔁 Повторить похожий вопрос", "✏️ Изменить план и выполнить заново" — форк плана обратно в редактируемый preview), richer history (вопросы + plan info + insights), "Можно продолжить" suggestions.
+  - Две render path: Главный агент (clean textual + trace/JSON для кухни) vs dedicated tabs (полные визуалы + редакторы).
+  - Поддержка penalties (Data/Chart/Dashboard/Analyst), new chart types (area/scatter/waterfall) из Planner-данных, "по регионам" правила.
+  - Trace показывает только top-level задачи плана (sub-calls высокоуровневых агентов скрыты, как задумано).
+- Phase 2 dataset/UI polish завершён: penalties в sample.csv + make_dataset + ALLOWED + FEW_SHOT + UI hints; viz/charts + ChartAgent расширены под area/scatter/waterfall; тесты детализированы (test_planner_agent.py, расширения viz/ui_smoke + DETAILED_TEST_PLAN.md); docs синхронизированы (этот аудит).
+- Telegram-бот (отложен).
+- Дополнительные улучшения по запросу (Phase 3+: evaluator, более динамичная история, полный waterfall, больше колонок датасета, prompt lab и т.д.).
+- Детальные тесты + docs refresh по запросу (см. план.md в сессии + tests/DETAILED_TEST_PLAN.md).
 
 ## Команды
 - Установка: `pip install -r requirements.txt`
@@ -101,18 +104,31 @@ Phase 8 — обработка ошибок, логирование шагов �
 - Каждый новый модуль сопровождается тестом в tests/.
 
 ## Пользовательский интерфейс
-UI (Streamlit) — тонкий клиент. Основная цель — понятность обычному пользователю:
-- Скрыты все технические объяснения работы LLM (reasoning, "Почему этот тип?", "композиция LLM" и т.п.).
-- Добавлена вкладка/секция **📋 Данные** — просмотр выборки, статистика, кликабельные подсказки вопросов + явная пометка «демо-данные».
-- Простая история запросов (в памяти) + быстрый повтор/итерация.
-- Улучшен онбординг: «Как быстро начать», дружелюбные пустые состояния, смягчённые статусы.
-- Презентация: после генерации показывается краткий outline тем.
-- Подготовка к Planner: в UI импортированы Plan/Task/AgentCall; добавлены аккуратные свёрнутые поверхности «Как был построен...» (высокоуровневые шаги). Полноценный render_plan появится вместе с PlannerAgent.
-- **PlannerAgent v2**: первая версия настоящего иерархического планировщика. Генерирует `Plan` с 1–3 `Task` (с `agent_name`, `params`, `depends_on`, `description`) через structured LLM. Выполняет план с топологической сортировкой, передачей контекста между зависимыми задачами и поддержкой "параллельного" выполнения независимых задач (через AgentExecutor). Прикрепляет выполненный план к результату. В UI — свёрнутый экспандер **"Что было сделано"** со списком шагов плана (по умолчанию закрыт). Graceful error handling (продолжает другие задачи). Сохраняет принцип скрытия внутренних деталей. Обновлены модели использования `Plan`/`Task`/`AgentCall`. Вкладка "Главный агент" поддерживает отображение плана.
+UI (Streamlit) — тонкий клиент. Основная цель — понятность обычному пользователю (весь текст на русском, kitchen скрыт):
 
-- Вкладка «Презентация»: режимы «По вопросам» и «Одним предложением» чётко разделены; блок вопросов сворачиваемый; для свободного ввода — большое поле «О чём должна быть презентация?».
-- Вкладка «Дашборды»: «Инсайты» переименованы в «Выводы», удалены объяснения выбора типов и reasoning; редактор графиков называется «Настройка графиков».
-- Технические детали (SQL, reasoning, отладка) вынесены в сворачиваемые блоки или полностью убраны из основного вида.
+- **Вкладка «🤖 Главный агент»** (primary interactive entry, PlannerAgent v2.5+):
+  - Пользователь вводит вопрос → показывается **preview плана** (1-3 задачи: agent + описание + deps).
+  - **Редактирование перед выполнением**: selectbox агента + text_input описания для каждой задачи (значения сохраняются при rerun).
+  - Кнопки: "✅ Выполнить план" (st.status показывает реальные шаги из (отредактированного) плана), "🔄 Перегенерировать план".
+  - **Результат в чистом текстовом режиме** (специально для planner-originated): заголовок + summary + "Выводы" (bullets); полные графики/дашборды/презентации — только через "Скачать trace выполнения (JSON)" или dedicated tabs. Нет inline визуалов в чате Главного (по запросу Phase 1 polish: "график не надо вот показывать").
+  - **"Что было сделано"** (свёрнутый экспандер по умолчанию): список шагов плана с иконками статусов (✅/❌/⚠️), deps, brief_result (rows / тип графика / kpi count / slides / insights / fallback / ошибка).
+  - **"📥 Скачать trace выполнения (JSON)"**: полный payload (executed_plan, plan_execution, specs, data, source_sql, penalties и т.д.) — можно использовать для отладки или re-build.
+  - **Итерация**: кнопки на результатах "🔁 Повторить похожий вопрос" (prefill input), "✏️ Изменить план и выполнить заново" (форк prior _executed_plan обратно в редактируемый preview в истории).
+  - Richer history (в session): вопросы + plan info + insights; "Можно продолжить" suggestions.
+  - Graceful: ошибки генерации/выполнения показываются дружелюбно; частичные результаты + полный trace; continue других задач при ошибке одной.
+  - Две render path чётко разделены: Главный → clean textual + trace/JSON; dedicated tabs → полные интерактивные визуалы + редакторы.
+
+- **Вкладка «📋 Данные»**: просмотр выборки (с penalties), статистика, кликабельные подсказки вопросов (в т.ч. Phase 2: "Штрафы (penalties) по регионам"), явная пометка «демо-данные» + "валюта Br, Phase 2: + penalties".
+
+- **Вкладка «📊 Графики»**: тонкий клиент к Orchestrator/ChartAgent; живой plotly + экспорт; поддержка новых типов (через Planner или прямой).
+
+- **Вкладка «📈 Дашборды»**: KPI st.metric grid + layout-driven multi plotly (build_chart), "Выводы", пост-ген редактор ("Настройка графиков": смена типов + re-render), client filters (напр. по region), "в презентацию", export JSON (полный: kpi/charts/data/source_sql). В Главном — clean mode.
+
+- **Вкладка «📑 Презентация»**: два чётких режима — «По вопросам» (сворачиваемый блок с per-q prefs chart_type + note) и «Одним предложением» (большое поле темы). num_slides slider + live count, include title/recs, outline после генерации, download .pptx. Action "из дашборда" (из Главного или dedicated) передаёт вопросы + prefs + visuals из trace.
+
+- Общее: скрыты все LLM kitchen (reasoning, "Почему этот тип?", sub-calls) из основного вида — только в свёрнутых "для разработчика" или в trace JSON. Онбординг, пустые состояния, строка состояния, простая in-memory история + быстрый repeat/iteration. Весь пользовательский текст на русском.
+
+- Технические детали (SQL, reasoning, отладка, полный Plan JSON) — в сворачиваемых блоках или только в trace download.
 
 ## Definition of Done (для любой задачи)
 - Код типизирован, есть тест, ruff чистый, функция/эндпоинт работает на sample-данных,

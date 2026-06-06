@@ -105,7 +105,14 @@ def main() -> None:
 
     # Вспомогательный рендерер результатов Planner'а (локальная функция внутри main)
     def _render_planner_result(res):
-        """Красивое, стабильное и информативное отображение результата PlannerAgent в чате."""
+        """Красивое, стабильное и информативное отображение результата PlannerAgent в чате.
+
+        Phase 1 improvement:
+        - Для результатов, пришедших из Главного агента (есть _plan_execution),
+          по умолчанию показываем чистый "человеческий" текстовый вид (summary + выводы).
+        - Полные графики, данные и спецификации — только в скачанном JSON-трейсе.
+        - Это делает ответ чистым и понятным, без захламления чата интерактивными графиками.
+        """
         # Обработка случая уточняющего вопроса
         if (
             hasattr(res, "insights")
@@ -119,7 +126,37 @@ def main() -> None:
             st.caption("Вы можете ответить в чате — Главный агент учтёт предыдущий контекст.")
             return
 
-        # 1. График / AskResult-подобный результат
+        # === Phase 1: чистый режим для результатов из Главного агента ===
+        # Если результат пришёл через planner (есть _plan_execution или _executed_plan),
+        # показываем только текстовую "человеческую" часть + возможность скачать JSON.
+        # Графики/дашборды не рендерим inline — пользователь сказал "график не надо показывать вот так".
+        if (
+            getattr(res, "_plan_execution", None) is not None
+            or getattr(res, "_executed_plan", None) is not None
+        ):
+            # Чистый текстовый вид
+            title = getattr(res, "title", None)
+            summary = getattr(res, "summary", None)
+            insights = getattr(res, "insights", None) or []
+
+            if title:
+                st.subheader(title)
+            if summary:
+                st.write(summary)
+
+            if insights:
+                st.subheader("Выводы")
+                for ins in insights:
+                    st.markdown(f"- {ins}")
+
+            # Подсказка + возможность скачать полный JSON (с графиками, данными, ChartSpec и т.д.)
+            st.caption(
+                "Полные графики, KPI, данные и спецификации доступны в скачанном JSON-трейсе. "
+                "Можно продолжить: «сделай презентацию по этому дашборду» или уточнить нужные графики."
+            )
+            return
+
+        # 1. График / AskResult-подобный результат (для обычных вкладок, не из Главного агента)
         if (
             hasattr(res, "chart_spec")
             and getattr(res, "chart_spec", None)
@@ -145,7 +182,7 @@ def main() -> None:
                     for ins in res.analysis.insights:
                         st.markdown(f"- {ins}")
 
-        # 2. Дашборд
+        # 2. Дашборд (для обычных вкладок "Дашборды")
         elif hasattr(res, "charts") and getattr(res, "charts", None):
             try:
                 from app.schemas import DashboardResult
@@ -197,8 +234,15 @@ def main() -> None:
             return
 
         if hasattr(res, "insights") and res.insights:
+            # Специальный случай для чистого AnalysisResult из Главного агента (цепочка data + analyst и т.п.)
+            if (
+                not hasattr(res, "charts")
+                and not hasattr(res, "chart_spec")
+                and not hasattr(res, "kpi_cards")
+            ):
+                st.subheader("Текстовые выводы")
             for ins in res.insights:
-                st.write(ins)
+                st.markdown(f"- {ins}")
         elif hasattr(res, "key_conclusion") and res.key_conclusion:
             st.write(res.key_conclusion)
         else:
@@ -287,6 +331,54 @@ def main() -> None:
                                         f"**{j}. {task.agent_name}** — {task.description}{deps}"
                                     )
 
+                        # Download trace (Phase 1 polish)
+                        if execution or plan:
+                            import json
+
+                            trace_payload = {
+                                "executed_plan": plan.model_dump() if plan else None,
+                                "plan_execution": execution,
+                            }
+                            st.download_button(
+                                "📥 Скачать trace выполнения (JSON)",
+                                data=json.dumps(trace_payload, ensure_ascii=False, indent=2),
+                                file_name=f"planner_trace_{i}.json",
+                                mime="application/json",
+                                key=f"dl_trace_{i}",
+                            )
+
+                        # === Phase 2: better iteration actions for Главный агент ===
+                        if plan or execution:
+                            st.markdown("---")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                if st.button("🔁 Повторить похожий вопрос", key=f"repeat_q_{i}"):
+                                    # Pre-fill the input with the original question + hint
+                                    original_q = msg.get("question") or getattr(
+                                        res, "title", "сводка по налогам"
+                                    )
+                                    st.session_state["main_question_input"] = original_q
+                                    st.rerun()
+                            with col_b:
+                                if st.button(
+                                    "✏️ Изменить план и выполнить заново", key=f"fork_plan_{i}"
+                                ):
+                                    # Put the previous executed plan back as editable pending plan
+                                    if plan:
+                                        st.session_state["main_messages"][i] = {
+                                            "role": "assistant",
+                                            "plan": plan,
+                                            "question": msg.get("question", ""),
+                                        }
+                                        st.rerun()
+                                    elif hasattr(res, "_executed_plan") and res._executed_plan:
+                                        st.session_state["main_messages"][i] = {
+                                            "role": "assistant",
+                                            "plan": res._executed_plan,
+                                            "question": msg.get("question", ""),
+                                        }
+                                        st.rerun()
+
                     # Случай 2: сообщение с планом, ожидающим подтверждения
                     elif msg.get("plan") is not None:
                         plan = msg["plan"]
@@ -294,12 +386,72 @@ def main() -> None:
 
                         _render_plan_preview(plan)
 
+                        st.caption(
+                            "План готов к выполнению. При необходимости отредактируйте задачи выше. Во время выполнения плана будет показан индикатор загрузки (может занять время из-за вызовов моделей)."
+                        )
+
+                        # === Простое редактирование плана (Phase 1) ===
+                        from app.schemas import Plan, Task
+
+                        st.markdown("**Редактировать план перед выполнением (опционально):**")
+                        allowed_agents = [
+                            "data_agent",
+                            "analyst_agent",
+                            "chart_agent",
+                            "dashboard_agent",
+                            "presentation_agent",
+                        ]
+                        edited_tasks_data = []
+                        for j, task in enumerate(plan.tasks):
+                            st.caption(f"Задача {j + 1}")
+                            c1, c2 = st.columns([3, 7])
+                            with c1:
+                                new_agent = st.selectbox(
+                                    "Агент",
+                                    options=allowed_agents,
+                                    index=allowed_agents.index(task.agent_name)
+                                    if task.agent_name in allowed_agents
+                                    else 0,
+                                    key=f"edit_agent_{i}_{j}",
+                                )
+                            with c2:
+                                new_desc = st.text_input(
+                                    "Описание",
+                                    value=task.description,
+                                    key=f"edit_desc_{i}_{j}",
+                                )
+                            edited_tasks_data.append(
+                                {
+                                    "id": task.id,
+                                    "description": new_desc,
+                                    "agent_name": new_agent,
+                                    "params": task.params,
+                                    "depends_on": task.depends_on,
+                                }
+                            )
+
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.button("✅ Выполнить план", key=f"exec_{i}", type="primary"):
                                 planner = get_planner()
-                                result = planner.execute_plan(plan)
-                                # Заменяем текущее сообщение на результат выполнения
+                                # Собираем отредактированный план
+                                edited_plan = Plan(
+                                    goal=plan.goal,
+                                    tasks=[Task(**t) for t in edited_tasks_data],
+                                    strategy=plan.strategy,
+                                )
+                                # Phase 1 polish: st.status с шагами плана,
+                                # чтобы пользователь понимал, что именно сейчас происходит.
+                                with st.status("Выполняю план...", expanded=True) as status:
+                                    steps_summary = " → ".join(
+                                        t["agent_name"] for t in edited_tasks_data
+                                    )
+                                    status.update(
+                                        label=f"Выполняю план: {steps_summary} (локальные вызовы моделей)"
+                                    )
+                                    result = planner.execute_plan(edited_plan)
+                                    status.update(label="План выполнен", state="complete")
+
                                 st.session_state["main_messages"][i] = {
                                     "role": "assistant",
                                     "result": result,
@@ -315,6 +467,21 @@ def main() -> None:
                                     "question": msg.get("question", ""),
                                 }
                                 st.rerun()
+
+                    # Случай 3: простая ошибка или текстовое сообщение (например, сбой generate_plan)
+                    elif msg.get("content"):
+                        content = msg["content"]
+                        if (
+                            "Не удалось" in content
+                            or "ошибк" in content.lower()
+                            or "fail" in content.lower()
+                        ):
+                            st.error(content)
+                            st.caption(
+                                "Убедись, что Ollama запущен (`ollama serve` в другом терминале) и модель скачана: `ollama pull qwen2.5-coder:7b-instruct`"
+                            )
+                        else:
+                            st.write(content)
 
         # Простая форма ввода
         with st.form("main_form", clear_on_submit=True):
@@ -350,6 +517,12 @@ def main() -> None:
                     st.session_state["main_messages"].append(
                         {"role": "assistant", "content": error_msg}
                     )
+                    # Подсказка в лог для разработчика
+                    import logging
+
+                    logging.getLogger("streamlit").warning(
+                        f"[Главный агент] generate_plan failed: {e}. Убедись что `ollama serve` работает и модель qwen2.5-coder:7b-instruct доступна."
+                    )
 
             st.rerun()
 
@@ -360,11 +533,56 @@ def main() -> None:
             st.session_state["main_messages"] = []
             st.rerun()
 
+        # === Phase 2: улучшенная итерация / история для Главного агента ===
+        # Показываем предыдущие вопросы + краткую инфу о плане и первом выводе (если есть).
+        # Клик — подставить вопрос. Кнопки на результатах для повтора/форка.
+        if st.session_state.get("main_messages"):
+            prev_items = []
+            for m in st.session_state["main_messages"]:
+                if m.get("question"):
+                    q = m["question"]
+                    plan_info = ""
+                    insight = ""
+                    if m.get("plan"):
+                        plan_info = (
+                            " (план: " + ", ".join(t.agent_name for t in m["plan"].tasks[:2]) + "…)"
+                        )
+                    elif m.get("result"):
+                        res = m["result"]
+                        if getattr(res, "_executed_plan", None):
+                            ep = res._executed_plan
+                            plan_info = (
+                                " (выполнен: "
+                                + ", ".join(t.agent_name for t in ep.tasks[:2])
+                                + "…)"
+                            )
+                        if hasattr(res, "insights") and res.insights:
+                            insight = " | " + str(res.insights[0])[:50]
+                        elif hasattr(res, "summary"):
+                            insight = " | " + str(res.summary)[:50]
+                    prev_items.append((q, plan_info + insight))
+            if prev_items:
+                with st.expander(
+                    "🔁 История Главного агента в этой сессии (клик — подставить вопрос)",
+                    expanded=False,
+                ):
+                    seen = set()
+                    for q, info in reversed(prev_items):
+                        if q in seen:
+                            continue
+                        seen.add(q)
+                        label = (
+                            (q + info) if len(q) + len(info) <= 80 else (q[:50] + "..." + info[:25])
+                        )
+                        if st.button(label, key=f"reuse_main_q_{hash(q)}"):
+                            st.session_state["main_question_input"] = q
+                            st.rerun()
+
     with tab_data:
         st.markdown("**Набор данных (демо)**")
         st.caption(
             "Синтетические данные о налоговых поступлениях по регионам Республики Беларусь за 2024 год "
-            "(валюта Br). Реальной базы нет — запросы выполняются через DuckDB прямо по CSV."
+            "(валюта Br, Phase 2: + penalties/штрафы). Реальной базы нет — запросы выполняются через DuckDB прямо по CSV."
         )
 
         df = _load_demo_df()
@@ -401,6 +619,7 @@ def main() -> None:
                 "Топ-3 региона по подоходному налогу",
                 "В каких регионах наибольшая задолженность по НДС?",
                 "Сколько налогоплательщиков в среднем по областям?",
+                "Штрафы (penalties) по регионам",  # Phase 2
             ]
             sug_cols = st.columns(3)
             for idx, sug in enumerate(suggestions):
@@ -432,6 +651,7 @@ def main() -> None:
             "Динамика начислений в г. Минск за год",
             "Структура налогов по видам (доли)",
             "Топ-3 региона по подоходному налогу",
+            "Штрафы (penalties) по регионам",  # Phase 2
         ]
 
         if col1.button(examples[0], use_container_width=True):

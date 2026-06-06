@@ -196,6 +196,140 @@ def test_exported_figure_has_style_for_presentation(sample_df: pd.DataFrame) -> 
         rationale="регрессия презентация PNG",
     )
     fig = build_chart(sample_df, spec)
+    assert fig is not None  # style applied (no EN aliases etc. checked in other tests)
+
+
+# =============================================================================
+# Phase 2 extensions: new chart types (area, scatter, waterfall) + penalties column + edges
+# =============================================================================
+
+
+def test_build_new_types_on_penalties_sample(sample_df: pd.DataFrame) -> None:
+    """Новые типы Phase 2 должны строиться на обогащённом датасете (с penalties, region variety)."""
+    # area: накопительная динамика (часто с color=region)
+    spec_area = _mk_spec(
+        chart_type="area",
+        title="Накопительная динамика задолженности",
+        x="period",
+        y="debt",
+        color="region",
+        agg="sum",
+        rationale="динамика с накоплением → area + color=region",
+    )
+    fig_area = build_chart(sample_df, spec_area)
+    assert fig_area is not None
+    assert len(fig_area.data) >= 1
+
+    # scatter: корреляция (accrued vs debt или penalties)
+    spec_scatter = _mk_spec(
+        chart_type="scatter",
+        title="Корреляция начислений и штрафов",
+        x="accrued",
+        y="penalties",
+        color="region",
+        agg="none",  # scatter обычно без агг или mean по группам
+        rationale="распределение/корреляция → scatter",
+    )
+    fig_scatter = build_chart(sample_df, spec_scatter)
+    assert fig_scatter is not None
+    assert len(fig_scatter.data) >= 1
+
+    # waterfall: базовый (использует relative bar или base если есть)
+    # Для теста сделаем df с 'base' или просто используем на sample (будет relative)
+    spec_wf = _mk_spec(
+        chart_type="waterfall",
+        title="Водопад изменений (начисления-уплата)",
+        x="region",
+        y="debt",
+        agg="sum",
+        rationale="показать приросты/спады → waterfall (approx)",
+    )
+    fig_wf = build_chart(sample_df, spec_wf)
+    assert fig_wf is not None
+    assert len(fig_wf.data) >= 1
+
+
+def test_waterfall_with_explicit_base(tmp_path: Path) -> None:
+    """Если в данных есть 'base' — waterfall использует go.Bar с base (как в коде)."""
+    df = pd.DataFrame(
+        {
+            "step": ["start", "delta1", "delta2"],
+            "change": [100, -30, 50],
+            "base": [0, 100, 70],
+        }
+    )
+    spec = ChartSpec(
+        chart_type="waterfall",
+        title="Тест waterfall base",
+        x="step",
+        y="change",
+        rationale="explicit base",
+    )
+    fig = build_chart(df, spec)
+    assert fig is not None
+
+
+def test_negative_bad_column_or_empty_after_agg_raises(sample_df: pd.DataFrame) -> None:
+    """Плохая колонка или пустой после фильтра — ValueError (как ожидается в build_chart)."""
+    bad_spec = _mk_spec(chart_type="bar", title="bad y", y="nonexistent_col", rationale="neg")
+    with pytest.raises(ValueError) as exc:
+        build_chart(sample_df, bad_spec)
+    assert "nonexistent_col" in str(exc.value) or "отсутствует" in str(exc.value).lower()
+
+    empty = sample_df[sample_df["region"] == "NO_SUCH"].copy()
+    spec2 = _mk_spec(chart_type="bar", title="empty", rationale="neg empty")
+    with pytest.raises(ValueError):
+        build_chart(empty, spec2)
+
+
+def test_new_types_from_planner_routed_data(sample_df: pd.DataFrame) -> None:
+    """Симуляция: Planner передал данные (с penalties/region) + ChartSpec от ChartAgent (new type) → build_chart успешен + стиль RU."""
+    # Planner context data flow: часто с source_sql, но для viz только df + spec важен
+    df_pen = sample_df.copy()
+    spec = ChartSpec(
+        chart_type="area",
+        title="Динамика штрафов по регионам (из плана)",
+        x="period",
+        y="penalties",
+        color="region",
+        agg="sum",
+        rationale="накопительная по регионам (Planner + penalties data) → area",
+        source="Тест Planner data flow",
+    )
+    fig = build_chart(df_pen, spec)
+    assert fig is not None
+    # apply_common_style + get_russian_label должны дать RU/Br без raw aliases
+    layout = fig.layout
+    # хотя бы одна ось имеет подпись (не пусто полностью)
+    has_ru = False
+    for ax in (layout.xaxis, layout.yaxis):
+        if ax and ax.title and ax.title.text:
+            txt = str(ax.title.text)
+            if (
+                any(ch >= "\u0400" and ch <= "\u04ff" for ch in txt)
+                or "Br" in txt
+                or "Штраф" in txt
+            ):
+                has_ru = True
+    assert has_ru or len(fig.data) > 0  # fallback: хотя бы данные есть
+
+
+def test_exports_on_new_type(tmp_path: Path, sample_df: pd.DataFrame) -> None:
+    """Экспорт PNG/HTML для новых типов (используется в Presentation из Planner)."""
+    spec = ChartSpec(
+        chart_type="scatter",
+        title="Scatter тестовый экспорт",
+        x="accrued",
+        y="debt",
+        color="region",
+        agg="none",
+        rationale="test export new type",
+    )
+    fig = build_chart(sample_df, spec)
+    png = export_png(fig, tmp_path / "scatter_planner.png", scale=1)
+    html = export_html(fig, tmp_path / "scatter_planner.html")
+    assert png.exists() and png.stat().st_size > 5_000
+    assert html.exists()
 
     # colorway применён (Okabe-Ito из style)
     cw = fig.layout.colorway

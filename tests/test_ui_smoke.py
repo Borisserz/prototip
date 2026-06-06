@@ -60,3 +60,20 @@ def test_ui_streamlit_app_imports_without_error():
     assert "Предыдущие вопросы" in src or "Предыдущие дашборды" in src
     assert "Основные темы в презентации" in src or "Тема презентации" in src
     assert "Как был построен этот дашборд" in src  # planner-prep surface (collapsed)
+
+    # Phase 1 Главный агент polish smoke
+    assert "Редактировать план перед выполнением" in src
+    assert "Скачать trace выполнения" in src
+    assert "Выполняю план" in src  # spinner / status during execute
+    assert "Что было сделано" in src
+    # basic iteration/history
+    assert "Предыдущие вопросы в этой сессии" in src or "Предыдущие" in src
+
+    # Phase 2 (no TG) smoke: iteration, viz (area/scatter/waterfall), dataset (penalties)
+    assert "Повторить похожий вопрос" in src
+    assert "Изменить план и выполнить заново" in src
+    assert "penalties" in src or "Штрафы" in src  # dataset column
+    assert (
+        "waterfall" in src.lower() or "area" in src.lower() or "scatter" in src.lower()
+    )  # new chart types in prompts/viz
+    assert "История Главного агента" in src  # richer history

@@ -1,0 +1,55 @@
+"""Pydantic модели контрактов (Phase 1+).
+
+ChartSpec — центральная спецификация для детерминированного построения графиков
+в viz/charts.py. Все данные между модулями — только через Pydantic (никаких dict).
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+ChartType = Literal[
+    "bar",
+    "grouped_bar",
+    "stacked_bar",
+    "line",
+    "area",
+    "scatter",
+    "waterfall",
+    "horizontal_bar",
+    "donut",
+    "kpi",
+    "heatmap",
+]
+
+
+class ChartSpec(BaseModel):
+    """Спецификация графика (детерминированный рендер в viz/charts.py).
+
+    Заполняется ChartAgent (structured output, temperature=0) или вручную.
+    Поддерживаемые типы (Phase 2+): bar/grouped/stacked/line/area/scatter/waterfall/horizontal_bar/donut/kpi/heatmap.
+    Поля точно по контракту: тип, заголовок (RU), оси (из колонок df), color/группа, агг, источник (RU),
+    insights (тезисы RU), rationale (почему этот тип). Spec-first: LLM не генерит код, рендер детерминированный в viz/.
+    """
+
+    chart_type: ChartType = Field(..., description="Тип графика")
+    title: str = Field(..., description="Заголовок на русском")
+    subtitle: str | None = Field(None, description="Подзаголовок")
+    x: str = Field(..., description="Ось X / категория (имя колонки в df)")
+    y: str = Field(..., description="Ось Y / значение / мера (имя колонки в df)")
+    color: str | None = Field(None, description="Группа / цвет / сегмент (имя колонки)")
+    agg: Literal["sum", "mean", "count", "none"] | None = Field(
+        "sum", description="Агрегация перед визуализацией"
+    )
+    source: str = Field(
+        "Синтетические данные (демо), Республика Беларусь",
+        description="Подпись источника (всегда на русском)",
+    )
+    insights: list[str] = Field(
+        default_factory=list, description="3-5 ключевых выводов по графику (тезисы на русском)"
+    )
+    rationale: str = Field(
+        ..., description="Почему выбран именно этот тип графика (аудит/пояснение)"
+    )

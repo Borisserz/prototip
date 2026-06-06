@@ -77,6 +77,9 @@ def generate_sample_data(seed: int = 42) -> pd.DataFrame:
                 tp_base = rng.integers(8_000, 420_000)
                 taxpayers = int(tp_base * (rfactor**0.35) * rng.uniform(0.9, 1.1))
 
+                # Phase 2 dataset richness: добавляем penalties (штрафы/пени) как новую колонку
+                penalties = round(debt * rng.uniform(0.05, 0.18), 0)  # 5-18% от долга
+
                 rows.append(
                     {
                         "period": period,
@@ -86,6 +89,7 @@ def generate_sample_data(seed: int = 42) -> pd.DataFrame:
                         "paid": float(paid),
                         "debt": float(debt),
                         "taxpayers": taxpayers,
+                        "penalties": float(penalties),
                     }
                 )
 

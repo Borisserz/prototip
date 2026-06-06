@@ -32,6 +32,7 @@ ALLOWED_COLUMNS = {
     "paid",
     "debt",
     "taxpayers",
+    "penalties",  # Phase 2: добавлено для richer dataset (штрафы/пени)
 }
 
 DATA_PATH = Path("data/sample.csv")
@@ -50,11 +51,20 @@ SQL: SELECT region, SUM(debt) as total_debt FROM df WHERE tax_type = 'НДС' GR
 Q: Динамика начислений по г. Минск за все месяцы?
 SQL: SELECT period, SUM(accrued) as total_accrued FROM df WHERE region = 'г. Минск' GROUP BY period ORDER BY period LIMIT 20
 
+Q: Динамика начислений по регионам
+SQL: SELECT period, region, SUM(accrued) as total_accrued FROM df GROUP BY period, region ORDER BY period, region LIMIT 40
+
 Q: Сколько налогоплательщиков в среднем по областям?
 SQL: SELECT region, AVG(taxpayers) as avg_taxpayers FROM df GROUP BY region ORDER BY avg_taxpayers DESC LIMIT 10
 
 Q: Топ-3 региона по задолженности в 2024?
 SQL: SELECT region, SUM(debt) as total_debt FROM df WHERE period LIKE '2024-%' GROUP BY region ORDER BY total_debt DESC LIMIT 3
+
+Q: Доля подоходного налога в общих начислениях по регионам
+SQL: SELECT region, SUM(CASE WHEN tax_type = 'Подоходный налог' THEN accrued ELSE 0 END) * 100.0 / SUM(accrued) as share_pct FROM df GROUP BY region ORDER BY share_pct DESC LIMIT 10
+
+Q: Средняя задолженность на налогоплательщика в топ-регионах
+SQL: SELECT region, SUM(debt) / SUM(taxpayers) as debt_per_taxpayer FROM df GROUP BY region ORDER BY debt_per_taxpayer DESC LIMIT 5
 
 # Примечание: алиасы total_debt / total_accrued и т.п. — источник возможных английских лейблов в ChartSpec.y.
 # Обработка в viz/style.py:get_russian_label (стрип префиксов + fallback) + в viz/charts (conditional labels).
@@ -109,7 +119,7 @@ class DataAgent(BaseAgent):
 
     def _build_prompt(self, question: str, previous_error: str | None = None) -> str:
         schema_info = f"Доступные колонки: {', '.join(sorted(ALLOWED_COLUMNS))}. Таблица: df (pandas + duckdb)."
-        prompt = f"""Ты — эксперт по SQL для аналитики налогов в Республике Беларусь (синтетические данные).
+        prompt = f"""Ты — эксперт по SQL для аналитики налогов в Республике Беларусь (синтетические данные, включая Phase 2 колонки типа penalties).
 
 {schema_info}
 

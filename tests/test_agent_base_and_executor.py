@@ -128,3 +128,39 @@ def test_orchestrator_uses_executor_and_agents_have_reasoning():
     # Под-результаты тоже должны иметь reasoning (через executor или прямое заполнение)
     if res.analysis:
         assert getattr(res.analysis, "reasoning", "")
+
+
+def test_planner_repair_plan_adds_missing_depends_on_and_question():
+    """Проверка, что _repair_plan чинит deps и question (защита от капризов LLM в Главном агенте)."""
+    from app.agents.models import Task
+    from app.agents.planner_agent import PlannerAgent
+
+    p = PlannerAgent()
+
+    # План, который LLM мог отдать без depends_on и без "question" в params второй задачи
+    bad_tasks = [
+        Task(
+            id="t1",
+            description="Получить данные",
+            agent_name="data_agent",
+            params={"question": "сводка по налогам"},
+            depends_on=[],
+        ),
+        Task(
+            id="t2",
+            description="Сделать сводку на основе полученных данных",
+            agent_name="analyst_agent",
+            params={},  # нет question, нет depends_on — классическая ошибка
+            depends_on=[],
+        ),
+    ]
+
+    repaired = p._repair_plan(bad_tasks)
+
+    # Вторая задача должна получить depends_on на t1
+    assert repaired[1].depends_on == ["t1"]
+    # И хотя бы пустой question (дальше _invoke_agent подставит original)
+    assert "question" in repaired[1].params
+
+    # data_agent не должен был получить лишних deps
+    assert repaired[0].depends_on == []

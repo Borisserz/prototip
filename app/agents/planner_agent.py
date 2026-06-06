@@ -1,11 +1,22 @@
-"""PlannerAgent (первая версия, Вариант A).
+"""PlannerAgent v2.5+ — иерархический планировщик (Главный агент).
 
-Простой intent-based роутер.
-Принимает вопрос → определяет intent → вызывает ровно один основной агент
-через AgentExecutor → возвращает его результат.
+Генерирует минимальный Plan (1-3 Task) через structured LLM с сильным промптом,
+примерами (в т.ч. для размытых "сводка"), жёсткими правилами минимизации и bias к
+высокоуровневым агентам (dashboard/presentation для обзоров).
 
-Всё происходит скрыто: пользователь не видит план, вызванные агенты
-и внутренний reasoning.
+Поддерживает:
+- generate_plan(question) → Plan (с _repair_plan для deps/"question", _validate, _assess_quality + self-correction)
+- execute_plan(plan) → AgentResult (topo sort, context injection только data/source_sql по depends_on,
+  _invoke_agent с правильными сигнатурами для всех 5 агентов, graceful per-task continue-on-error,
+  attach _executed_plan, _plan_execution (статусы+briefs), _agent_calls)
+- run() (с cache)
+- Интерактив в UI: preview плана, редактирование (agent+desc), execute с st.status,
+  чистый текстовый рендер результатов (без inline графиков, kitchen скрыт), "Что было сделано",
+  "Скачать trace выполнения (JSON)" (полный payload с specs/data/execution), кнопки итерации
+  (Повторить похожий / Изменить план и выполнить заново), richer history.
+
+Внутренняя работа (sub-calls высокоуровневых агентов, LLM reasoning) скрыта от пользователя.
+Trace показывает только top-level задачи плана. Данные между задачами — только через Pydantic.
 """
 
 from __future__ import annotations
@@ -37,11 +48,11 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 Твоя задача — создать **минимально необходимый** план из **1, 2 или максимум 3 задач**, используя только эти агенты:
 
 Доступные агенты и их сильные стороны (используй это при выборе):
-- **data_agent**: только получение сырых данных (SQL + записи). params: {"question": "<вопрос для генерации SQL>"}. Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
-- **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные (они придут автоматически по depends_on от data_agent). params: {"question": "<конкретный под-вопрос для этого одного графика>"}. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
-- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. params: {"question": "<вопрос>"}. Используй, когда нужен именно текстовый анализ без визуализации.
-- **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу". params: {"question": "<оригинальный вопрос>"} (опционально data, max_charts).
-- **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад". params: {"question": "<тема>"} или {"questions": ["q1", "q2", ...]}.
+- **data_agent**: только получение сырых данных (SQL + записи). params: {{"question": "<вопрос для генерации SQL>"}}. Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
+- **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные (они придут автоматически по depends_on от data_agent). params: {{"question": "<конкретный под-вопрос для этого одного графика>"}}. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
+- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. params: {{"question": "<вопрос>"}}. Используй, когда нужен именно текстовый анализ без визуализации.
+- **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу". params: {{"question": "<оригинальный вопрос>"}} (опционально data, max_charts).
+- **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад". params: {{"question": "<тема>"}} или {{"questions": ["q1", "q2", ...]}}.
 
 **Жёсткие правила минимизации (соблюдай в порядке приоритета):**
 
@@ -51,7 +62,7 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 2. Используй цепочку data_agent → chart_agent только когда пользователь явно хочет **один конкретный график** (динамика одной серии, топ-N, один donut и т.д.).
 3. Никогда не делай 3 задачи, если можно обойтись 1 или 2.
 4. dashboard_agent и presentation_agent уже содержат внутри умную логику (они сами вызывают data/chart/analyst при необходимости). Не дублируй их работу.
-5. depends_on указывай только когда следующая задача реально использует результат предыдущей (например chart_agent зависит от data_agent). Для dashboard_agent и presentation_agent зависимости почти никогда не нужны.
+5. depends_on указывай **обязательно**, когда следующая задача реально использует результат предыдущей. Особенно: если после data_agent идёт analyst_agent или chart_agent и в описании задачи есть слова "на основе полученных данных", "по данным", "сводка по данным" и т.п. — deps_on **должен** содержать id data_agent. Для dashboard_agent и presentation_agent зависимости почти никогда не нужны.
 
 **Примеры хороших планов (минимальных и правильных):**
 
@@ -66,6 +77,16 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 Вопрос: "Сделай презентацию по денежному состоянию граждан"
 → План: 1 задача → presentation_agent
   (она сама разберёт вопрос на несколько слайдов)
+
+**Примеры хороших планов для размытых/приветственных запросов (добавлены в Phase 1):**
+
+Вопрос: "привет дай сводку по налогам"
+ План: 1 задача → dashboard_agent
+  (широкий обзор — лучше всего один дашборд)
+
+Вопрос: "краткая сводка по налогам"
+ План: 1 задача → dashboard_agent
+  (пользователь хочет общую картину, не один график и не цепочку)
 
 **Примеры плохих планов (избегай):**
 
@@ -262,6 +283,7 @@ class PlannerAgent(BaseAgent):
                         depends_on=t.depends_on,
                     )
                 )
+            tasks = self._repair_plan(tasks)
 
             plan = Plan(
                 goal=plan_spec.goal or question,
@@ -287,10 +309,12 @@ class PlannerAgent(BaseAgent):
 Проблемы, которые нужно исправить:
 {chr(10).join("- " + e for e in errors) if errors else "- План можно сделать существенно короче и лучше"}
 
-Правила, которые ты должен был соблюсти:
-- Минимум задач (предпочитать dashboard_agent или presentation_agent для широких запросов)
-- Не дублировать работу высокоуровневых агентов
-- Использовать правильные зависимости
+Правила, которые ты должен был соблюсти (исправляй эти нарушения в первую очередь):
+- Минимум задач — если можно одним высокоуровневым агентом (dashboard_agent или presentation_agent), делай ровно 1 задачу.
+- Для широких вопросов ("сводка", "обзор", "дай данные по...", "привет...") — всегда предпочитай dashboard_agent или presentation_agent.
+- Не дублировать работу высокоуровневых агентов (dashboard и presentation уже сами вызывают data/chart/analyst внутри).
+- **Обязательно используй правильные зависимости**: если после data_agent идёт analyst_agent или chart_agent и задача говорит "на основе полученных данных", "сводка по данным" и т.п. — вторая задача **должна** иметь depends_on на id data_agent.
+- Если в текущем плане зависимости отсутствуют — добавь их.
 
 Создай **исправленную и максимально минимальную** версию этого плана. Верни только _PlanSpec.
 """
@@ -313,6 +337,7 @@ class PlannerAgent(BaseAgent):
                                 depends_on=t.depends_on,
                             )
                         )
+                    tasks = self._repair_plan(tasks)
                     plan = Plan(
                         goal=corrected_spec.goal or question,
                         tasks=tasks,
@@ -356,35 +381,48 @@ class PlannerAgent(BaseAgent):
     ) -> AgentResult:
         """Подготавливает правильные аргументы и вызывает агент через executor.
 
-        Это центральное место, которое знает сигнатуры run() всех агентов:
+        Это **единственное** место, которое знает точные сигнатуры run() всех агентов
+        и как превращать Task.params + инжектированный контекст в корректный вызов.
+
         - data_agent: run(question: str)
-        - chart_agent / analyst_agent: run(question: str, data: list[dict])  (используем **call_kwargs)
+        - chart_agent / analyst_agent: run(question: str, data: list[dict])  (через **call_kwargs)
         - dashboard_agent: run(request: DashboardRequest)
         - presentation_agent: run(questions: list[str] | PresentationInput | ...)
 
-        Всегда очищаем "result_from_*" junk из контекста. Используем executor.run
-        так же, как это делает Orchestrator (str + data=kw для низкоуровневых).
+        Здесь же — defensive извлечение question, гарантия data для data-зависимых агентов,
+        и подробный лог того, что именно было передано (очень помогает при отладке "почему упал").
         """
         p = {k: v for k, v in (params or {}).items() if not str(k).startswith("result_from_")}
-        q = str(p.get("question") or p.get("q") or original_question or "").strip()
+
+        # Очень defensive извлечение вопроса (LLM иногда кладёт "q", иногда вообще ничего)
+        q = (
+            str(p.get("question") or p.get("q") or original_question or "").strip()
+            or original_question
+        )
 
         if agent_name == "data_agent":
-            # DataAgent.run принимает bare str (внутри делает DataAgentInput)
             arg = q or original_question
+            logger.info(f"[PlannerAgent] _invoke data_agent q={arg[:60]!r}")
             return self.executor.run(agent_name, arg)
 
         if agent_name in ("chart_agent", "analyst_agent"):
-            # Эти два требуют (question, data). Orchestrator уже делает так:
-            # executor.run("chart_agent", question, data=...)
-            # executor пробросит data= как kwarg → agent.run(q, data=the_list)
             data = p.get("data") or []
+            if not data:
+                # Это часто признак того, что depends_on не был (или не был почи нен) в плане.
+                # Мы всё равно вызываем — агент сам сделает graceful fallback,
+                # но в лог и в trace это будет видно.
+                logger.warning(
+                    f"[PlannerAgent] _invoke {agent_name}: data is EMPTY but task likely needed prior data_agent result. "
+                    f"Check depends_on / _repair_plan. q={q[:60]!r}"
+                )
+            logger.info(f"[PlannerAgent] _invoke {agent_name} q={q[:50]!r} data_rows={len(data)}")
             return self.executor.run(agent_name, q or original_question, data=data)
 
         if agent_name == "dashboard_agent":
             payload: dict[str, Any] = {}
             if q:
                 payload["question"] = q
-            if "data" in p and p["data"]:
+            if p.get("data"):
                 payload["data"] = p["data"]
             if "max_charts" in p:
                 payload["max_charts"] = p["max_charts"]
@@ -392,24 +430,26 @@ class PlannerAgent(BaseAgent):
                 payload["include_kpi"] = bool(p["include_kpi"])
             if not payload.get("question"):
                 payload["question"] = original_question
+            logger.info(
+                f"[PlannerAgent] _invoke dashboard_agent question={payload.get('question', '')[:50]!r} has_data={bool(payload.get('data'))}"
+            )
             req = DashboardRequest(**payload)
             return self.executor.run(agent_name, req)
 
         if agent_name == "presentation_agent":
-            # PresentationAgent.run очень толерантный, но мы даём ему безопасный shape.
-            # Поддерживаем как {"questions": [...]}, так и {"question": "..."} от LLM.
-            if "questions" in p and p["questions"]:
+            if p.get("questions"):
                 qs: Any = p["questions"]
             elif q:
                 qs = [q]
             else:
                 qs = [original_question] if original_question else []
-            # Можно передать list[str] — PresentationAgent сам превратит в внутренний список.
-            # Если в будущем понадобятся per-question prefs (chart_type), здесь можно собрать
-            # list[dict] или PresentationInput, но для планов от Главного агента list[str] достаточно.
+            logger.info(
+                f"[PlannerAgent] _invoke presentation_agent questions_count={len(qs) if isinstance(qs, (list, tuple)) else '?'}"
+            )
             return self.executor.run(agent_name, qs)
 
-        # Неизвестный агент или fallback — пусть executor обернёт ошибку
+        # Неизвестный агент — пусть executor вернёт ошибку (будет записана в trace)
+        logger.warning(f"[PlannerAgent] _invoke unknown agent {agent_name}")
         return self.executor.run(agent_name, p if p else original_question)
 
     def _execute_plan(self, plan: Plan, original_question: str) -> AgentResult:
@@ -567,6 +607,54 @@ class PlannerAgent(BaseAgent):
                 ordered.extend(remaining.values())
                 break
         return ordered
+
+    def _repair_plan(self, tasks: list[Task]) -> list[Task]:
+        """Пост-обработка плана после генерации LLM (и после self-correction).
+
+        Делает план максимально исполнимым даже если модель что-то упустила:
+        - Гарантирует, что analyst/chart после data_agent имеют depends_on на него (data flow).
+        - Гарантирует наличие usable "question" в params для задач, которым он нужен.
+        - Можно расширять под другие частые ошибки LLM (max 3 tasks уже ограничено в схеме).
+
+        Это основная защита от симптома "data_agent получил строки, а analyst/chart их не увидел".
+        """
+        fixed: list[Task] = []
+        last_data_id: str | None = None
+
+        for t in tasks:
+            params = dict(t.params or {})
+            deps = list(t.depends_on or [])
+
+            # 1. Ремонт depends_on для data-зависимых агентов
+            if (
+                t.agent_name in ("analyst_agent", "chart_agent")
+                and last_data_id
+                and last_data_id not in deps
+            ):
+                deps.append(last_data_id)
+
+            # 2. Ремонт "question" — самая частая недостача в params от LLM
+            if not params.get("question"):
+                # Для большинства задач достаточно оригинального вопроса пользователя.
+                # Более точный под-вопрос (если модель его сгенерировала) мы оставляем.
+                # Здесь мы просто гарантируем наличие ключа, чтобы _invoke_agent не падал.
+                # Конкретное значение будет взято в _invoke_agent (original_question фоллбэк).
+                params["question"] = params.get("question") or ""
+
+            fixed.append(
+                Task(
+                    id=t.id,
+                    description=t.description,
+                    agent_name=t.agent_name,
+                    params=params,
+                    depends_on=deps,
+                )
+            )
+
+            if t.agent_name == "data_agent":
+                last_data_id = t.id
+
+        return fixed
 
     def generate_plan(self, question: str) -> Plan:
         """Только генерирует план (без выполнения). Используется для показа пользователю перед подтверждением."""
