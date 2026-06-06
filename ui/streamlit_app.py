@@ -441,6 +441,22 @@ def _coerce_chart_spec(spec: Any) -> ChartSpec | None:
     return None
 
 
+def _chart_display_title(chart_spec: ChartSpec | None, fallback: str) -> str:
+    if chart_spec is None:
+        return fallback
+    if getattr(chart_spec, "action_title", None):
+        return str(chart_spec.action_title)
+    if chart_spec.title:
+        return chart_spec.title
+    return fallback
+
+
+def _drilldown_supported(chart_spec: ChartSpec | None) -> bool:
+    if chart_spec is None:
+        return False
+    return chart_spec.chart_type not in ("treemap", "kpi", "heatmap")
+
+
 def _resolve_artifact_path(path: str | None) -> Path | None:
     """Ищет PNG/артефакт относительно cwd и корня проекта."""
     if not path or str(path).startswith("ERROR"):
@@ -719,6 +735,7 @@ def _render_chart_block(
     *,
     chart_key: str | None = None,
     enable_drilldown: bool = False,
+    data_explanation: str | None = None,
 ) -> tuple[bool, str | None]:
     """Рисует график: Plotly → PNG fallback. Возвращает (успех, текст ошибки)."""
     last_error: str | None = None
@@ -732,13 +749,20 @@ def _render_chart_block(
                 "key": chart_key,
                 "config": {"displayModeBar": True, "responsive": True, "displaylogo": False},
             }
-            if enable_drilldown and chart_key:
+            drill_ok = enable_drilldown and _drilldown_supported(chart_spec)
+            if drill_ok and chart_key:
                 plotly_kwargs["on_select"] = "rerun"
                 plotly_kwargs["selection_mode"] = ("points",)
                 event = st.plotly_chart(fig, **plotly_kwargs)
                 _handle_plotly_selection(event, chart_spec, chart_key=chart_key)
             else:
                 st.plotly_chart(fig, **plotly_kwargs)
+            if data_explanation:
+                st.markdown(
+                    f'<p style="color:#888;font-size:0.85rem;margin-top:0.25rem;">'
+                    f"ℹ️ {html.escape(data_explanation)}</p>",
+                    unsafe_allow_html=True,
+                )
             return True, None
         except Exception as exc:
             last_error = str(exc)
@@ -858,8 +882,9 @@ def _render_pinned_item_card(res: AskResult, *, item_idx: int) -> None:
 
     chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
     data = getattr(res, "data", None) or []
-    title = (chart_spec.title if chart_spec and chart_spec.title else None) or getattr(
-        res, "question", f"График {item_idx + 1}"
+    title = _chart_display_title(
+        chart_spec,
+        getattr(res, "question", f"График {item_idx + 1}"),
     )
 
     st.markdown(
@@ -868,11 +893,13 @@ def _render_pinned_item_card(res: AskResult, *, item_idx: int) -> None:
     )
 
     if chart_spec:
+        analysis = getattr(res, "analysis", None)
         _render_chart_block(
             data,
             chart_spec,
             getattr(res, "png_path", None),
             chart_key=f"pinned_chart_{item_idx}",
+            data_explanation=getattr(analysis, "data_explanation", None) if analysis else None,
         )
     elif _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
         st.image(str(_resolve_artifact_path(res.png_path)), use_container_width=True)
@@ -1105,9 +1132,7 @@ def _render_analytics_card(
     data = getattr(res, "data", None) or []
     analysis = getattr(res, "analysis", None)
 
-    title = (chart_spec.title if chart_spec and chart_spec.title else None) or getattr(
-        res, "question", "Результат анализа"
-    )
+    title = _chart_display_title(chart_spec, getattr(res, "question", "Результат анализа"))
     chart_ok = False
     badge_class = "status-badge"
     badge_text = "✅ Успешно проанализировано"
@@ -1132,12 +1157,16 @@ def _render_analytics_card(
 
         st.markdown('<div class="chart-panel">', unsafe_allow_html=True)
         if chart_spec:
+            data_expl = (
+                getattr(analysis, "data_explanation", None) if analysis else None
+            )
             chart_ok, _ = _render_chart_block(
                 data,
                 chart_spec,
                 getattr(res, "png_path", None),
                 chart_key=chart_key,
                 enable_drilldown=enable_drilldown,
+                data_explanation=data_expl,
             )
         elif _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
             st.image(str(_resolve_artifact_path(res.png_path)), use_container_width=True)
@@ -1682,7 +1711,15 @@ def main() -> None:
                     render_assistant_response(
                         msg["result"],
                         chart_key=f"chat_chart_{msg_idx}",
-                        enable_drilldown=msg_idx == last_drill_idx,
+                        enable_drilldown=msg_idx == last_drill_idx
+                        and _drilldown_supported(
+                            _coerce_chart_spec(
+                                _normalize_result(msg["result"]).chart_spec
+                                if msg.get("result") is not None
+                                and isinstance(_normalize_result(msg["result"]), AskResult)
+                                else None
+                            )
+                        ),
                     )
                 else:
                     st.write(msg.get("content", ""))

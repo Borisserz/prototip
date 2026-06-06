@@ -60,6 +60,7 @@ CHART_TYPE_RU: dict[str, str] = {
     "area": "областная",
     "scatter": "точечная",
     "waterfall": "водопад",
+    "treemap": "древовидная (treemap)",
 }
 
 
@@ -81,7 +82,13 @@ class PresentationAgent(BaseAgent):
         for q, r in zip(questions, results):  # noqa: B905
             conc = (r.analysis.key_conclusion if r.analysis else "") or ""
             anom = (r.analysis.anomaly_or_trend if r.analysis else "") or "нет"
-            summaries.append(f"Вопрос: {q}\nКлючевой вывод: {conc}\nАномалия/тренд: {anom}")
+            action = (
+                getattr(r.chart_spec, "action_title", None) if r.chart_spec else None
+            ) or ""
+            action_line = f"Action title: {action}\n" if action else ""
+            summaries.append(
+                f"Вопрос: {q}\n{action_line}Ключевой вывод: {conc}\nАномалия/тренд: {anom}"
+            )
 
         prompt = f"""Ты — старший аналитик, готовящий презентацию для руководства по налоговой статистике Республики Беларусь (синтетические данные).
 
@@ -375,9 +382,15 @@ class PresentationAgent(BaseAgent):
             slide = prs.slides.add_slide(blank_layout)
 
             header = q
-            if res.chart_spec and getattr(res.chart_spec, "title", None):
-                header = res.chart_spec.title
-            self._add_question_slide_header(slide, header)
+            subtitle_q: str | None = None
+            if res.chart_spec:
+                spec = res.chart_spec
+                if getattr(spec, "action_title", None):
+                    header = spec.action_title
+                    subtitle_q = q
+                elif getattr(spec, "title", None):
+                    header = spec.title
+            self._add_question_slide_header(slide, header, subtitle=subtitle_q)
 
             graph_added = False
             if res.chart_spec and res.data:
@@ -560,8 +573,8 @@ class PresentationAgent(BaseAgent):
             reasoning=pres_reasoning,
         )
 
-    def _add_question_slide_header(self, slide, title: str) -> None:
-        """Заголовок слайда: Pt 28, слева + акцентная линия на всю ширину."""
+    def _add_question_slide_header(self, slide, title: str, subtitle: str | None = None) -> None:
+        """Заголовок слайда: Pt 28, слева + опциональный подзаголовок (вопрос) + акцентная линия."""
         self._add_title_text(
             slide,
             title,
@@ -570,10 +583,27 @@ class PresentationAgent(BaseAgent):
             bold=True,
             color=DARK_BLUE,
         )
+        accent_top = 0.82
+        if subtitle:
+            sub_box = slide.shapes.add_textbox(
+                Inches(SLIDE_MARGIN_H_IN),
+                Inches(0.72),
+                Inches(SLIDE_WIDTH_IN - 2 * SLIDE_MARGIN_H_IN),
+                Inches(0.35),
+            )
+            sub_tf = sub_box.text_frame
+            sub_tf.word_wrap = True
+            sub_p = sub_tf.paragraphs[0]
+            sub_p.text = subtitle
+            sub_p.font.size = Pt(14)
+            sub_p.font.name = "Arial"
+            sub_p.font.color.rgb = GRAY
+            accent_top = 1.02
+
         accent = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE,
             Inches(SLIDE_MARGIN_H_IN),
-            Inches(0.82),
+            Inches(accent_top),
             Inches(SLIDE_WIDTH_IN - 2 * SLIDE_MARGIN_H_IN),
             Inches(0.03),
         )

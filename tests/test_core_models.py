@@ -73,8 +73,8 @@ def test_chart_spec_json_roundtrip_for_llm() -> None:
     assert restored.chart_type == "donut"
 
 
-def test_chart_type_literal_contains_all_eleven() -> None:
-    """ChartType покрывает 11 типов (Phase 1 + area/scatter/waterfall)."""
+def test_chart_type_literal_contains_all_twelve() -> None:
+    """ChartType покрывает 12 типов (Phase 1 + area/scatter/waterfall/treemap)."""
     types: list[ChartType] = [
         "bar",
         "grouped_bar",
@@ -87,7 +87,26 @@ def test_chart_type_literal_contains_all_eleven() -> None:
         "area",
         "scatter",
         "waterfall",
+        "treemap",
     ]
     for t in types:
         ChartSpec(chart_type=t, title="t", x="x", y="y", rationale="r")
-    assert len(types) == 11
+    assert len(types) == 12
+
+
+def test_chart_spec_storytelling_fields_optional() -> None:
+    """Data Storytelling поля опциональны и roundtrip-safe."""
+    spec = ChartSpec(
+        chart_type="horizontal_bar",
+        title="Задолженность по регионам",
+        x="region",
+        y="debt",
+        rationale="рейтинг",
+        action_title="Гомельская область — лидер по задолженности",
+        show_average=True,
+        highlight_category="Гомельская область",
+    )
+    restored = ChartSpec.model_validate(spec.model_dump())
+    assert restored.action_title == spec.action_title
+    assert restored.show_average is True
+    assert restored.highlight_category == "Гомельская область"

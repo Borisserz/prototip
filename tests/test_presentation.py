@@ -226,3 +226,58 @@ def test_presentation_respects_prefs_and_exact_count_nonlive():
     assert any(ct == "horizontal_bar" for ct in called_types), (
         f"pref horizontal_bar should override, got {called_types}"
     )
+
+
+def test_presentation_slide_header_uses_action_title() -> None:
+    """Заголовок слайда: action_title важнее title и вопроса."""
+    agent = PresentationAgent()
+    ask = _fake_ask_result(
+        question="Какая задолженность по регионам?",
+        title="Задолженность по регионам",
+        data=[{"region": "г. Минск", "debt": 100}],
+    )
+    ask.chart_spec = ChartSpec(
+        chart_type="horizontal_bar",
+        title="Задолженность по регионам",
+        x="region",
+        y="debt",
+        action_title="Гомельская область — лидер по задолженности",
+        rationale="mock",
+    )
+
+    captured_headers: list[tuple[str, str | None]] = []
+
+    def capture_header(slide, title, subtitle=None):
+        captured_headers.append((title, subtitle))
+
+    with (
+        patch(
+            "app.agents.presentation_agent.get_executor",
+            return_value=_mock_planner_executor(ask),
+        ),
+        patch("app.agents.presentation_agent.call_structured") as mock_narr,
+        patch.object(agent, "_add_question_slide_header", side_effect=capture_header),
+        patch("app.agents.presentation_agent.build_chart") as mock_build,
+        patch("app.agents.presentation_agent.export_png"),
+        patch("app.agents.presentation_agent.Presentation") as mock_prs,
+    ):
+        mock_narr.return_value = DeckNarrative(
+            overview="ov",
+            themes=["t1", "t2"],
+            key_takeaways=["k1", "k2", "k3", "k4"],
+            recommendations=["r1", "r2"],
+        )
+        mock_fig = MagicMock()
+        mock_fig.layout.annotations = []
+        mock_build.return_value = mock_fig
+        mock_prs_inst = MagicMock()
+        mock_prs_inst.slides.add_slide.return_value = MagicMock()
+        mock_prs_inst.slides.__len__.return_value = 5
+        mock_prs.return_value = mock_prs_inst
+
+        agent.run(["Какая задолженность по регионам?"], include_title=False, include_recommendations=False)
+
+    assert captured_headers
+    header, subtitle = captured_headers[0]
+    assert header == "Гомельская область — лидер по задолженности"
+    assert subtitle == "Какая задолженность по регионам?"

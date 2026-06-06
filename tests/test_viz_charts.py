@@ -14,7 +14,7 @@ import pytest
 
 from core.models import ChartSpec
 from viz.charts import build_chart, export_html, export_png
-from viz.style import PALETTE
+from viz.style import MUTED_BAR_COLOR, PALETTE
 
 
 @pytest.fixture(scope="module")
@@ -418,3 +418,72 @@ def test_hbar_top_ranking_correct_layout_labels_no_english(sample_df: pd.DataFra
     # categoryorder применён (не проверяем глубоко)
     yaxis = getattr(fig.layout, "yaxis", None)
     assert yaxis is not None
+
+
+def test_build_treemap_on_sample(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="treemap",
+        title="Структура начислений",
+        x="region",
+        color="tax_type",
+        agg="sum",
+        action_title="г. Минск — крупнейший регион",
+        rationale="иерархия → treemap",
+    )
+    fig = build_chart(sample_df, spec)
+    assert fig is not None
+    assert len(fig.data) >= 1
+
+
+def test_show_average_hline_on_bar(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="bar",
+        title="Начисления по регионам",
+        show_average=True,
+        agg="sum",
+        rationale="сравнение со средним",
+    )
+    fig = build_chart(sample_df, spec)
+    shapes = list(fig.layout.shapes or [])
+    assert any(getattr(s, "line", None) and getattr(s.line, "dash", "") == "dash" for s in shapes)
+
+
+def test_highlight_category_muted_bars(sample_df: pd.DataFrame) -> None:
+    top_region = str(sample_df.groupby("region")["accrued"].sum().idxmax())
+    spec = _mk_spec(
+        chart_type="bar",
+        title="Начисления",
+        highlight_category=top_region,
+        agg="sum",
+        rationale="акцент категории",
+    )
+    fig = build_chart(sample_df, spec)
+    trace = fig.data[0]
+    colors = getattr(getattr(trace, "marker", None), "color", None)
+    assert colors is not None
+    color_list = list(colors) if isinstance(colors, (list, tuple)) else [colors]
+    assert PALETTE[0] in color_list
+    assert MUTED_BAR_COLOR in color_list
+
+
+def test_bar_marker_cornerradius(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(chart_type="bar", title="Скругление", agg="sum", rationale="rounding")
+    fig = build_chart(sample_df, spec)
+    trace = fig.data[0]
+    radius = getattr(getattr(trace, "marker", None), "cornerradius", None)
+    assert radius == 6
+
+
+def test_treemap_export_png(tmp_path: Path, sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="treemap",
+        title="Treemap export",
+        x="region",
+        color="tax_type",
+        agg="sum",
+        rationale="export treemap",
+    )
+    fig = build_chart(sample_df, spec)
+    png = export_png(fig, tmp_path / "treemap.png", scale=1)
+    assert png.exists()
+    assert png.stat().st_size > 5_000

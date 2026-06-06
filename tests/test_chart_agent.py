@@ -42,6 +42,28 @@ def test_chart_agent_mock_returns_spec() -> None:
     assert "регион" in result.spec.title.lower() or "начислено" in result.spec.title.lower()
 
 
+def test_chart_agent_storytelling_spec_fields() -> None:
+    """ChartSpec с Data Storytelling полями проходит через ChartAgent."""
+    agent = ChartAgent()
+    fake_spec = ChartSpec(
+        chart_type="treemap",
+        title="Структура начислений",
+        x="region",
+        color="tax_type",
+        y="accrued",
+        action_title="г. Минск доминирует",
+        show_average=False,
+        highlight_category=None,
+        rationale="иерархия → treemap",
+    )
+    with patch("app.agents.chart_agent.call_structured") as mock_call:
+        mock_call.return_value = fake_spec
+        result = agent.run("Структура по регионам и налогам", [{"region": "г. Минск", "tax_type": "НДС", "accrued": 1}])
+
+    assert result.spec.chart_type == "treemap"
+    assert result.spec.action_title == "г. Минск доминирует"
+
+
 @pytest.mark.live
 @pytest.mark.skipif(not is_ollama_available(), reason="Ollama недоступен для живого Phase 4 теста")
 def test_chart_agent_live_and_e2e_with_dataagent() -> None:

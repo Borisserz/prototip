@@ -22,6 +22,7 @@ ChartType = Literal[
     "area",
     "scatter",
     "waterfall",
+    "treemap",
 ]
 
 
@@ -29,8 +30,9 @@ class ChartSpec(BaseModel):
     """Спецификация графика (детерминированный рендер в viz/charts.py).
 
     Заполняется вручную в Phase1 тестах; позже ChartAgent (structured output, temperature=0).
-    Поля точно по PROJECT_SPEC: тип, заголовок, оси, цвет/группа, агрегация, источник,
-    список выводов, причина выбора типа. Минимальный набор (без лишних полей).
+    Поля: тип, заголовки (title / action_title), оси, цвет/группа, агрегация, источник,
+    insights, rationale. Data Storytelling: action_title (говорящий вывод), show_average,
+    highlight_category (акцент одной категории при single-series).
     """
 
     chart_type: ChartType = Field(..., description="Тип графика")
@@ -51,4 +53,13 @@ class ChartSpec(BaseModel):
     )
     rationale: str = Field(
         ..., description="Почему выбран именно этот тип графика (аудит/пояснение)"
+    )
+    action_title: str | None = Field(
+        None, description="Говорящий заголовок с бизнес-выводом (Data Storytelling)"
+    )
+    show_average: bool = Field(
+        False, description="Отрисовать пунктирную линию среднего (сравнение категорий)"
+    )
+    highlight_category: str | None = Field(
+        None, description="Категория для цветового акцента (только без color)"
     )

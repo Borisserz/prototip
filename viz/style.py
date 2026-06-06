@@ -27,6 +27,20 @@ FONT_FAMILY: str = "Arial, sans-serif"
 CHART_WIDTH: int = 1000
 CHART_HEIGHT: int = 600
 MARGINS: dict[str, int] = {"l": 120, "r": 40, "t": 115, "b": 140}
+MUTED_BAR_COLOR: str = "#E0E0E0"
+
+_CARTESIAN_CHART_TYPES: frozenset[str] = frozenset(
+    {
+        "bar",
+        "grouped_bar",
+        "stacked_bar",
+        "line",
+        "area",
+        "scatter",
+        "waterfall",
+        "horizontal_bar",
+    }
+)
 
 
 def format_number_ru(value: float | int, decimals: int = 0, suffix: str = "Br") -> str:
@@ -101,6 +115,24 @@ def get_russian_label(col: str) -> str:
     return cleaned
 
 
+def compose_title_text(spec: Any) -> str:
+    """Собирает заголовок: action_title (главный) + title/subtitle (подзаголовок)."""
+    title = getattr(spec, "title", "") or ""
+    subtitle = getattr(spec, "subtitle", None)
+    action_title = getattr(spec, "action_title", None)
+
+    if action_title:
+        sub_parts = [title]
+        if subtitle:
+            sub_parts.append(str(subtitle))
+        sub_text = " — ".join(p for p in sub_parts if p)
+        return f"{action_title}<br><sub>{sub_text}</sub>" if sub_text else str(action_title)
+
+    if subtitle:
+        return f"{title}<br><sub>{subtitle}</sub>"
+    return title
+
+
 def add_source_footer(fig: go.Figure, text: str) -> go.Figure:
     """Добавляет подпись источника внизу (фирменный стиль)."""
     fig.add_annotation(
@@ -116,16 +148,19 @@ def add_source_footer(fig: go.Figure, text: str) -> go.Figure:
     return fig
 
 
-def apply_common_style(fig: go.Figure, spec: Any) -> go.Figure:
+def apply_common_style(
+    fig: go.Figure,
+    spec: Any,
+    *,
+    chart_type: str | None = None,
+) -> go.Figure:
     """Применяет единый стиль ко всем графикам.
 
     Использует PALETTE, FONT, format_number_ru, русские лейблы, footer источника.
     Вызывается внутри build_chart после создания traces.
     """
-    # Title + subtitle
-    title_text = spec.title
-    if getattr(spec, "subtitle", None):
-        title_text = f"{spec.title}<br><sub>{spec.subtitle}</sub>"
+    title_text = compose_title_text(spec)
+    ctype = chart_type or getattr(spec, "chart_type", None)
 
     fig.update_layout(
         title=dict(
@@ -142,24 +177,44 @@ def apply_common_style(fig: go.Figure, spec: Any) -> go.Figure:
         hovermode="closest",
         plot_bgcolor="#FAFAFA",
         paper_bgcolor="white",
+        hoverlabel=dict(
+            bgcolor="white",
+            font=dict(family=FONT_FAMILY, size=12),
+        ),
     )
 
-    # Оси: русские названия + subtle grid + форматирование больших чисел
-    x_label = get_russian_label(getattr(spec, "x", ""))
-    y_label = get_russian_label(getattr(spec, "y", ""))
+    if ctype in _CARTESIAN_CHART_TYPES:
+        x_label = get_russian_label(getattr(spec, "x", ""))
+        y_label = get_russian_label(getattr(spec, "y", ""))
+        grid_kw = dict(gridcolor="#E8E8E8", griddash="dash", showgrid=True)
 
-    fig.update_xaxes(
-        title=dict(text=x_label, font=dict(family=FONT_FAMILY, size=12)),
-        gridcolor="#E8E8E8",
-        linecolor="#CCCCCC",
-        automargin=True,
-    )
-    fig.update_yaxes(
-        title=dict(text=y_label, font=dict(family=FONT_FAMILY, size=12)),
-        gridcolor="#E8E8E8",
-        linecolor="#CCCCCC",
-        automargin=True,
-    )
+        if ctype == "horizontal_bar":
+            # horizontal_bar: значения на X, категории на Y
+            fig.update_xaxes(
+                title=dict(text=x_label, font=dict(family=FONT_FAMILY, size=12)),
+                linecolor="#CCCCCC",
+                automargin=True,
+                **grid_kw,
+            )
+            fig.update_yaxes(
+                title=dict(text=y_label, font=dict(family=FONT_FAMILY, size=12)),
+                linecolor="#CCCCCC",
+                automargin=True,
+                showgrid=False,
+            )
+        else:
+            fig.update_xaxes(
+                title=dict(text=x_label, font=dict(family=FONT_FAMILY, size=12)),
+                linecolor="#CCCCCC",
+                automargin=True,
+                showgrid=False,
+            )
+            fig.update_yaxes(
+                title=dict(text=y_label, font=dict(family=FONT_FAMILY, size=12)),
+                linecolor="#CCCCCC",
+                automargin=True,
+                **grid_kw,
+            )
 
     # Форматирование тиков Y для денег (если большие значения)
     # Простая эвристика: если max > 1e6 — форматируем

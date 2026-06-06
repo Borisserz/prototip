@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from viz.style import (
     PALETTE,
     apply_common_style,
+    compose_title_text,
     format_number_ru,
     get_russian_label,
 )
@@ -18,12 +19,16 @@ from viz.style import (
 class _DummySpec:
     """Минимальный объект для теста apply (как ChartSpec)."""
 
-    def __init__(self) -> None:
+    def __init__(self, **kwargs: object) -> None:
         self.title = "Тестовый график"
         self.subtitle = "Проверка стиля"
         self.x = "region"
         self.y = "accrued"
         self.source = "Синтетические данные: тесты"
+        self.action_title = None
+        self.chart_type = "bar"
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 def test_format_number_ru_spaces_and_suffix() -> None:
@@ -63,13 +68,28 @@ def test_palette_has_eight_colorblind_colors() -> None:
     assert all(c.startswith("#") and len(c) == 7 for c in PALETTE)
 
 
+def test_compose_title_text_with_action_title() -> None:
+    spec = _DummySpec(
+        action_title="г. Минск доминирует в начислениях",
+        title="Начисления по регионам",
+        subtitle="2024 год",
+    )
+    text = compose_title_text(spec)
+    assert "г. Минск доминирует" in text
+    assert "Начисления по регионам" in text
+    assert "2024 год" in text
+
+
 def test_apply_common_style_updates_layout_and_footer() -> None:
     """apply добавляет title, font, colorway, footer annotation."""
     fig = go.Figure(go.Bar(x=["a", "b"], y=[1_200_000, 3_400_000]))
     spec = _DummySpec()
-    styled = apply_common_style(fig, spec)
+    styled = apply_common_style(fig, spec, chart_type="bar")
 
     assert styled.layout.title.text is not None
+    assert styled.layout.hoverlabel.bgcolor == "white"
+    assert styled.layout.yaxis.showgrid is True
+    assert styled.layout.xaxis.showgrid is False
     assert "Тестовый график" in str(styled.layout.title.text)
     assert styled.layout.font.family == "Arial, sans-serif"
     assert styled.layout.colorway is not None

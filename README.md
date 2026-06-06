@@ -6,7 +6,7 @@
 
 - Каркас + все Phase + DashboardAgent (KPI + multi ChartSpec + layout + editor + filters) + PlannerAgent (Главный агент: generate/execute/repair/editing/trace/iteration).
 - Данные: data/sample.csv (Беларусь, Br, 7 регионов, **penalties** колонка Phase 2; регенерируй `python data/make_dataset.py` при изменениях).
-- Графики: фабрика 11 типов (bar/.../line/area/scatter/waterfall/horizontal_bar/donut/kpi/heatmap), Okabe-Ito + RU/Br стиль в viz/, spec-first (LLM только ChartSpec, детерминированный рендер), PNG/HTML экспорт, live plotly.
+- Графики: фабрика 12 типов (bar/.../treemap/horizontal_bar/donut/kpi/heatmap), Data Storytelling (action_title, show_average, highlight_category), Okabe-Ito + RU/Br стиль в viz/, spec-first (LLM только ChartSpec, детерминированный рендер), PNG/HTML экспорт, live plotly.
 - Презентация: .pptx с exact count, prefs per-q, visuals из specs, narrative, recs; поддержка "from dashboard" / Planner.
 - Логирование: [Agent]..., [AgentExecutor]..., stdout + артефакты.
 - UI: `streamlit run ui/streamlit_app.py` — чат с live pipeline log, drill-down, pinned dashboard, trace expander «Что было сделано» + JSON download, презентация через Orchestrator.
@@ -64,7 +64,7 @@ PlannerAgent (Главный) — generate_plan (structured + repair + correctio
         ↓
 Orchestrator.ask / .dashboard / .presentation (единый фасад; ask → PlannerAgent)
         ↓
-DataAgent (Text-to-SQL DuckDB, penalties-aware) → Analyst + ChartAgent (structured → ChartSpec 11 типов)
+DataAgent (Text-to-SQL DuckDB, penalties-aware) → Analyst + ChartAgent (structured → ChartSpec 12 типов)
         ↓
 viz/charts.py (det build_chart + apply_common_style) → plotly (live) / PNG (pres)
 PresentationAgent → .pptx (exact slides, visuals из specs, narrative)

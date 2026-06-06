@@ -73,6 +73,33 @@ def test_analyst_agent_includes_chart_spec_in_prompt() -> None:
     assert "horizontal_bar" in prompt_arg or "горизонтальной" in prompt_arg
 
 
+def test_analyst_agent_data_explanation_in_prompt() -> None:
+    """Промпт запрашивает data_explanation; результат может его содержать."""
+    agent = AnalystAgent()
+    sample_data = [{"region": "г. Минск", "tax_type": "НДС", "accrued": 100}]
+
+    fake_result = AnalysisResult(
+        insights=["а", "б", "в"],
+        key_conclusion="вывод",
+        data_explanation="Данные отфильтрованы по г. Минск и сгруппированы по видам налогов.",
+        anomaly_or_trend=None,
+    )
+
+    with patch("app.agents.analyst_agent.call_structured") as mock_call:
+        mock_call.return_value = fake_result
+        result = agent.run(
+            "Начисления в Минске",
+            sample_data,
+            source_sql="SELECT * FROM t WHERE region='г. Минск'",
+            drilldown_filters={"region": "г. Минск"},
+        )
+
+    prompt_arg = mock_call.call_args[0][0]
+    assert "data_explanation" in prompt_arg
+    assert "г. Минск" in prompt_arg
+    assert result.data_explanation is not None
+
+
 @pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(), reason="Ollama + модель недоступна для live теста Phase 3"

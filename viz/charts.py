@@ -21,12 +21,16 @@ from core.models import ChartSpec
 from .style import (
     CHART_HEIGHT,
     CHART_WIDTH,
+    MUTED_BAR_COLOR,
     PALETTE,
     apply_common_style,
     format_number_ru,
     get_russian_label,
     make_ru_ticktext,
 )
+
+_BAR_TYPES = frozenset({"bar", "grouped_bar", "stacked_bar", "horizontal_bar"})
+_AVERAGE_TYPES = frozenset({"bar", "line", "area", "horizontal_bar"})
 
 
 def _annotate_max_point(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> None:
@@ -72,6 +76,100 @@ def _annotate_max_point(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctyp
         pass
 
 
+def _money_suffix(y_col: str) -> bool:
+    return any(k in str(y_col).lower() for k in ("debt", "accrued", "paid")) and "taxpayer" not in str(
+        y_col
+    ).lower()
+
+
+def _apply_bar_rounding(fig: go.Figure, ctype: str) -> None:
+    if ctype not in _BAR_TYPES:
+        return
+    with suppress(Exception):
+        fig.update_traces(marker_cornerradius=6)
+
+
+def _category_col_for_highlight(spec: ChartSpec, ctype: str) -> str:
+    # Категориальная колонка в df всегда spec.x (для hbar она на оси Y, но в данных — spec.x)
+    return spec.x
+
+
+def _apply_highlight(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> bool:
+    """Подсветка одной категории. Возвращает True, если цвета применены."""
+    if not spec.highlight_category or spec.color is not None:
+        return False
+    if ctype not in _BAR_TYPES:
+        return False
+
+    cat_col = _category_col_for_highlight(spec, ctype)
+    if cat_col not in dff.columns:
+        return False
+
+    target = str(spec.highlight_category).strip().lower()
+    colors: list[str] = []
+    matched = False
+    for val in dff[cat_col]:
+        if str(val).strip().lower() == target:
+            colors.append(PALETTE[0])
+            matched = True
+        else:
+            colors.append(MUTED_BAR_COLOR)
+
+    if not matched:
+        return False
+
+    with suppress(Exception):
+        fig.update_traces(marker_color=colors, marker=dict(color=colors, cornerradius=6))
+    return True
+
+
+def _apply_average_line(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> None:
+    if not spec.show_average or ctype not in _AVERAGE_TYPES:
+        return
+    if spec.y not in dff.columns:
+        return
+
+    numeric = pd.to_numeric(dff[spec.y], errors="coerce").dropna()
+    if numeric.empty:
+        return
+
+    avg = float(numeric.mean())
+    suffix = "Br" if _money_suffix(spec.y) else ""
+    label = f"Среднее: {format_number_ru(avg, suffix=suffix)}"
+
+    if ctype == "horizontal_bar":
+        fig.add_vline(
+            x=avg,
+            line_dash="dash",
+            line_color=PALETTE[1],
+            annotation_text=label,
+            annotation_position="top",
+            annotation_font=dict(size=10, color=PALETTE[1]),
+        )
+    else:
+        fig.add_hline(
+            y=avg,
+            line_dash="dash",
+            line_color=PALETTE[1],
+            annotation_text=label,
+            annotation_position="right",
+            annotation_font=dict(size=10, color=PALETTE[1]),
+        )
+
+
+def _build_treemap(dff: pd.DataFrame, spec: ChartSpec) -> go.Figure:
+    path_cols = [spec.x]
+    if spec.color and spec.color in dff.columns:
+        path_cols.append(spec.color)
+    return px.treemap(
+        dff,
+        path=path_cols,
+        values=spec.y,
+        color=spec.y,
+        color_continuous_scale="Blues",
+    )
+
+
 def _prepare_agg(df: pd.DataFrame, spec: ChartSpec) -> pd.DataFrame:
     """Внутренняя агрегация по spec.agg (если не none). Возвращает копию/агг df."""
     if not spec.agg or spec.agg == "none":
@@ -104,8 +202,10 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         raise ValueError("Пустой DataFrame передан в build_chart")
 
     cols_to_check = [spec.y]
-    if spec.chart_type != "kpi":
+    if spec.chart_type not in ("kpi",):
         cols_to_check.append(spec.x)
+    if spec.chart_type == "treemap" and spec.color:
+        cols_to_check.append(spec.color)
     for col in cols_to_check:
         if col not in df.columns:
             raise ValueError(f"Колонка '{col}' (x/y) отсутствует в df для {spec.chart_type}")
@@ -198,25 +298,33 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         fig.update_layout(
             xaxis_title=get_russian_label(str(color)), yaxis_title=get_russian_label(x)
         )
+    elif ctype == "treemap":
+        fig = _build_treemap(dff, spec)
     else:
         raise ValueError(f"Неизвестный chart_type: {ctype}")
 
+    highlighted = False
+    if ctype in _BAR_TYPES:
+        _apply_bar_rounding(fig, ctype)
+        highlighted = _apply_highlight(fig, dff, spec, ctype)
+
+    if ctype in _AVERAGE_TYPES:
+        _apply_average_line(fig, dff, spec, ctype)
+
     # Value labels on bars (русские числа; Br только для денежных колонок debt/accrued/paid)
-    if ctype in ("bar", "grouped_bar", "stacked_bar", "horizontal_bar"):
+    if ctype in _BAR_TYPES:
         try:
             if y in dff.columns:
-                use_br = (
-                    any(k in str(y).lower() for k in ("debt", "accrued", "paid"))
-                    and "taxpayer" not in str(y).lower()
-                )
-                texts = [format_number_ru(v, suffix="Br" if use_br else "") for v in dff[y]]
+                texts = [
+                    format_number_ru(v, suffix="Br" if _money_suffix(y) else "") for v in dff[y]
+                ]
                 fig.update_traces(text=texts, textposition="outside", textfont=dict(size=9))
         except Exception:
             pass  # non-fatal
 
     # Общий стиль (кроме kpi — частично переопределён выше)
     if ctype != "kpi":
-        fig = apply_common_style(fig, spec)
+        fig = apply_common_style(fig, spec, chart_type=ctype)
 
     # Для horizontal_bar оси в фигуре swapped по смыслу (категория на Y, значение на X),
     # поэтому переопределяем titles после apply (который использует spec x/y без учёта swap).
@@ -228,10 +336,13 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
             xaxis_title=get_russian_label(y),
             yaxis_title=get_russian_label(x),
         )
-        # force цвет для одного ряда (px + colorway иногда даёт чёрный последний из PALETTE)
-        if color is None:
+        # force цвет для одного ряда (если highlight не применён)
+        if color is None and not highlighted:
             with suppress(Exception):
-                fig.update_traces(marker_color=PALETTE[0], marker=dict(color=PALETTE[0]))
+                fig.update_traces(
+                    marker_color=PALETTE[0],
+                    marker=dict(color=PALETTE[0], cornerradius=6),
+                )
         # margin bump (справа для текста labels на x-axis horizontal bars)
         with suppress(Exception):
             fig.update_layout(margin=dict(l=200, r=140, t=80, b=120))

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from app.agents.models import AgentCall, Plan, PlanExecutionStep, PlannerTrace
 from app.schemas import AskResult
-from ui.components.pipeline import pipeline_step_markdown, pipeline_status_headline
+from core.models import ChartSpec
+from ui.components.pipeline import pipeline_status_headline, pipeline_step_markdown
 from ui.components.trace import result_has_trace
-from ui.streamlit_app import _normalize_result
+from ui.streamlit_app import _chart_display_title, _drilldown_supported, _normalize_result
 
 
 def test_pipeline_step_markdown_empty():
@@ -67,3 +68,28 @@ def test_normalize_result_dict_ask():
     }
     res = _normalize_result(raw)
     assert isinstance(res, AskResult)
+
+
+def test_chart_display_title_prefers_action_title():
+    spec = ChartSpec(
+        chart_type="bar",
+        title="Описание",
+        x="region",
+        y="accrued",
+        action_title="г. Минск лидирует",
+        rationale="t",
+    )
+    assert _chart_display_title(spec, "fallback") == "г. Минск лидирует"
+
+
+def test_drilldown_not_supported_for_treemap():
+    spec = ChartSpec(
+        chart_type="treemap",
+        title="t",
+        x="region",
+        y="accrued",
+        rationale="t",
+    )
+    assert _drilldown_supported(spec) is False
+    bar = ChartSpec(chart_type="bar", title="t", x="region", y="accrued", rationale="t")
+    assert _drilldown_supported(bar) is True

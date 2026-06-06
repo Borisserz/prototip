@@ -452,6 +452,10 @@ class PlannerAgent(BaseAgent):
             call_kwargs: dict[str, Any] = {"data": data}
             if chart_spec is not None:
                 call_kwargs["chart_spec"] = chart_spec
+            if p.get("source_sql"):
+                call_kwargs["source_sql"] = p["source_sql"]
+            if p.get("drilldown_filters"):
+                call_kwargs["drilldown_filters"] = p["drilldown_filters"]
             return self.executor.run(agent_name, q or original_question, **call_kwargs)
 
         if agent_name == "dashboard_agent":
@@ -507,7 +511,11 @@ class PlannerAgent(BaseAgent):
 
         def build_params(task: Task) -> dict[str, Any]:
             task_params = dict(task.params or {})
-            if drilldown and drilldown.filters and task.agent_name == "data_agent":
+            if (
+                drilldown
+                and drilldown.filters
+                and task.agent_name in ("data_agent", "analyst_agent")
+            ):
                 task_params.setdefault("drilldown_filters", drilldown.filters)
             with lock:
                 dependency_results = [context.get(dep_id) for dep_id in task.depends_on]

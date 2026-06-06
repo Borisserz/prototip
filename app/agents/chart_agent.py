@@ -31,6 +31,12 @@ FEW_SHOT_CHART = """
 - Доли/структура/проценты → "donut" (x=tax_type или region, y=accrued)
 - Один ключевой показатель (сумма/итог) → "kpi"
 - Матрица (регион x период) → "heatmap" (x=period, color=region или наоборот, y=accrued)
+- Иерархическая структура / состав при >4 категориях → "treemap" (x=верхний уровень, color=второй уровень опционально, y=мера)
+
+**Data Storytelling (новые поля ChartSpec):**
+- action_title: говорящий бизнес-вывод для заголовка («Гомельская область — лидер по задолженности»). title остаётся описательным.
+- show_average=true: при сравнении категорий/рейтингах (single-series bar/horizontal_bar/line/area).
+- highlight_category: акцент одной категории (только если color=null).
 
 Пример 1:
 Q: Динамика начислений по регионам
@@ -55,6 +61,14 @@ Q: Зависимость между начислениями и задолже�
 Пример 6 (водопад изменений):
 Q: Изменения в задолженности: начисления - уплата - остаток
  type=waterfall, x=step, y=change, title="Водопад задолженности", rationale="показать приросты/спады → waterfall"
+
+Пример 7 (treemap — структура):
+Q: Структура начислений по регионам и видам налогов
+ type=treemap, x=region, color=tax_type, y=accrued, title="Структура начислений", action_title="г. Минск доминирует в общем объёме начислений", rationale="иерархия >4 категорий → treemap"
+
+Пример 8 (рейтинг + storytelling):
+Q: Регионы по задолженности — выделить Гомельскую область
+ type=horizontal_bar, x=region, y=debt, show_average=true, highlight_category="Гомельская область", title="Задолженность по регионам", action_title="Гомельская область превышает средний уровень задолженности", rationale="сравнение + акцент → horizontal_bar + show_average + highlight"
 """
 
 
@@ -97,8 +111,9 @@ class ChartAgent(BaseAgent):
 Пример данных (первые строки + разнообразие регионов если есть): {sample}
 Всего строк в результате: {len(data)}
 
-Выбери подходящий chart_type из: bar, grouped_bar, stacked_bar, line, area, scatter, waterfall, horizontal_bar, donut, kpi, heatmap.
+Выбери подходящий chart_type из: bar, grouped_bar, stacked_bar, line, area, scatter, waterfall, horizontal_bar, donut, kpi, heatmap, treemap.
 Заполни ChartSpec полностью (title на русском, subtitle если нужно, x/y/color из доступных колонок, agg=sum/mean, insights 2-4 тезиса, rationale почему этот тип).
+Заполняй action_title, show_average, highlight_category осмысленно (иначе null/false).
 
 **Правила для новых типов (Phase 2):**
 - Если динамика с накоплением, сглаживанием или нужно показать "площадь под кривой" → area (часто с color=region для нескольких серий).
@@ -127,6 +142,22 @@ class ChartAgent(BaseAgent):
             raise RuntimeError(
                 "ChartAgent не смог получить спецификацию графика. Проверьте модель Ollama и попробуйте ещё раз."
             ) from e
+
+        if spec.highlight_category and spec.color is not None:
+            logger.info(
+                "[ChartAgent] highlight_category сброшен: несовместим с color=%s",
+                spec.color,
+            )
+            spec = spec.model_copy(update={"highlight_category": None})
+
+        if spec.chart_type == "treemap" and data:
+            cols = set(data[0].keys())
+            n_unique = len({row.get(spec.x) for row in data if spec.x in cols})
+            if n_unique <= 4:
+                logger.info(
+                    "[ChartAgent] treemap при %d категориях (<=4) — допустимо, но bar/donut могли бы подойти",
+                    n_unique,
+                )
 
         # Минимальная пост-валидация (x/y должны быть в данных если не kpi)
         if spec.chart_type != "kpi" and data:

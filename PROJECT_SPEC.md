@@ -28,7 +28,7 @@ SQL по этим данным выполняется через DuckDB прям
 
 ### Phase 1 — Графики ✅ Готово (Phase 2 расширения)
 - Генератор синтетического датасета → data/sample.csv (Phase 2: + penalties).
-- Модель ChartSpec (Pydantic, core/models.py): chart_type (Literal: bar/grouped_bar/stacked_bar/line/area/scatter/waterfall/horizontal_bar/donut/kpi/heatmap — 11 типов), title (RU), x/y/color (из колонок df), agg, source (RU), insights (RU тезисы), rationale.
+- Модель ChartSpec (Pydantic, core/models.py): chart_type (Literal: bar/grouped_bar/stacked_bar/line/area/scatter/waterfall/treemap/horizontal_bar/donut/kpi/heatmap — 12 типов), title (RU), action_title/show_average/highlight_category (Data Storytelling), x/y/color (из колонок df), agg, source (RU), insights (RU тезисы), rationale. AnalysisResult: +data_explanation (explainability).
 - Единая дизайн-система (viz/style.py + charts.py): Okabe-Ito палитра, русские лейблы (get_russian_label), Br форматирование, value labels, hover cleanup, hbar sort/order, tick ru (без SI B/M), apply_common_style. Никаких хардкодов цветов/шрифтов вне viz/.
 - Фабрика графиков (viz/charts.py, spec-first): build_chart(df, ChartSpec) → go.Figure детерминировано. Поддержка всех 11 (area=px.area, scatter=px.scatter, waterfall — basic relative/bar-with-base; полная go.Waterfall + cumulative prep — в бэклоге). Экспорт PNG (kaleido, scale 2 для слайдов, ~1000x600 sharp) + HTML.
 - Готово: на sample.csv (в т.ч. с penalties) строятся графики в едином стиле; тесты + экспорт; новые типы с правилами в ChartAgent.
@@ -86,7 +86,7 @@ SQL по этим данным выполняется через DuckDB прям
 ## Подготовка к иерархической архитектуре (PlannerAgent) — Phase 2.x + реализация
 Рефакторинг + полная реализация PlannerAgent v2.5+ (интерактивный "Главный агент"):
 
-- Модели: app/agents/models.py (AgentResult базовый + Task/Plan/AgentCall), core/models.py (ChartSpec с 11 типами), schemas.py (re-export для API/UI).
+- Модели: app/agents/models.py (AgentResult базовый + Task/Plan/AgentCall), core/models.py (ChartSpec с 12 типами), schemas.py (re-export для API/UI).
 - BaseAgent + AgentRegistry/Executor (единый вызов, логи `[AgentExecutor] call... / done... (Nms)`).
 - PlannerAgent: generate_plan (structured + сильный промпт + repair + self-correction + quality scoring), execute_plan (topological sort + injection только data/source_sql по depends_on + _invoke_agent с корректными формами + graceful per-task + attach _executed_plan/_plan_execution/_agent_calls).
 - UI (streamlit_app.py "🤖 Главный агент"): preview + per-task editing (agent select + desc edit), execute со st.status (шаги из плана), clean textual render результатов (title/summary/insights; полные viz только в trace JSON или dedicated tabs), "Что было сделано" (steps + briefs + статусы), "Скачать trace выполнения (JSON)", iteration buttons (repeat / fork plan), richer history, "Можно продолжить".
