@@ -36,6 +36,18 @@ def extract_drilldown_from_point(
             filters[chart_spec.y] = str(y_val)
         elif chart_spec.x in DRILLDOWN_DIMENSIONS and x_val is not None:
             filters[chart_spec.x] = str(x_val)
+    elif chart_spec.chart_type == "treemap":
+        label = point.get("label") or point.get("text")
+        parents = point.get("parents") or point.get("parent")
+        if label:
+            if chart_spec.color and chart_spec.color in DRILLDOWN_DIMENSIONS:
+                filters[chart_spec.color] = str(label)
+            elif chart_spec.x in DRILLDOWN_DIMENSIONS:
+                filters[chart_spec.x] = str(label)
+            else:
+                filters["_segment"] = str(label)
+        if parents and chart_spec.x in DRILLDOWN_DIMENSIONS:
+            filters[chart_spec.x] = str(parents)
     elif chart_spec.x in DRILLDOWN_DIMENSIONS and x_val is not None:
         filters[chart_spec.x] = str(x_val)
 

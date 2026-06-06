@@ -12,6 +12,8 @@ import time
 
 from app.agents.base_agent import BaseAgent
 from app.agents.models import ChartAgentInput, ChartAgentResult
+from app.chart_data_profile import format_profile_for_prompt, profile_data
+from app.chart_repair import repair_chart_spec
 from core.llm import call_structured, setup_logging
 from core.models import ChartSpec
 
@@ -103,11 +105,16 @@ class ChartAgent(BaseAgent):
             except Exception:
                 sample = data[:5]
 
+        data_profile = profile_data(data)
+        profile_text = format_profile_for_prompt(data_profile)
+
         prompt = f"""Ты — эксперт по визуализации данных налогов Республики Беларусь (синтетические данные). Ты работаешь как tool-agent: на входе вопрос и готовые records, на выходе только спецификация ChartSpec для детерминированного рендера в viz/charts.py.
 
 {FEW_SHOT_CHART}
 
 Вопрос: {inp.question}
+Профиль данных (колонки, диапазоны, уникальные значения):
+{profile_text}
 Пример данных (первые строки + разнообразие регионов если есть): {sample}
 Всего строк в результате: {len(data)}
 
@@ -149,6 +156,8 @@ class ChartAgent(BaseAgent):
                 spec.color,
             )
             spec = spec.model_copy(update={"highlight_category": None})
+
+        spec = repair_chart_spec(spec, data, question=inp.question)
 
         if spec.chart_type == "treemap" and data:
             cols = set(data[0].keys())

@@ -24,7 +24,6 @@ import time
 from pydantic import BaseModel
 
 from app.agents.base_agent import BaseAgent
-from app.pipeline_progress import emit_pipeline_stage
 from app.agents.factory import get_executor
 from app.agents.models import (
     DashboardLayout,
@@ -32,6 +31,8 @@ from app.agents.models import (
     DashboardResult,
     KpiCard,
 )
+from app.chart_repair import repair_chart_spec
+from app.pipeline_progress import emit_pipeline_stage
 from core.llm import call_structured, setup_logging
 from core.models import ChartSpec
 from viz.style import format_number_ru
@@ -279,14 +280,16 @@ class DashboardAgent(BaseAgent):
                     cr = executor.run("chart_agent", idea_str, data=data)
                     if not cr.success:
                         raise RuntimeError(cr.error or "ChartAgent failed")
-                    charts.append(cr.spec)
+                    charts.append(repair_chart_spec(cr.spec, data, question=idea_str))
                 except Exception as e:
                     logger.info(f"[DashboardAgent] sub_chart_error for '{idea}': {e}")
         except Exception as e:
             logger.info(f"[DashboardAgent] chart_agent_init_error: {e}")
 
         if not charts and composition.charts:
-            charts = composition.charts[:max_c]
+            charts = [
+                repair_chart_spec(c, data, question=q) for c in composition.charts[:max_c]
+            ]
 
         # Мягкая валидация: если x/y не в данных — оставляем (модель иногда ошибается, но viz потом отработает или упадёт выше)
         if data:

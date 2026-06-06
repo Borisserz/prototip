@@ -49,6 +49,8 @@ def test_get_russian_label_dataset_cols() -> None:
     assert get_russian_label("accrued") == "Начислено, Br"
     assert get_russian_label("region") == "Регион"
     assert get_russian_label("period") == "Месяц"
+    assert get_russian_label("penalties") == "Штрафы и пени, Br"
+    assert get_russian_label("total_penalties") == "Штрафы и пени, Br"
     assert get_russian_label("taxpayers") == "Число налогоплательщиков"
     assert get_russian_label("debt") == "Задолженность, Br"
     assert get_russian_label("total_debt") == "Задолженность, Br"

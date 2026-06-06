@@ -110,3 +110,18 @@ def test_chart_spec_storytelling_fields_optional() -> None:
     assert restored.action_title == spec.action_title
     assert restored.show_average is True
     assert restored.highlight_category == "Гомельская область"
+
+
+def test_chart_spec_top_n_and_sort_order() -> None:
+    spec = ChartSpec(
+        chart_type="horizontal_bar",
+        title="Топ-5",
+        x="region",
+        y="debt",
+        rationale="рейтинг",
+        top_n=5,
+        sort_order="desc",
+    )
+    restored = ChartSpec.model_validate(spec.model_dump())
+    assert restored.top_n == 5
+    assert restored.sort_order == "desc"

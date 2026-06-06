@@ -63,3 +63,9 @@ class ChartSpec(BaseModel):
     highlight_category: str | None = Field(
         None, description="Категория для цветового акцента (только без color)"
     )
+    top_n: int | None = Field(
+        None, description="Ограничить число категорий после агрегации (топ-N)"
+    )
+    sort_order: Literal["asc", "desc", "none"] | None = Field(
+        None, description="Сортировка по оси категорий или значению (desc для рейтингов)"
+    )

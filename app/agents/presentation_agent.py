@@ -27,6 +27,7 @@ from pptx.util import Inches, Pt
 from app.agents.base_agent import BaseAgent
 from app.agents.factory import get_executor
 from app.agents.models import AskResult, DeckNarrative, PresentationInput, PresentationResult
+from app.chart_repair import repair_chart_spec
 from app.pipeline_progress import emit_pipeline_stage, suppress_pipeline_emit
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
@@ -401,6 +402,7 @@ class PresentationAgent(BaseAgent):
                     if user_pref:
                         slide_spec.chart_type = user_pref
                     slide_spec.title = ""
+                    slide_spec = repair_chart_spec(slide_spec, res.data, question=q)
                     fig = build_chart(df, slide_spec)
                     with suppress(Exception):
                         fig.update_layout(title=dict(text=""))

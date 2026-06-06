@@ -13,6 +13,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.models import AnalysisResult, SqlResult
+from app.storytelling import enrich_analysis_explanation
 from core.llm import call_structured, setup_logging
 
 setup_logging()
@@ -212,7 +213,13 @@ class AnalystAgent(BaseAgent):
                 f"Проанализировано {len(data)} записей. "
                 f"Сформировано {len(analysis.insights)} инсайтов + ключевой вывод{suffix}."
             )
-        return analysis
+        return enrich_analysis_explanation(
+            analysis,
+            sql=source_sql,
+            drilldown_filters=drilldown_filters,
+            spec=chart_spec,
+            row_count=len(data),
+        )
 
     def run_from_sql(self, question: str, sql_result: SqlResult) -> AnalysisResult:
         """Удобный метод для оркестратора: принимает SqlResult."""

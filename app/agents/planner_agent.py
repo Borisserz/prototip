@@ -30,13 +30,19 @@ from app.agents.models import (
     Plan,
     Task,
 )
+from app.chart_repair import repair_chart_spec
 from app.pipeline_progress import (
     emit_agent_finished,
     emit_agent_started,
     emit_cache_hit_progress,
     emit_pipeline_stage,
 )
-from app.planner_utils import PlannerResultCache, attach_planner_trace, make_planner_trace, planner_cache_key
+from app.planner_utils import (
+    PlannerResultCache,
+    attach_planner_trace,
+    make_planner_trace,
+    planner_cache_key,
+)
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
 
@@ -702,7 +708,11 @@ class PlannerAgent(BaseAgent):
                     out_dir = Path("out")
                     out_dir.mkdir(parents=True, exist_ok=True)
                     df = pd.DataFrame(result.data)
-                    fig = build_chart(df, result.chart_spec)
+                    repaired = repair_chart_spec(
+                        result.chart_spec, result.data, question=original_question
+                    )
+                    result.chart_spec = repaired
+                    fig = build_chart(df, repaired)
                     png_file = (out_dir / f"chart_{self._slug(original_question)}.png").resolve()
                     export_png(fig, png_file, scale=2.0)
                     result.png_path = str(png_file)

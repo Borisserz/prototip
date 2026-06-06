@@ -98,6 +98,7 @@ def get_russian_label(col: str) -> str:
         "paid": "Уплачено, Br",
         "debt": "Задолженность, Br",
         "taxpayers": "Число налогоплательщиков",
+        "penalties": "Штрафы и пени, Br",
         "value": "Значение",
     }
     if c in mapping:
@@ -112,6 +113,8 @@ def get_russian_label(col: str) -> str:
         return "Начислено, Br"
     if "total paid" in cl or "paid total" in cl:
         return "Уплачено, Br"
+    if "penalt" in cl or "штраф" in cl or "пени" in cl:
+        return "Штрафы и пени, Br"
     return cleaned
 
 

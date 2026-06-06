@@ -24,10 +24,23 @@ from .style import (
     MUTED_BAR_COLOR,
     PALETTE,
     apply_common_style,
+    compose_title_text,
     format_number_ru,
     get_russian_label,
     make_ru_ticktext,
 )
+
+_HOVER_RU_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("total_debt=", "Задолженность, Br="),
+    ("debt=", "Задолженность, Br="),
+    ("accrued=", "Начислено, Br="),
+    ("total_accrued=", "Начислено, Br="),
+    ("paid=", "Уплачено, Br="),
+    ("total_paid=", "Уплачено, Br="),
+    ("penalties=", "Штрафы и пени, Br="),
+    ("total_penalties=", "Штрафы и пени, Br="),
+)
+_MAX_ANNOTATION_CATEGORIES = 12
 
 _BAR_TYPES = frozenset({"bar", "grouped_bar", "stacked_bar", "horizontal_bar"})
 _AVERAGE_TYPES = frozenset({"bar", "line", "area", "horizontal_bar"})
@@ -37,6 +50,10 @@ def _annotate_max_point(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctyp
     """Стрелка на максимум для bar / horizontal_bar / line (говорящий график)."""
     try:
         if ctype not in ("bar", "horizontal_bar", "line"):
+            return
+        if len(dff) > _MAX_ANNOTATION_CATEGORIES:
+            return
+        if spec.show_average or spec.color is not None:
             return
         val_col, cat_col = spec.y, spec.x
         if val_col not in dff.columns or cat_col not in dff.columns:
@@ -77,9 +94,52 @@ def _annotate_max_point(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctyp
 
 
 def _money_suffix(y_col: str) -> bool:
-    return any(k in str(y_col).lower() for k in ("debt", "accrued", "paid")) and "taxpayer" not in str(
-        y_col
-    ).lower()
+    return any(
+        k in str(y_col).lower() for k in ("debt", "accrued", "paid", "penalt")
+    ) and "taxpayer" not in str(y_col).lower()
+
+
+def _apply_ru_hover_templates(fig: go.Figure) -> None:
+    """Заменяет сырые имена колонок в hovertemplate на русские подписи."""
+    for trace in fig.data:
+        ht = getattr(trace, "hovertemplate", None)
+        if not ht:
+            continue
+        ht = str(ht)
+        for raw, ru in _HOVER_RU_REPLACEMENTS:
+            ht = ht.replace(raw, ru)
+        with suppress(Exception):
+            trace.hovertemplate = ht
+
+
+def _sort_chronological_if_period(dff: pd.DataFrame, col: str) -> pd.DataFrame:
+    if col not in dff.columns or col.lower() != "period":
+        return dff
+    try:
+        return dff.sort_values(col, ascending=True)
+    except Exception:
+        return dff
+
+
+def _apply_top_n_and_sort(dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> pd.DataFrame:
+    """top_n и sort_order после агрегации."""
+    out = dff.copy()
+    cat_col = spec.x
+    val_col = spec.y
+
+    if cat_col in out.columns and cat_col.lower() == "period":
+        out = _sort_chronological_if_period(out, cat_col)
+    elif spec.sort_order and spec.sort_order != "none" and val_col in out.columns:
+        ascending = spec.sort_order == "asc"
+        out = out.sort_values(val_col, ascending=ascending)
+    elif ctype == "horizontal_bar" and val_col in out.columns and spec.color is None:
+        out = out.sort_values(val_col, ascending=False)
+
+    if spec.top_n and spec.top_n > 0 and val_col in out.columns:
+        out = out.nlargest(spec.top_n, val_col) if spec.sort_order != "asc" else out.nsmallest(
+            spec.top_n, val_col
+        )
+    return out
 
 
 def _apply_bar_rounding(fig: go.Figure, ctype: str) -> None:
@@ -161,12 +221,66 @@ def _build_treemap(dff: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     path_cols = [spec.x]
     if spec.color and spec.color in dff.columns:
         path_cols.append(spec.color)
-    return px.treemap(
+    fig = px.treemap(
         dff,
         path=path_cols,
         values=spec.y,
         color=spec.y,
-        color_continuous_scale="Blues",
+        color_continuous_scale=[[0, PALETTE[1]], [0.5, PALETTE[4]], [1, PALETTE[0]]],
+    )
+    with suppress(Exception):
+        fig.update_traces(
+            texttemplate="%{label}<br>%{value:,.0f}",
+            hovertemplate="<b>%{label}</b><br>%{value:,.0f}<extra></extra>",
+        )
+    return fig
+
+
+def _build_waterfall(dff: pd.DataFrame, spec: ChartSpec) -> go.Figure:
+    """Настоящий waterfall через go.Waterfall (накопительные шаги)."""
+    x_col, y_col = spec.x, spec.y
+    if "base" in dff.columns:
+        return go.Figure(
+            go.Bar(
+                x=dff[x_col],
+                y=dff[y_col],
+                base=dff["base"],
+                marker=dict(color=PALETTE[0]),
+            )
+        )
+
+    measures: list[str] = []
+    values: list[float] = []
+    for pos, (_, row) in enumerate(dff.iterrows()):
+        val = float(row[y_col])
+        if pos == 0:
+            measures.append("absolute")
+        elif pos == len(dff) - 1 and len(dff) > 1:
+            measures.append("total")
+        else:
+            measures.append("relative")
+        values.append(val)
+
+    if len(measures) == 1:
+        measures = ["absolute"]
+
+    text_vals = [
+        format_number_ru(v, suffix="Br" if _money_suffix(y_col) else "") for v in values
+    ]
+    return go.Figure(
+        go.Waterfall(
+            name=get_russian_label(y_col),
+            orientation="v",
+            x=[str(v) for v in dff[x_col]],
+            y=values,
+            measure=measures,
+            text=text_vals,
+            textposition="outside",
+            connector=dict(line=dict(color="#CCCCCC", width=1)),
+            increasing=dict(marker=dict(color=PALETTE[2])),
+            decreasing=dict(marker=dict(color=PALETTE[5])),
+            totals=dict(marker=dict(color=PALETTE[0])),
+        )
     )
 
 
@@ -214,6 +328,10 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     x, y, color = spec.x, spec.y, spec.color
 
     dff = df[[y]].copy() if ctype == "kpi" else _prepare_agg(df, spec)  # no group for kpi
+    if ctype != "kpi":
+        dff = _apply_top_n_and_sort(dff, spec, ctype)
+        if spec.x in dff.columns:
+            dff = _sort_chronological_if_period(dff, spec.x)
 
     fig: go.Figure
 
@@ -228,20 +346,7 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     elif ctype == "scatter":
         fig = px.scatter(dff, x=x, y=y, color=color)
     elif ctype == "waterfall":
-        # Basic waterfall using relative bars or go.Waterfall.
-        # For demo, if data has 'base', use it; else relative bar as approximation.
-        if "base" in dff.columns:
-            fig = go.Figure(
-                go.Bar(
-                    x=dff[x],
-                    y=dff[y],
-                    base=dff["base"],
-                    marker=dict(color=PALETTE[0] if not color else None),
-                )
-            )
-        else:
-            fig = px.bar(dff, x=x, y=y, color=color, barmode="relative")
-        fig.update_layout(barmode="relative")
+        fig = _build_waterfall(dff, spec)
     elif ctype == "horizontal_bar":
         # Для horizontal_bar: категория (регион) на Y (слева), значение на X (снизу).
         # Сортируем по убыванию значения, чтобы largest был сверху.
@@ -262,16 +367,19 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
         # KPI: берём сумму/значение по y (после agg)
         total = float(dff[y].sum()) if spec.agg != "none" else float(dff[y].iloc[0])
         label = get_russian_label(y)
+        title_html = compose_title_text(spec)
+        if "<br>" not in title_html:
+            title_html = f"{title_html}<br><span style='font-size:0.6em'>{label}</span>"
         fig = go.Figure(
             go.Indicator(
                 mode="number",
                 value=total,
                 number={
                     "valueformat": ",",
-                    "font": {"size": 68, "color": "#E69F00"},
+                    "font": {"size": 68, "color": PALETTE[0]},
                     "prefix": "",
                 },
-                title={"text": f"{spec.title}<br><span style='font-size:0.6em'>{label}</span>"},
+                title={"text": title_html},
             )
         )
         # Стиль карточки
@@ -366,29 +474,8 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
                     )  # без Br на оси для чистоты, на барах есть
                     fig.update_xaxes(tickvals=tickvals, ticktext=ticktext)
 
-        # очистка hovertemplate от сырых алиасов (total_debt= -> русское) для чистоты PNG/экспорта
-        if ctype in {"bar", "grouped_bar", "stacked_bar", "horizontal_bar", "line"}:
-            for trace in fig.data:
-                ht = getattr(trace, "hovertemplate", None)
-                if ht:
-                    ht = str(ht)
-                    for raw, ru in [
-                        ("total_debt=", "Задолженность, Br="),
-                        ("debt=", "Задолженность, Br="),
-                        ("accrued=", "Начислено, Br="),
-                        ("total_accrued=", "Начислено, Br="),
-                        ("paid=", "Уплачено, Br="),
-                    ]:
-                        ht = ht.replace(raw, ru)
-                    with suppress(Exception):
-                        trace.hovertemplate = ht
-
-    # Hover с русским форматом для чисел (упрощённо)
-    if ctype in {"bar", "grouped_bar", "stacked_bar", "line", "horizontal_bar"}:
-        for trace in fig.data:
-            if hasattr(trace, "hovertemplate") and trace.hovertemplate:
-                # plotly сам использует :, но мы оставляем; при необходимости post-process
-                pass
+    if ctype in {"bar", "grouped_bar", "stacked_bar", "line", "horizontal_bar", "area"}:
+        _apply_ru_hover_templates(fig)
 
     # Фиксируем размер для экспорта (kpi уже свой)
     if ctype != "kpi":

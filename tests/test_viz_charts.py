@@ -474,6 +474,51 @@ def test_bar_marker_cornerradius(sample_df: pd.DataFrame) -> None:
     assert radius == 6
 
 
+def test_line_period_chronological_order(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="line",
+        title="Динамика",
+        x="period",
+        y="accrued",
+        agg="sum",
+        sort_order="asc",
+    )
+    fig = build_chart(sample_df, spec)
+    trace = fig.data[0]
+    periods = list(trace.x)
+    assert periods == sorted(periods)
+
+
+def test_kpi_action_title_in_layout(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="kpi",
+        title="Итого штрафов",
+        x="Всего",
+        y="penalties",
+        agg="sum",
+        action_title="Штрафы растут к концу года",
+        rationale="kpi storytelling",
+    )
+    fig = build_chart(sample_df, spec)
+    indicator_title = getattr(getattr(fig.data[0], "title", None), "text", "") or ""
+    assert "Штрафы растут" in str(indicator_title)
+
+
+def test_top_n_limits_horizontal_bar(sample_df: pd.DataFrame) -> None:
+    spec = _mk_spec(
+        chart_type="horizontal_bar",
+        title="Топ-3",
+        y="debt",
+        agg="sum",
+        top_n=3,
+        sort_order="desc",
+        rationale="top n",
+    )
+    fig = build_chart(sample_df, spec)
+    trace = fig.data[0]
+    assert len(trace.y) == 3
+
+
 def test_treemap_export_png(tmp_path: Path, sample_df: pd.DataFrame) -> None:
     spec = _mk_spec(
         chart_type="treemap",

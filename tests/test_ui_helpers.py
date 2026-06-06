@@ -7,7 +7,13 @@ from app.schemas import AskResult
 from core.models import ChartSpec
 from ui.components.pipeline import pipeline_status_headline, pipeline_step_markdown
 from ui.components.trace import result_has_trace
-from ui.streamlit_app import _chart_display_title, _drilldown_supported, _normalize_result
+from ui.streamlit_app import (
+    DASHBOARD_CHART_TYPES,
+    _chart_display_title,
+    _drilldown_supported,
+    _filter_data_by_regions,
+    _normalize_result,
+)
 
 
 def test_pipeline_step_markdown_empty():
@@ -82,14 +88,31 @@ def test_chart_display_title_prefers_action_title():
     assert _chart_display_title(spec, "fallback") == "г. Минск лидирует"
 
 
-def test_drilldown_not_supported_for_treemap():
-    spec = ChartSpec(
+def test_drilldown_supported_matrix():
+    treemap = ChartSpec(
         chart_type="treemap",
         title="t",
         x="region",
         y="accrued",
         rationale="t",
     )
-    assert _drilldown_supported(spec) is False
+    assert _drilldown_supported(treemap) is True
     bar = ChartSpec(chart_type="bar", title="t", x="region", y="accrued", rationale="t")
     assert _drilldown_supported(bar) is True
+    kpi = ChartSpec(chart_type="kpi", title="t", x="x", y="accrued", rationale="t")
+    assert _drilldown_supported(kpi) is False
+
+
+def test_filter_data_by_regions():
+    data = [
+        {"region": "г. Минск", "accrued": 1},
+        {"region": "Гомельская область", "accrued": 2},
+    ]
+    filtered = _filter_data_by_regions(data, ["г. Минск"])
+    assert len(filtered) == 1
+    assert filtered[0]["region"] == "г. Минск"
+
+
+def test_dashboard_chart_types_complete():
+    assert "treemap" in DASHBOARD_CHART_TYPES
+    assert "waterfall" in DASHBOARD_CHART_TYPES

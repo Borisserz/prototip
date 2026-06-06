@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
+from app.chart_repair import repair_chart_spec  # noqa: E402
 from app.config import config  # noqa: E402
 from app.drilldown import (  # noqa: E402
     DRILLDOWN_DIMENSIONS,
@@ -57,6 +58,35 @@ CHART_VAL_FOR_DISPLAY: dict[str, str | None] = {
     "горизонтальная столбчатая": "horizontal_bar",
 }
 CHART_DISPLAY_FOR_VAL: dict[str | None, str] = {v: k for k, v in CHART_VAL_FOR_DISPLAY.items()}
+
+DASHBOARD_CHART_TYPES: list[str] = [
+    "bar",
+    "grouped_bar",
+    "stacked_bar",
+    "line",
+    "area",
+    "scatter",
+    "waterfall",
+    "horizontal_bar",
+    "donut",
+    "kpi",
+    "heatmap",
+    "treemap",
+]
+DASHBOARD_CHART_TYPE_LABELS: dict[str, str] = {
+    "bar": "Столбчатая",
+    "grouped_bar": "Группированная",
+    "stacked_bar": "Стековая",
+    "line": "Линейная",
+    "area": "С заливкой (area)",
+    "scatter": "Точечная",
+    "waterfall": "Водопад",
+    "horizontal_bar": "Горизонтальная (рейтинг)",
+    "donut": "Круговая (donut)",
+    "kpi": "KPI",
+    "heatmap": "Тепловая карта",
+    "treemap": "Treemap",
+}
 
 SUGGESTION_PROMPTS: list[str] = [
     "Какая задолженность по регионам?",
@@ -454,7 +484,109 @@ def _chart_display_title(chart_spec: ChartSpec | None, fallback: str) -> str:
 def _drilldown_supported(chart_spec: ChartSpec | None) -> bool:
     if chart_spec is None:
         return False
-    return chart_spec.chart_type not in ("treemap", "kpi", "heatmap")
+    return chart_spec.chart_type not in ("kpi", "heatmap")
+
+
+def _filter_data_by_regions(data: list[dict], regions: list[str] | None) -> list[dict]:
+    if not regions or not data or "region" not in data[0]:
+        return data
+    allowed = set(regions)
+    return [row for row in data if str(row.get("region", "")) in allowed]
+
+
+def _dashboard_editor_key(chart_key_prefix: str, chart_idx: int) -> str:
+    return f"dash_editor_{chart_key_prefix}_{chart_idx}"
+
+
+def _read_dashboard_chart_override(
+    base_spec: ChartSpec,
+    *,
+    chart_key_prefix: str,
+    chart_idx: int,
+    available_regions: list[str],
+) -> ChartSpec:
+    """Читает post-gen правки из session_state и возвращает обновлённый ChartSpec."""
+    ek = _dashboard_editor_key(chart_key_prefix, chart_idx)
+    state = st.session_state.get(ek)
+    if not isinstance(state, dict):
+        return base_spec
+
+    updates: dict[str, Any] = {}
+    ctype = state.get("chart_type")
+    if ctype and ctype in DASHBOARD_CHART_TYPES:
+        updates["chart_type"] = ctype
+    if state.get("action_title") is not None:
+        updates["action_title"] = state.get("action_title") or None
+    updates["show_average"] = bool(state.get("show_average", base_spec.show_average))
+    hc = state.get("highlight_category")
+    if hc is not None:
+        updates["highlight_category"] = hc or None
+
+    spec = base_spec.model_copy(update=updates) if updates else base_spec
+    if spec.highlight_category and spec.color:
+        spec = spec.model_copy(update={"highlight_category": None})
+    return spec
+
+
+def _render_dashboard_chart_editor(
+    spec: ChartSpec,
+    *,
+    chart_key_prefix: str,
+    chart_idx: int,
+    available_regions: list[str],
+) -> None:
+    """Post-gen редактор: тип графика, фильтр региона, storytelling."""
+    ek = _dashboard_editor_key(chart_key_prefix, chart_idx)
+    if ek not in st.session_state:
+        st.session_state[ek] = {
+            "chart_type": spec.chart_type,
+            "regions": [],
+            "action_title": spec.action_title or "",
+            "show_average": spec.show_average,
+            "highlight_category": spec.highlight_category or "",
+        }
+
+    with st.expander("✏️ Настроить график", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            type_labels = [DASHBOARD_CHART_TYPE_LABELS.get(t, t) for t in DASHBOARD_CHART_TYPES]
+            cur_idx = (
+                DASHBOARD_CHART_TYPES.index(st.session_state[ek]["chart_type"])
+                if st.session_state[ek]["chart_type"] in DASHBOARD_CHART_TYPES
+                else 0
+            )
+            picked = st.selectbox(
+                "Тип графика",
+                type_labels,
+                index=cur_idx,
+                key=f"{ek}_type",
+            )
+            st.session_state[ek]["chart_type"] = DASHBOARD_CHART_TYPES[type_labels.index(picked)]
+        with c2:
+            if available_regions:
+                st.session_state[ek]["regions"] = st.multiselect(
+                    "Фильтр по региону",
+                    available_regions,
+                    default=st.session_state[ek].get("regions") or [],
+                    key=f"{ek}_regions",
+                )
+
+        st.session_state[ek]["action_title"] = st.text_input(
+            "Говорящий заголовок (action_title)",
+            value=st.session_state[ek].get("action_title", ""),
+            key=f"{ek}_action",
+        )
+        st.session_state[ek]["show_average"] = st.checkbox(
+            "Показать линию среднего",
+            value=bool(st.session_state[ek].get("show_average")),
+            key=f"{ek}_avg",
+        )
+        st.session_state[ek]["highlight_category"] = st.text_input(
+            "Выделить категорию",
+            value=st.session_state[ek].get("highlight_category", ""),
+            key=f"{ek}_highlight",
+            help="Только для односерийных bar/horizontal_bar без color",
+        )
 
 
 def _resolve_artifact_path(path: str | None) -> Path | None:
@@ -743,7 +875,8 @@ def _render_chart_block(
     if data and chart_spec:
         try:
             df = pd.DataFrame(data)
-            fig = _fig_for_streamlit(build_chart(df, chart_spec))
+            repaired = repair_chart_spec(chart_spec, data)
+            fig = _fig_for_streamlit(build_chart(df, repaired))
             plotly_kwargs: dict[str, Any] = {
                 "use_container_width": True,
                 "key": chart_key,
@@ -1473,6 +1606,7 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
         if res.charts and getattr(res, "data", None):
             df = pd.DataFrame(res.data)
             data_rows = df.to_dict(orient="records")
+            available_regions = sorted(df["region"].dropna().unique().tolist()) if "region" in df.columns else []
             n_cols = max(1, min(getattr(res.layout, "columns", 2), 2))
             layout_type = getattr(res.layout, "type", "kpi_top_grid")
 
@@ -1486,9 +1620,26 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
                         if coerced is None:
                             _render_chart_error("Некорректная спецификация графика.")
                         else:
-                            _render_chart_block(
-                                data_rows,
+                            _render_dashboard_chart_editor(
                                 coerced,
+                                chart_key_prefix=chart_key_prefix,
+                                chart_idx=i,
+                                available_regions=available_regions,
+                            )
+                            ek = _dashboard_editor_key(chart_key_prefix, i)
+                            filtered = _filter_data_by_regions(
+                                data_rows,
+                                st.session_state.get(ek, {}).get("regions"),
+                            )
+                            edited = _read_dashboard_chart_override(
+                                coerced,
+                                chart_key_prefix=chart_key_prefix,
+                                chart_idx=i,
+                                available_regions=available_regions,
+                            )
+                            _render_chart_block(
+                                filtered,
+                                edited,
                                 chart_key=f"{chart_key_prefix}_tab_{i}",
                             )
             else:
@@ -1501,9 +1652,26 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
                         else:
                             if coerced.title:
                                 st.caption(coerced.title)
-                            _render_chart_block(
-                                data_rows,
+                            _render_dashboard_chart_editor(
                                 coerced,
+                                chart_key_prefix=chart_key_prefix,
+                                chart_idx=i,
+                                available_regions=available_regions,
+                            )
+                            ek = _dashboard_editor_key(chart_key_prefix, i)
+                            filtered = _filter_data_by_regions(
+                                data_rows,
+                                st.session_state.get(ek, {}).get("regions"),
+                            )
+                            edited = _read_dashboard_chart_override(
+                                coerced,
+                                chart_key_prefix=chart_key_prefix,
+                                chart_idx=i,
+                                available_regions=available_regions,
+                            )
+                            _render_chart_block(
+                                filtered,
+                                edited,
                                 chart_key=f"{chart_key_prefix}_grid_{i}",
                             )
             st.markdown("</div>", unsafe_allow_html=True)
