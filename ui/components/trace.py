@@ -47,9 +47,9 @@ def render_planner_trace(res: Any, *, key_prefix: str = "trace") -> None:
         if steps:
             st.markdown("##### Выполнение")
             for step in steps:
-                icon = "✅" if step.status == "успешно" else "❌"
+                status_label = "Успешно" if step.status == "успешно" else "Ошибка"
                 st.markdown(
-                    f"{icon} **{step.num}. {step.agent_name}** — {step.description}\n\n"
+                    f"**{step.num}. {step.agent_name}** ({status_label}) — {step.description}\n\n"
                     f"{step.brief_result}"
                 )
 

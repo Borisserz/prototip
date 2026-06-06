@@ -65,18 +65,18 @@ Orchestrator оставлен тонким (только высокоуровн�
 7. Перед коммитом: `ruff check . && ruff format .` и `pytest -q` должны быть зелёными.
 
 ## Порядок реализации (кратко; детали в PROJECT_SPEC.md)
-Phase 0 — каркас проекта и зависимости. ✅ Готово
-Phase 1 — КРАСИВЫЕ ГРАФИКИ: датасет, ChartSpec, единый стиль, фабрика графиков, экспорт в PNG. ✅ Готово
-Phase 2 — DataAgent: NL → SQL по датасету через DuckDB, с самокоррекцией по ошибке. ✅ Готово
-Phase 3 — AnalystAgent: текстовые выводы по данным. ✅ Готово
-Phase 4 — ChartAgent: модель выбирает тип графика и заполняет ChartSpec. ✅ Готово
-Phase 5 — Orchestrator: единый пайплайн "вопрос → ответ + график". ✅ Готово
-Phase 6 — PresentationAgent: сборка .pptx. ✅ Готово
-Phase 7 — Streamlit UI + интеграция. ✅ Готово
-Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. ✅ Готово
+Phase 0 — каркас проекта и зависимости. — Готово
+Phase 1 — КРАСИВЫЕ ГРАФИКИ: датасет, ChartSpec, единый стиль, фабрика графиков, экспорт в PNG. — Готово
+Phase 2 — DataAgent: NL → SQL по датасету через DuckDB, с самокоррекцией по ошибке. — Готово
+Phase 3 — AnalystAgent: текстовые выводы по данным. — Готово
+Phase 4 — ChartAgent: модель выбирает тип графика и заполняет ChartSpec. — Готово
+Phase 5 — Orchestrator: единый пайплайн "вопрос → ответ + график". — Готово
+Phase 6 — PresentationAgent: сборка .pptx. — Готово
+Phase 7 — Streamlit UI + интеграция. — Готово
+Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. — Готово
 
 ## Следующий спринт
-- **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка "📈 Дашборды" в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
+- **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка «Дашборды» в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
 - **PlannerAgent** (Phase 1 + Phase 2 progress): иерархическая мультиагентная оркестрация. После детального штурма и hardening (Phase 1 завершена):
   - Сильный `PLAN_GENERATION_PROMPT` + примеры для размытых запросов ("привет дай сводку...").
   - Усиленный self-correction промпт (явно требует исправления `depends_on` и предпочтения высокоуровневых агентов).
@@ -106,7 +106,7 @@ Phase 8 — обработка ошибок, логирование шагов �
 ## Пользовательский интерфейс
 UI (Streamlit) — тонкий клиент. Основная цель — понятность обычному пользователю:
 - Скрыты все технические объяснения работы LLM (reasoning, "Почему этот тип?", "композиция LLM" и т.п.).
-- Добавлена вкладка/секция **📋 Данные** — просмотр выборки, статистика, кликабельные подсказки вопросов + явная пометка «демо-данные».
+- Добавлена вкладка/секция **Данные** — просмотр выборки, статистика, кликабельные подсказки вопросов + явная пометка «демо-данные».
 - Простая история запросов (в памяти) + быстрый повтор/итерация.
 - Улучшен онбординг: «Как быстро начать», дружелюбные пустые состояния, смягчённые статусы.
 - Презентация: после генерации показывается краткий outline тем.

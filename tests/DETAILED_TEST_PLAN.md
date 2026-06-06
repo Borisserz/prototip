@@ -44,7 +44,7 @@ It documents the **very detailed test strategy** for the 4 focus areas + cross-c
 
 **Integration**: real sample (penalties) + mocked comp → specs → build_chart calls; data matches input; source_sql present; sub errors graceful.
 
-**Planner-orchestrated**: plans with single dashboard_agent (broad "сводка") or data→...→dash (repair ensures); execute → result full fields + trace (only top-level dashboard_agent, subs not traced as designed). In Главный агент: clean textual render (title/summary/insights + "полные графики в JSON" per Phase 1 polish; no inline grid). Dedicated "📈 Дашборды" tab: full KPI grid + layout multi-plotly + post-gen editor (type change + re-render) + client filters (region) + "Выводы" + "в презентацию" + export JSON (full kpi/charts/data/source_sql).
+**Planner-orchestrated**: plans with single dashboard_agent (broad "сводка") or data→...→dash (repair ensures); execute → result full fields + trace (only top-level dashboard_agent, subs not traced as designed). In Главный агент: clean textual render (title/summary/insights + "полные графики в JSON" per Phase 1 polish; no inline grid). Dedicated «Дашборды» tab: full KPI grid + layout multi-plotly + post-gen editor (type change + re-render) + client filters (region) + "Выводы" + "в презентацию" + export JSON (full kpi/charts/data/source_sql).
 
 **UI-specific**: post-gen editor + re-render; filters + re-render; action "в презентацию" feeds prefs/count to pres (visuals from specs in trace); JSON export fidelity; "Выводы" (renamed from Инсайты); action from Главный результат.
 

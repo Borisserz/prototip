@@ -14,11 +14,11 @@ from contextvars import ContextVar
 from typing import Any
 
 PIPELINE_STAGES: list[dict[str, str]] = [
-    {"id": "intent", "label": "Анализ намерения", "icon": "🧠"},
-    {"id": "sql", "label": "Генерация SQL", "icon": "🗄️"},
-    {"id": "duckdb", "label": "Обработка данных (DuckDB)", "icon": "🔍"},
-    {"id": "synthesis", "label": "Текстовый синтез", "icon": "📝"},
-    {"id": "viz", "label": "Визуализация", "icon": "🎨"},
+    {"id": "intent", "label": "Анализ намерения", "icon": ""},
+    {"id": "sql", "label": "Генерация SQL", "icon": ""},
+    {"id": "duckdb", "label": "Обработка данных (DuckDB)", "icon": ""},
+    {"id": "synthesis", "label": "Текстовый синтез", "icon": ""},
+    {"id": "viz", "label": "Визуализация", "icon": ""},
 ]
 
 AGENT_START_STAGE: dict[str, str] = {

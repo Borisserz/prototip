@@ -96,18 +96,18 @@ SUGGESTION_PROMPTS: list[str] = [
     "Топ-3 региона по подоходному налогу",
 ]
 
-# Карточки empty state: (иконка, заголовок, описание, запрос агентам)
-PROMPT_CARDS: list[tuple[str, str, str, str]] = [
-    ("🗺️", "Топ регионов по долгу", "Рейтинг задолженности по областям", "Какая задолженность по регионам?"),
-    ("📈", "Динамика в Минске", "Начисления по месяцам за 2024 год", "Динамика начислений в г. Минск за год"),
-    ("📊", "Структура налогов", "Доли видов налогов в разрезе", "Структура налогов по видам (доли)"),
-    ("📋", "Дашборд по долгу", "KPI и графики в одном обзоре", "Покажи дашборд по задолженности по регионам"),
-    ("🏆", "Топ-3 по подоходному", "Лидеры по подоходному налогу", "Топ-3 региона по подоходному налогу"),
-    ("🔍", "Сводка по Минску", "Ключевые метрики г. Минска", "Ключевые метрики и дашборд по начислениям в г. Минск"),
+# Карточки empty state: (заголовок, описание, запрос агентам)
+PROMPT_CARDS: list[tuple[str, str, str]] = [
+    ("Топ регионов по долгу", "Рейтинг задолженности по областям", "Какая задолженность по регионам?"),
+    ("Динамика в Минске", "Начисления по месяцам за 2024 год", "Динамика начислений в г. Минск за год"),
+    ("Структура налогов", "Доли видов налогов в разрезе", "Структура налогов по видам (доли)"),
+    ("Дашборд по долгу", "KPI и графики в одном обзоре", "Покажи дашборд по задолженности по регионам"),
+    ("Топ-3 по подоходному", "Лидеры по подоходному налогу", "Топ-3 региона по подоходному налогу"),
+    ("Сводка по Минску", "Ключевые метрики г. Минска", "Ключевые метрики и дашборд по начислениям в г. Минск"),
 ]
 
 # Обратная совместимость для тестов/импортов
-PROMPT_CHIPS: list[tuple[str, str]] = [(f"{i} {t}", q) for i, t, _, q in PROMPT_CARDS[:3]]
+PROMPT_CHIPS: list[tuple[str, str]] = [(t, q) for t, _, q in PROMPT_CARDS[:3]]
 
 @st.cache_resource(show_spinner=False)
 def get_orchestrator() -> Orchestrator:
@@ -546,7 +546,7 @@ def _render_dashboard_chart_editor(
             "highlight_category": spec.highlight_category or "",
         }
 
-    with st.expander("✏️ Настроить график", expanded=False):
+    with st.expander("Настроить график", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
             type_labels = [DASHBOARD_CHART_TYPE_LABELS.get(t, t) for t in DASHBOARD_CHART_TYPES]
@@ -683,7 +683,7 @@ def _render_presentation_download_button(
     pptx_path: str | None,
     *,
     key: str,
-    label: str = "📥 Скачать презентацию (.pptx)",
+    label: str = "Скачать презентацию (.pptx)",
 ) -> None:
     """Финальный CTA — скачивание .pptx под каруселью."""
     resolved = _resolve_artifact_path(pptx_path)
@@ -763,7 +763,7 @@ def _render_chart_error(message: str) -> None:
     st.markdown(
         f"""
         <div class="chart-error-block">
-            <div class="chart-error-icon">🛑</div>
+            <div class="chart-error-icon">!</div>
             <div>
                 <div class="chart-error-title">Недостаточно данных для графика</div>
                 <div class="chart-error-desc">{safe}</div>
@@ -831,7 +831,7 @@ def _render_drilldown_chrome(
         segment = str(ctx.get("segment_label", "сегмент"))
         st.markdown(f"Выбранный сегмент: **{segment}**")
         if st.button(
-            f"🔎 Детальный анализ: {segment}",
+            f"Детальный анализ: {segment}",
             type="primary",
             key=f"drill_go_{chart_key}",
             use_container_width=True,
@@ -893,7 +893,7 @@ def _render_chart_block(
             if data_explanation:
                 st.markdown(
                     f'<p style="color:#888;font-size:0.85rem;margin-top:0.25rem;">'
-                    f"ℹ️ {html.escape(data_explanation)}</p>",
+                    f"Примечание: {html.escape(data_explanation)}</p>",
                     unsafe_allow_html=True,
                 )
             return True, None
@@ -907,7 +907,7 @@ def _render_chart_block(
 
     if last_error or (chart_spec and not data):
         st.info(
-            "📊 Графическая визуализация недоступна для данного среза данных. "
+            "Графическая визуализация недоступна для данного среза данных. "
             "Ознакомьтесь с текстовыми выводами ниже."
         )
     return False, last_error
@@ -991,18 +991,18 @@ def _render_pin_button(res: AskResult, *, action_key: str) -> None:
     st.markdown('<div class="pin-row">', unsafe_allow_html=True)
     if _is_pinned(res):
         st.button(
-            "✅ Добавлено на Мой Дашборд",
+            "Добавлено на Мой Дашборд",
             disabled=True,
             use_container_width=True,
             key=f"pin_done_{action_key}",
         )
     elif st.button(
-        "📌 Добавить на Мой Дашборд",
+        "Добавить на Мой Дашборд",
         use_container_width=True,
         key=f"pin_add_{action_key}",
     ):
         _pin_result(res)
-        st.toast("График добавлен на ⭐️ Мой собранный дашборд", icon="📌")
+        st.toast("График добавлен на Мой собранный дашборд")
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1044,10 +1044,10 @@ def _render_pinned_item_card(res: AskResult, *, item_idx: int) -> None:
         st.caption(chart_spec.insights[0])
 
     if data:
-        with st.expander("📋 Данные", expanded=False):
+        with st.expander("Данные", expanded=False):
             _render_styled_data_table(data, table_key=f"pinned_{item_idx}")
 
-    if st.button("📤 Убрать с дашборда", key=f"unpin_{item_idx}", use_container_width=True):
+    if st.button("Убрать с дашборда", key=f"unpin_{item_idx}", use_container_width=True):
         fp = _pin_fingerprint(res)
         st.session_state["pinned_items"] = [
             item
@@ -1065,19 +1065,19 @@ def _render_pinned_dashboard() -> None:
 
     hdr_left, hdr_right = st.columns([3, 1])
     with hdr_left:
-        st.markdown("### ⭐️ Мой собранный дашборд")
+        st.markdown("### Мой собранный дашборд")
         st.caption("Графики и выводы, которые вы закрепили из чата — всегда под рукой.")
     with hdr_right:
-        if items and st.button("🗑️ Очистить дашборд", use_container_width=True, key="clear_pinned"):
+        if items and st.button("Очистить дашборд", use_container_width=True, key="clear_pinned"):
             st.session_state["pinned_items"] = []
-            st.toast("Дашборд очищен", icon="🗑️")
+            st.toast("Дашборд очищен")
             st.rerun()
 
     if not items:
         st.markdown(
             """
             <div class="analytics-card-wrap" style="text-align:center; padding:2rem 1rem;">
-                <div style="font-size:2rem; margin-bottom:0.5rem;">📌</div>
+                <div style="font-size:1.1rem; margin-bottom:0.5rem; color:#666;">Нет закреплённых графиков</div>
                 <div style="font-weight:700; color:#0F172A; margin-bottom:0.35rem;">Дашборд пока пуст</div>
                 <div style="color:#64748B; font-size:0.92rem;">
                     Задайте вопрос в чате и нажмите «Добавить на Мой Дашборд» под понравившимся графиком.
@@ -1137,7 +1137,7 @@ def _render_export_actions(
         if png_artifact is not None:
             with open(png_artifact, "rb") as f:
                 st.download_button(
-                    "📥 Скачать график (PNG)",
+                    "Скачать график (PNG)",
                     data=f.read(),
                     file_name=f"{slug}.png",
                     mime="image/png",
@@ -1146,7 +1146,7 @@ def _render_export_actions(
                 )
         else:
             st.button(
-                "📥 Скачать график (PNG)",
+                "Скачать график (PNG)",
                 disabled=True,
                 use_container_width=True,
                 key=f"dl_png_disabled_{action_key}",
@@ -1155,7 +1155,7 @@ def _render_export_actions(
         if data:
             csv_bytes = pd.DataFrame(data).to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                "📄 Скачать данные (CSV)",
+                "Скачать данные (CSV)",
                 data=csv_bytes,
                 file_name=f"{slug}_data.csv",
                 mime="text/csv",
@@ -1164,7 +1164,7 @@ def _render_export_actions(
             )
         else:
             st.button(
-                "📄 Скачать данные (CSV)",
+                "Скачать данные (CSV)",
                 disabled=True,
                 use_container_width=True,
                 key=f"dl_csv_disabled_{action_key}",
@@ -1185,12 +1185,12 @@ def _render_follow_up_suggestions(
     if not questions:
         return
 
-    st.markdown("##### ✨ Продолжить исследование")
+    st.markdown("##### Продолжить исследование")
     cols = st.columns(len(questions))
     for idx, question in enumerate(questions):
         with cols[idx]:
             label = question if len(question) <= 72 else f"{question[:69]}..."
-            if st.button(f"✨ {label}", key=f"{key_prefix}_{idx}", use_container_width=True):
+            if st.button(label, key=f"{key_prefix}_{idx}", use_container_width=True):
                 st.session_state["pending_prompt"] = question
                 st.rerun()
 
@@ -1227,9 +1227,9 @@ def _render_analysis_block(
 
     with left:
         if insights:
-            st.markdown("##### 💡 Ключевые наблюдения")
+            st.markdown("##### Ключевые наблюдения")
             items_html = "".join(
-                f'<div class="insight-item"><span class="insight-icon">💡</span>'
+                f'<div class="insight-item"><span class="insight-icon">—</span>'
                 f'<span class="insight-text">{html.escape(ins)}</span></div>'
                 for ins in insights
             )
@@ -1237,14 +1237,14 @@ def _render_analysis_block(
 
     with right:
         if metrics:
-            st.markdown("##### 📌 Цифры")
+            st.markdown("##### Цифры")
             for label, value in metrics:
                 st.metric(label=label, value=value)
         if anomaly:
             st.markdown(
                 f"""
                 <div class="anomaly-block">
-                    <div class="anomaly-label">⚠️ Тренд / аномалия</div>
+                    <div class="anomaly-label">Тренд / аномалия</div>
                     <div class="anomaly-text">{html.escape(anomaly)}</div>
                 </div>
                 """,
@@ -1268,10 +1268,10 @@ def _render_analytics_card(
     title = _chart_display_title(chart_spec, getattr(res, "question", "Результат анализа"))
     chart_ok = False
     badge_class = "status-badge"
-    badge_text = "✅ Успешно проанализировано"
+    badge_text = "Успешно проанализировано"
     if chart_spec and not data and not _resolve_artifact_path(getattr(res, "png_path", None)):
         badge_class = "status-badge warn"
-        badge_text = "⚠️ Только текстовый анализ"
+        badge_text = "Только текстовый анализ"
 
     with st.container(border=False):
         st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
@@ -1313,7 +1313,7 @@ def _render_analytics_card(
             _render_pin_button(res, action_key=chart_key or "default")
 
         if data:
-            with st.expander("📋 Данные", expanded=False):
+            with st.expander("Данные", expanded=False):
                 _render_styled_data_table(data, table_key=chart_key or "default")
 
         if analysis or (chart_spec and getattr(chart_spec, "insights", None)):
@@ -1364,9 +1364,9 @@ def _render_empty_state() -> None:
     for row_start in range(0, len(PROMPT_CARDS), row_size):
         cols = st.columns(row_size)
         for col_idx, card in enumerate(PROMPT_CARDS[row_start : row_start + row_size]):
-            icon, heading, desc, query = card
+            heading, desc, query = card
             with cols[col_idx]:
-                label = f"{icon}  {heading}\n\n{desc}"
+                label = f"{heading}\n\n{desc}"
                 if st.button(label, key=f"card_{row_start + col_idx}", use_container_width=True):
                     st.session_state["pending_prompt"] = query
                     st.rerun()
@@ -1459,7 +1459,7 @@ def _run_query_with_live_pipeline(
 
 def _render_technical_details(res: Any) -> None:
     """SQL, reasoning и прочее — только для любопытных."""
-    with st.popover("⚙️ Технические детали"):
+    with st.popover("Технические детали"):
         if hasattr(res, "sql") and getattr(res, "sql", None):
             st.caption("SQL-запрос")
             st.code(res.sql, language="sql")
@@ -1517,7 +1517,7 @@ def render_assistant_response(
         st.markdown(
             f"""
             <div class="chart-error-block">
-                <div class="chart-error-icon">🛑</div>
+                <div class="chart-error-icon">!</div>
                 <div>
                     <div class="chart-error-title">Запрос не выполнен</div>
                     <div class="chart-error-desc">{html.escape(getattr(res, "error", None) or "Неизвестная ошибка")}</div>
@@ -1582,7 +1582,7 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
             f"""
             <div class="analytics-card-header">
                 <h3 class="analytics-title">{html.escape(res.title)}</h3>
-                <span class="status-badge">✅ Дашборд сформирован</span>
+                <span class="status-badge">Дашборд сформирован</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1679,7 +1679,7 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
             if data_rows:
                 csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button(
-                    "📄 Скачать данные дашборда (CSV)",
+                    "Скачать данные дашборда (CSV)",
                     data=csv_bytes,
                     file_name="dashboard_data.csv",
                     mime="text/csv",
@@ -1713,10 +1713,10 @@ def _run_query(
 
 def _render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("## 📊 BI-Аналитика")
+        st.markdown("## BI-Аналитика")
         st.caption("Налоговая аналитика РБ · локально · синтетические данные 2024")
 
-        with st.expander("📋 Источник данных", expanded=False):
+        with st.expander("Источник данных", expanded=False):
             df = _load_demo_df()
             if df.empty:
                 st.warning("Файл `data/sample.csv` не найден.")
@@ -1736,7 +1736,7 @@ def _render_sidebar() -> None:
                     st.session_state["pending_prompt"] = sug
 
         if st.session_state.get("dashboard_history"):
-            with st.expander("📈 История дашбордов", expanded=False):
+            with st.expander("История дашбордов", expanded=False):
                 seen: set[str] = set()
                 for item in reversed(st.session_state["dashboard_history"]):
                     q = item.get("question", "")
@@ -1746,7 +1746,7 @@ def _render_sidebar() -> None:
                     if st.button(q[:60], key=f"dh_{hash(q)}", use_container_width=True):
                         st.session_state["pending_prompt"] = q
 
-        with st.expander("📑 Экспорт в презентацию", expanded=False):
+        with st.expander("Экспорт в презентацию", expanded=False):
             pres_mode = st.radio(
                 "Формат",
                 ["По вопросам", "Одной темой"],
@@ -1827,7 +1827,7 @@ def _render_sidebar() -> None:
             if st.session_state.get("last_presentation"):
                 pres = st.session_state["last_presentation"]
                 n = getattr(pres, "num_slides", 0) or 0
-                st.caption(f"Последняя презентация: **{n}** слайдов — превью и скачивание в чате ↑")
+                st.caption(f"Последняя презентация: **{n}** слайдов — превью и скачивание в чате выше")
 
         st.divider()
         if st.button("Очистить чат", use_container_width=True):
@@ -1841,7 +1841,6 @@ def _render_sidebar() -> None:
 def main() -> None:
     st.set_page_config(
         page_title="BI-Аналитика",
-        page_icon="📊",
         layout="centered",
         initial_sidebar_state="expanded",
     )
@@ -1863,7 +1862,7 @@ def main() -> None:
 
     _render_sidebar()
 
-    tab_chat, tab_pinned = st.tabs(["💬 Чат", "⭐️ Мой собранный дашборд"])
+    tab_chat, tab_pinned = st.tabs(["Чат", "Мой собранный дашборд"])
 
     with tab_chat:
         if not st.session_state["main_messages"]:
@@ -1942,12 +1941,12 @@ def main() -> None:
                     )
                     if has_stage_error and not final_snap.get("fatal_error"):
                         status.update(
-                            label="⚠️ Готово с предупреждениями",
+                            label="Готово с предупреждениями",
                             state="complete",
                             expanded=True,
                         )
                     else:
-                        status.update(label="✅ Готово!", state="complete", expanded=False)
+                        status.update(label="Готово", state="complete", expanded=False)
                     assistant_msg = {"role": "assistant", "result": result}
                     if isinstance(result, DashboardResult):
                         hist = st.session_state["dashboard_history"]

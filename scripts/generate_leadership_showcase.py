@@ -49,11 +49,11 @@ def main() -> None:
         csv_path=Path(args.csv),
         chart_scale=args.scale,
     )
-    print(f"✓ Showcase: {Path(args.output).resolve()}")
+    print(f"Showcase: {Path(args.output).resolve()}")
     print(f"  Графиков: {len(manifest['charts'])}")
     print(f"  Презентаций: {len(manifest['presentations'])}")
     for p in manifest["presentations"]:
-        print(f"    • {p['filename']} — {p['num_slides']} слайдов")
+        print(f"    - {p['filename']} — {p['num_slides']} слайдов")
     print(f"  Манифест: {manifest['manifest']}")
 
 

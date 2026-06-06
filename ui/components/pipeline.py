@@ -26,7 +26,7 @@ def pipeline_stage_label(stage_id: str, stage_state: dict[str, Any]) -> str:
 
 def pipeline_stage_icon(stage_id: str) -> str:
     meta = next((s for s in PIPELINE_STAGES if s["id"] == stage_id), None)
-    return meta["icon"] if meta else "▪️"
+    return meta["icon"] if meta else ""
 
 
 def pipeline_effective_status(stage_id: str, stage_state: dict[str, Any], *, finished: bool) -> str:
@@ -47,7 +47,7 @@ def pipeline_status_headline(snapshot: dict[str, Any]) -> str:
         stg = snapshot.get("stages", {}).get(sid, {})
         icon = pipeline_stage_icon(sid)
         label = pipeline_stage_label(sid, stg)
-        return f"{icon} {label}…"
+        return f"{label}…" if not icon else f"{icon} {label}…"
     if snapshot.get("finished"):
         stages = snapshot.get("stages", {})
         if any(s.get("status") == "error" for s in stages.values()):
@@ -73,17 +73,17 @@ def pipeline_step_markdown(snapshot: dict[str, Any]) -> str:
 
         if eff == "done":
             done_text = _PIPELINE_STEP_DONE_RU.get(sid, f"{label} выполнен")
-            lines.append(f"✅ {done_text}")
+            lines.append(f"[Готово] {done_text}")
         elif eff == "running":
             detail = log_text or label
-            lines.append(f"● {detail}…")
+            lines.append(f"[Выполняется] {detail}…")
         elif eff == "error":
             err = stg.get("error") or log_text or "ошибка"
-            lines.append(f"❌ {label}: {err}")
+            lines.append(f"[Ошибка] {label}: {err}")
         elif eff == "skipped":
-            lines.append(f"— {label}: не требуется")
+            lines.append(f"[Пропущено] {label}: не требуется")
         else:
-            lines.append(f"○ {label}")
+            lines.append(f"[Ожидание] {label}")
 
     return "\n\n".join(lines)
 

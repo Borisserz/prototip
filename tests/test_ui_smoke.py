@@ -34,7 +34,7 @@ def test_ui_streamlit_app_imports_without_error():
 
     assert hasattr(ui.streamlit_app, "_render_dashboard")
     assert hasattr(ui.streamlit_app, "_render_presentation_carousel")
-    assert "⭐️ Мой собранный дашборд" in src
+    assert "Мой собранный дашборд" in src
     assert "main_messages" in src
     assert "orch.ask" in src or "ask(prompt" in src
     assert "get_orchestrator().presentation" in src
