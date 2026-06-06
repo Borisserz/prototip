@@ -24,6 +24,7 @@ import time
 from pydantic import BaseModel
 
 from app.agents.base_agent import BaseAgent
+from app.agents.factory import get_executor
 from app.agents.models import (
     DashboardLayout,
     DashboardRequest,
@@ -37,25 +38,6 @@ from viz.style import format_number_ru
 # Ensure central logging (idempotent)
 setup_logging()
 logger = logging.getLogger("DashboardAgent")
-
-
-# Ленивые импорты под-агентов (избегаем циклов, как в PresentationAgent)
-def _get_data_agent():
-    from app.agents.data_agent import DataAgent
-
-    return DataAgent()
-
-
-def _get_analyst_agent():
-    from app.agents.analyst_agent import AnalystAgent
-
-    return AnalystAgent()
-
-
-def _get_chart_agent():
-    from app.agents.chart_agent import ChartAgent
-
-    return ChartAgent()
 
 
 FEW_SHOT_DASHBOARD = """
@@ -152,8 +134,9 @@ class DashboardAgent(BaseAgent):
         data_source = "provided"
         if not data:
             try:
-                data_agent = _get_data_agent()
-                sql_res = data_agent.run(q)
+                sql_res = get_executor(include_planner=False).run("data_agent", q)
+                if not sql_res.success:
+                    raise RuntimeError(sql_res.error or "DataAgent failed")
                 data = sql_res.data
                 source_sql = getattr(sql_res, "sql", None)
                 data_source = "data_agent"
@@ -186,8 +169,9 @@ class DashboardAgent(BaseAgent):
         # 2. Insights от AnalystAgent (опционально, для качества)
         insights: list[str] = []
         try:
-            analyst = _get_analyst_agent()
-            analysis = analyst.run(q, data)
+            analysis = get_executor(include_planner=False).run("analyst_agent", q, data=data)
+            if not analysis.success:
+                raise RuntimeError(analysis.error or "AnalystAgent failed")
             insights = analysis.insights or []
             logger.info(f"[DashboardAgent] analyst: got {len(insights)} insights")
         except Exception as e:
@@ -255,11 +239,13 @@ class DashboardAgent(BaseAgent):
 
         charts: list[ChartSpec] = []
         try:
-            ca = _get_chart_agent()
+            executor = get_executor(include_planner=False)
             for idea in (chart_ideas or [])[:max_c]:
                 try:
                     idea_str = idea if isinstance(idea, str) else getattr(idea, "title", str(idea))
-                    cr = ca.run(idea_str, data)
+                    cr = executor.run("chart_agent", idea_str, data=data)
+                    if not cr.success:
+                        raise RuntimeError(cr.error or "ChartAgent failed")
                     charts.append(cr.spec)
                 except Exception as e:
                     logger.info(f"[DashboardAgent] sub_chart_error for '{idea}': {e}")

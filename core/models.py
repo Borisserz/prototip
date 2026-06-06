@@ -15,9 +15,6 @@ ChartType = Literal[
     "grouped_bar",
     "stacked_bar",
     "line",
-    "area",
-    "scatter",
-    "waterfall",
     "horizontal_bar",
     "donut",
     "kpi",
@@ -28,10 +25,9 @@ ChartType = Literal[
 class ChartSpec(BaseModel):
     """Спецификация графика (детерминированный рендер в viz/charts.py).
 
-    Заполняется ChartAgent (structured output, temperature=0) или вручную.
-    Поддерживаемые типы (Phase 2+): bar/grouped/stacked/line/area/scatter/waterfall/horizontal_bar/donut/kpi/heatmap.
-    Поля точно по контракту: тип, заголовок (RU), оси (из колонок df), color/группа, агг, источник (RU),
-    insights (тезисы RU), rationale (почему этот тип). Spec-first: LLM не генерит код, рендер детерминированный в viz/.
+    Заполняется вручную в Phase1 тестах; позже ChartAgent (structured output, temperature=0).
+    Поля точно по PROJECT_SPEC: тип, заголовок, оси, цвет/группа, агрегация, источник,
+    список выводов, причина выбора типа. Минимальный набор (без лишних полей).
     """
 
     chart_type: ChartType = Field(..., description="Тип графика")

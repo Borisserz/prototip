@@ -12,8 +12,52 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.agents.presentation_agent import PresentationAgent
-from app.schemas import DeckNarrative, PresentationResult
+from app.schemas import AnalysisResult, AskResult, DeckNarrative, PresentationResult
 from core.llm import is_ollama_available
+from core.models import ChartSpec
+
+
+def _fake_ask_result(
+    *,
+    question: str = "тестовый вопрос",
+    png_path: str = "/tmp/fake.png",
+    chart_type: str = "bar",
+    title: str = "Тест",
+    data: list[dict] | None = None,
+) -> AskResult:
+    return AskResult(
+        question=question,
+        sql="SELECT 1",
+        data=data or [{"x": 1}],
+        analysis=AnalysisResult(
+            insights=["i1", "i2", "i3"],
+            key_conclusion="key",
+            anomaly_or_trend=None,
+            reasoning="mock analysis",
+        ),
+        chart_spec=ChartSpec(
+            chart_type=chart_type,  # type: ignore[arg-type]
+            title=title,
+            x="x",
+            y="x",
+            rationale="mock chart",
+        ),
+        png_path=png_path,
+        reasoning="mock ask",
+    )
+
+
+def _mock_planner_executor(*ask_results):
+    pending = list(ask_results)
+    mock_ex = MagicMock()
+
+    def run_side_effect(agent_name: str, *args, **kwargs):
+        if agent_name == "planner_agent":
+            return pending.pop(0) if pending else MagicMock(success=False, error="no mock result")
+        return MagicMock(success=False, error=f"unexpected agent {agent_name}")
+
+    mock_ex.run.side_effect = run_side_effect
+    return mock_ex
 
 
 def test_presentation_agent_mock():
@@ -26,20 +70,16 @@ def test_presentation_agent_mock():
         pass
 
     with (
-        patch("app.orchestrator.Orchestrator") as mock_orch,
+        patch(
+            "app.agents.presentation_agent.get_executor",
+            return_value=_mock_planner_executor(
+                _fake_ask_result(title="Тест бар 1"),
+                _fake_ask_result(title="Тест бар 2"),
+                _fake_ask_result(title="Тест бар 3"),
+            ),
+        ),
         patch("app.agents.presentation_agent.call_structured") as mock_narr,
     ):
-        mock_instance = MagicMock()
-        fake_ask = MagicMock()
-        fake_ask.png_path = "/tmp/fake.png"
-        fake_ask.data = [{"x": 1}]
-        fake_ask.chart_spec = MagicMock(chart_type="bar", title="Тест бар")
-        fake_ask.analysis = MagicMock(
-            insights=["i1", "i2", "i3"], key_conclusion="key", anomaly_or_trend=None
-        )
-        mock_instance.ask.return_value = fake_ask
-        mock_orch.return_value = mock_instance
-
         mock_narr.return_value = DeckNarrative(
             overview="test overview",
             themes=["t1", "t2"],
@@ -135,25 +175,26 @@ def test_presentation_respects_prefs_and_exact_count_nonlive():
     ]
 
     with (
-        patch("app.orchestrator.Orchestrator") as mock_orch,
+        patch(
+            "app.agents.presentation_agent.get_executor",
+            return_value=_mock_planner_executor(
+                _fake_ask_result(
+                    png_path="/tmp/f.png",
+                    chart_type="bar",
+                    title="Топ",
+                    data=[{"region": "a", "debt": 1}],
+                ),
+                _fake_ask_result(
+                    png_path="/tmp/f2.png",
+                    chart_type="bar",
+                    title="Struct",
+                    data=[{"tax_type": "x", "accrued": 2}],
+                ),
+            ),
+        ),
         patch("app.agents.presentation_agent.call_structured") as mock_narr,
         patch("app.agents.presentation_agent.build_chart") as mock_build,
     ):
-        mock_instance = MagicMock()
-        # разные спек для разных q (LLM мог бы дать bar для топа)
-        fake_ask1 = MagicMock()
-        fake_ask1.png_path = "/tmp/f.png"
-        fake_ask1.data = [{"region": "a", "debt": 1}]
-        fake_ask1.chart_spec = MagicMock(chart_type="bar", title="Топ")
-        fake_ask1.analysis = MagicMock(insights=["i"], key_conclusion="k", anomaly_or_trend=None)
-        fake_ask2 = MagicMock()
-        fake_ask2.png_path = "/tmp/f2.png"
-        fake_ask2.data = [{"tax_type": "x", "accrued": 2}]
-        fake_ask2.chart_spec = MagicMock(chart_type="bar", title="Struct")
-        fake_ask2.analysis = MagicMock(insights=["i2"], key_conclusion="k2", anomaly_or_trend=None)
-        mock_instance.ask.side_effect = [fake_ask1, fake_ask2]
-        mock_orch.return_value = mock_instance
-
         mock_narr.return_value = DeckNarrative(
             overview="ov",
             themes=["t1", "t2"],

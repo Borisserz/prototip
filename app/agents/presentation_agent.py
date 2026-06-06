@@ -1,8 +1,8 @@
 """PresentationAgent (Phase 6): авто-сборка .pptx презентации.
 
 Вход: список вопросов list[str].
-Внутри для каждого вызывает Orchestrator.ask(), собирает результаты,
-встраивает PNG из out/, инсайты, ключевые выводы.
+Внутри для каждого вызывает PlannerAgent через AgentExecutor,
+собирает результаты, встраивает PNG из out/, инсайты, ключевые выводы.
 Сохраняет в out/presentation.pptx
 
 Стиль: тёмно-синий, Arial, простой и аккуратный.
@@ -23,6 +23,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 from app.agents.base_agent import BaseAgent
+from app.agents.factory import get_executor
 from app.agents.models import AskResult, DeckNarrative, PresentationInput, PresentationResult
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
@@ -49,10 +50,10 @@ CHART_TYPE_RU: dict[str, str] = {
 
 
 class PresentationAgent(BaseAgent):
-    """Агент сборки презентаций .pptx из результатов Orchestrator."""
+    """Агент сборки презентаций .pptx из результатов PlannerAgent/AgentExecutor."""
 
     name = "presentation_agent"
-    description = "По списку вопросов собирает .pptx: для каждого вызывает Orchestrator.ask(), рендерит PNG через viz, добавляет нарратив (DeckNarrative via LLM), титульные/темы/выводы/рекомендации. Уважает prefs по chart_type."
+    description = "По списку вопросов собирает .pptx: для каждого вызывает planner_agent через AgentExecutor, рендерит PNG через viz, добавляет нарратив (DeckNarrative via LLM), титульные/темы/выводы/рекомендации. Уважает prefs по chart_type."
 
     def _slug(self, text: str, max_len: int = 40) -> str:
         import re
@@ -99,7 +100,7 @@ class PresentationAgent(BaseAgent):
         Поддерживает list[str], list[dict с text/chart_type/note] (из UI payload) или PresentationInput.
         num_slides + include_* позволяют строить exact кол-во слайдов (с appendix если нужно).
         Для pref: если дан chart_type в блоке — оверрайдим spec.chart_type перед ребилдом (уважаем выбор пользователя).
-        Для каждого вопроса вызывает Orchestrator.ask(),
+        Для каждого вопроса вызывает planner_agent через AgentExecutor,
         использует данные + chart_spec для стилизованного PNG (без заголовка графика, pres_slide_ png).
         После всех — один structured вызов для DeckNarrative.
         """
@@ -147,10 +148,7 @@ class PresentationAgent(BaseAgent):
                     notes[uidx] = qb.get("note")
                     uidx += 1
 
-        # lazy import to avoid potential cycle
-        from app.orchestrator import Orchestrator
-
-        orch = Orchestrator()
+        executor = get_executor(include_planner=True)
 
         out_dir = Path("out")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -165,7 +163,18 @@ class PresentationAgent(BaseAgent):
         # (используем все qs; срез/appendix решим по num_slides после)
         results: list[AskResult] = []
         for q in qs:
-            res = orch.ask(q)
+            raw = executor.run("planner_agent", q)
+            if isinstance(raw, AskResult):
+                res = raw
+            else:
+                res = AskResult(
+                    question=q,
+                    sql=getattr(raw, "source_sql", "") or "",
+                    data=getattr(raw, "data", []) or [],
+                    reasoning=getattr(raw, "reasoning", "PresentationAgent received non-AskResult"),
+                    error=getattr(raw, "error", None),
+                    success=getattr(raw, "success", True),
+                )
             results.append(res)
         logger.info(f"[PresentationAgent] collected {len(results)} results")
 

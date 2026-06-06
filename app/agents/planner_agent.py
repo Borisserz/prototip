@@ -1,42 +1,38 @@
-"""PlannerAgent v2.5+ — иерархический планировщик (Главный агент).
+"""PlannerAgent (первая версия, Вариант A).
 
-Генерирует минимальный Plan (1-3 Task) через structured LLM с сильным промптом,
-примерами (в т.ч. для размытых "сводка"), жёсткими правилами минимизации и bias к
-высокоуровневым агентам (dashboard/presentation для обзоров).
+Простой intent-based роутер.
+Принимает вопрос → определяет intent → вызывает ровно один основной агент
+через AgentExecutor → возвращает его результат.
 
-Поддерживает:
-- generate_plan(question) → Plan (с _repair_plan для deps/"question", _validate, _assess_quality + self-correction)
-- execute_plan(plan) → AgentResult (topo sort, context injection только data/source_sql по depends_on,
-  _invoke_agent с правильными сигнатурами для всех 5 агентов, graceful per-task continue-on-error,
-  attach _executed_plan, _plan_execution (статусы+briefs), _agent_calls)
-- run() (с cache)
-- Интерактив в UI: preview плана, редактирование (agent+desc), execute с st.status,
-  чистый текстовый рендер результатов (без inline графиков, kitchen скрыт), "Что было сделано",
-  "Скачать trace выполнения (JSON)" (полный payload с specs/data/execution), кнопки итерации
-  (Повторить похожий / Изменить план и выполнить заново), richer history.
-
-Внутренняя работа (sub-calls высокоуровневых агентов, LLM reasoning) скрыта от пользователя.
-Trace показывает только top-level задачи плана. Данные между задачами — только через Pydantic.
+Всё происходит скрыто: пользователь не видит план, вызванные агенты
+и внутренний reasoning.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from app.agents.base_agent import BaseAgent
-from app.agents.executor import AgentExecutor, AgentRegistry
+from app.agents.data_agent import ALLOWED_COLUMNS
+from app.agents.factory import get_executor
 from app.agents.models import (
     AgentCall,
     AgentResult,
+    AskResult,
     DashboardRequest,
     Plan,
     Task,
 )
 from core.llm import call_structured, setup_logging
+from viz.charts import build_chart, export_png
 
 setup_logging()
 logger = logging.getLogger("PlannerAgent")
@@ -45,12 +41,17 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 
 Пользователь задал вопрос: {question}
 
+**Структура датасета (Schema Awareness) — доступные колонки:**
+{allowed_columns}
+
+**Правило Schema Awareness:** при постановке задачи для **data_agent** обязательно используй названия колонок из доступного списка в параметре "question", чтобы SQL сгенерировался максимально точно (например: region, tax_type, accrued, debt, period, penalties).
+
 Твоя задача — создать **минимально необходимый** план из **1, 2 или максимум 3 задач**, используя только эти агенты:
 
 Доступные агенты и их сильные стороны (используй это при выборе):
 - **data_agent**: только получение сырых данных (SQL + записи). params: {{"question": "<вопрос для генерации SQL>"}}. Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
 - **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные (они придут автоматически по depends_on от data_agent). params: {{"question": "<конкретный под-вопрос для этого одного графика>"}}. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
-- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. params: {{"question": "<вопрос>"}}. Используй, когда нужен именно текстовый анализ без визуализации.
+- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные; если перед ним был chart_agent — получит ChartSpec и свяжет выводы с визуализацией. params: {{"question": "<вопрос>"}}.
 - **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу". params: {{"question": "<оригинальный вопрос>"}} (опционально data, max_charts).
 - **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад". params: {{"question": "<тема>"}} или {{"questions": ["q1", "q2", ...]}}.
 
@@ -62,7 +63,13 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 2. Используй цепочку data_agent → chart_agent только когда пользователь явно хочет **один конкретный график** (динамика одной серии, топ-N, один donut и т.д.).
 3. Никогда не делай 3 задачи, если можно обойтись 1 или 2.
 4. dashboard_agent и presentation_agent уже содержат внутри умную логику (они сами вызывают data/chart/analyst при необходимости). Не дублируй их работу.
-5. depends_on указывай **обязательно**, когда следующая задача реально использует результат предыдущей. Особенно: если после data_agent идёт analyst_agent или chart_agent и в описании задачи есть слова "на основе полученных данных", "по данным", "сводка по данным" и т.п. — deps_on **должен** содержать id data_agent. Для dashboard_agent и presentation_agent зависимости почти никогда не нужны.
+5. depends_on указывай **обязательно**, когда следующая задача реально использует результат предыдущей. Особенно: если после data_agent идёт analyst_agent или chart_agent — depends_on должен содержать id data_agent.
+6. **Diamond-паттерн (график + выводы):** если пользователю нужны И график, И текстовые выводы — строй цепочку data_agent → chart_agent → analyst_agent:
+   - chart_agent.depends_on = [id data_agent]
+   - analyst_agent.depends_on = [id data_agent, id chart_agent] — Аналитик синтезирует данные и визуализацию в связный нарратив.
+7. Если нужен только график без выводов — достаточно data_agent → chart_agent (2 задачи).
+8. Если нужен только текстовый анализ без графика — data_agent → analyst_agent (analyst зависит только от data).
+9. Не добавляй лишние зависимости, но для связки «график + выводы» analyst_agent **обязан** зависеть от chart_agent.
 
 **Примеры хороших планов (минимальных и правильных):**
 
@@ -73,6 +80,11 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 Вопрос: "Построй график динамики начислений в г. Минск за год"
 → План: 2 задачи → data_agent → chart_agent
   (нужен именно один график линии)
+
+Вопрос: "Покажи данные, график и выводы по задолженности регионов"
+→ План: 3 задачи → data_agent → chart_agent → analyst_agent (Diamond)
+  chart_agent.depends_on=[data_task_id], analyst_agent.depends_on=[data_task_id, chart_task_id].
+  data_agent params.question: "Топ регионов по задолженности (колонки region, debt)".
 
 Вопрос: "Сделай презентацию по денежному состоянию граждан"
 → План: 1 задача → presentation_agent
@@ -147,23 +159,9 @@ class PlannerAgent(BaseAgent):
         "и контекста, возвращает результат. Внутренняя работа скрыта от пользователя."
     )
 
-    def __init__(self) -> None:
-        self.registry = AgentRegistry()
-        self.executor = AgentExecutor(self.registry)
-
-        # Регистрируем агенты
-        from app.agents.analyst_agent import AnalystAgent
-        from app.agents.chart_agent import ChartAgent
-        from app.agents.dashboard_agent import DashboardAgent
-        from app.agents.data_agent import DataAgent
-        from app.agents.presentation_agent import PresentationAgent
-
-        self.executor.register(DataAgent())
-        self.executor.register(AnalystAgent())
-        self.executor.register(ChartAgent())
-        self.executor.register(DashboardAgent())
-        self.executor.register(PresentationAgent())
-
+    def __init__(self, use_shared_executor: bool = True) -> None:
+        self.executor = get_executor(include_planner=False, fresh=not use_shared_executor)
+        self.registry = self.executor.registry
         self._cache: dict[str, AgentResult] = {}
 
     def _validate_plan(self, plan: Plan) -> list[str]:
@@ -263,13 +261,21 @@ class PlannerAgent(BaseAgent):
 
         Возвращает уже провалидированный (и при необходимости исправленный) Plan.
         """
-        prompt = PLAN_GENERATION_PROMPT.format(question=question)
+        allowed_columns = ", ".join(sorted(ALLOWED_COLUMNS))
+        prompt = PLAN_GENERATION_PROMPT.format(question=question, allowed_columns=allowed_columns)
+        planner_system = (
+            "Ты — точный планировщик с полным знанием схемы данных. "
+            f"Доступные колонки датасета: {allowed_columns}. "
+            "При задачах для data_agent в params['question'] используй реальные названия колонок. "
+            "Для запросов «график + выводы» строй Diamond: data → chart → analyst. "
+            "Минимизируй число задач. Отвечай только валидным JSON по схеме."
+        )
 
         try:
             plan_spec: _PlanSpec = call_structured(
                 prompt,
                 schema=_PlanSpec,
-                system="Ты — точный и консервативный планировщик. Всегда минимизируй количество задач. Отвечай только валидным JSON по схеме.",
+                system=planner_system,
             )
 
             tasks = []
@@ -303,6 +309,8 @@ class PlannerAgent(BaseAgent):
                 # Улучшенный self-correction промпт
                 correction_prompt = f"""Оригинальный вопрос пользователя: {question}
 
+Доступные колонки датасета: {allowed_columns}
+
 Сгенерированный план:
 {plan.model_dump_json(indent=2)}
 
@@ -313,8 +321,9 @@ class PlannerAgent(BaseAgent):
 - Минимум задач — если можно одним высокоуровневым агентом (dashboard_agent или presentation_agent), делай ровно 1 задачу.
 - Для широких вопросов ("сводка", "обзор", "дай данные по...", "привет...") — всегда предпочитай dashboard_agent или presentation_agent.
 - Не дублировать работу высокоуровневых агентов (dashboard и presentation уже сами вызывают data/chart/analyst внутри).
-- **Обязательно используй правильные зависимости**: если после data_agent идёт analyst_agent или chart_agent и задача говорит "на основе полученных данных", "сводка по данным" и т.п. — вторая задача **должна** иметь depends_on на id data_agent.
-- Если в текущем плане зависимости отсутствуют — добавь их.
+- **Schema Awareness**: в params["question"] для data_agent используй реальные колонки ({allowed_columns}).
+- **Diamond-паттерн**: если нужны график И выводы — data → chart → analyst; analyst_agent.depends_on должен включать И data_agent, И chart_agent.
+- Если после data_agent идёт chart_agent или analyst_agent — depends_on на id data_agent обязателен.
 
 Создай **исправленную и максимально минимальную** версию этого плана. Верни только _PlanSpec.
 """
@@ -385,7 +394,8 @@ class PlannerAgent(BaseAgent):
         и как превращать Task.params + инжектированный контекст в корректный вызов.
 
         - data_agent: run(question: str)
-        - chart_agent / analyst_agent: run(question: str, data: list[dict])  (через **call_kwargs)
+        - chart_agent: run(question: str, data: list[dict])
+        - analyst_agent: run(question: str, data: list[dict], chart_spec: dict | None)
         - dashboard_agent: run(request: DashboardRequest)
         - presentation_agent: run(questions: list[str] | PresentationInput | ...)
 
@@ -405,18 +415,32 @@ class PlannerAgent(BaseAgent):
             logger.info(f"[PlannerAgent] _invoke data_agent q={arg[:60]!r}")
             return self.executor.run(agent_name, arg)
 
-        if agent_name in ("chart_agent", "analyst_agent"):
+        if agent_name == "chart_agent":
             data = p.get("data") or []
             if not data:
-                # Это часто признак того, что depends_on не был (или не был почи нен) в плане.
-                # Мы всё равно вызываем — агент сам сделает graceful fallback,
-                # но в лог и в trace это будет видно.
                 logger.warning(
-                    f"[PlannerAgent] _invoke {agent_name}: data is EMPTY but task likely needed prior data_agent result. "
+                    f"[PlannerAgent] _invoke chart_agent: data is EMPTY. "
                     f"Check depends_on / _repair_plan. q={q[:60]!r}"
                 )
-            logger.info(f"[PlannerAgent] _invoke {agent_name} q={q[:50]!r} data_rows={len(data)}")
+            logger.info(f"[PlannerAgent] _invoke chart_agent q={q[:50]!r} data_rows={len(data)}")
             return self.executor.run(agent_name, q or original_question, data=data)
+
+        if agent_name == "analyst_agent":
+            data = p.get("data") or []
+            chart_spec = p.get("chart_spec")
+            if not data:
+                logger.warning(
+                    f"[PlannerAgent] _invoke analyst_agent: data is EMPTY. "
+                    f"Check depends_on / _repair_plan. q={q[:60]!r}"
+                )
+            logger.info(
+                f"[PlannerAgent] _invoke analyst_agent q={q[:50]!r} "
+                f"data_rows={len(data)} has_chart_spec={chart_spec is not None}"
+            )
+            call_kwargs: dict[str, Any] = {"data": data}
+            if chart_spec is not None:
+                call_kwargs["chart_spec"] = chart_spec
+            return self.executor.run(agent_name, q or original_question, **call_kwargs)
 
         if agent_name == "dashboard_agent":
             payload: dict[str, Any] = {}
@@ -453,118 +477,212 @@ class PlannerAgent(BaseAgent):
         return self.executor.run(agent_name, p if p else original_question)
 
     def _execute_plan(self, plan: Plan, original_question: str) -> AgentResult:
-        """Выполняет план с надёжной передачей контекста.
-
-        - Уважает зависимости (топологический порядок).
-        - При ошибке в одной задаче пытается продолжить независимые задачи.
-        - Собирает краткие саммари для красивого отображения в UI.
-        - Использует _invoke_agent для корректных форм аргументов под каждый тип run().
-        """
-        context: dict[str, Any] = {}
+        """Execute plan in dependency-aware parallel waves."""
+        context: dict[str, AgentResult] = {}
         executed_calls: list[AgentCall] = []
-        plan_execution: list[dict] = []  # для UI: статус + brief_result
+        plan_execution: list[dict] = []
+        lock = threading.Lock()
 
-        ordered = self._topological_sort(plan.tasks)
+        tasks = {t.id: t for t in plan.tasks}
+        pending = set(tasks.keys())
+        running: dict[Any, tuple[Task, dict[str, Any], float]] = {}
+        max_workers = max(1, min(4, len(tasks) or 1))
 
-        for task in ordered:
+        def build_params(task: Task) -> dict[str, Any]:
             task_params = dict(task.params or {})
+            with lock:
+                dependency_results = [context.get(dep_id) for dep_id in task.depends_on]
+            for dep_res in dependency_results:
+                if dep_res is not None:
+                    if hasattr(dep_res, "data") and getattr(dep_res, "data", None):
+                        task_params.setdefault("data", dep_res.data)
+                    if hasattr(dep_res, "sql"):
+                        task_params.setdefault("source_sql", dep_res.sql)
+                    if hasattr(dep_res, "spec") and getattr(dep_res, "spec", None) is not None:
+                        task_params.setdefault("chart_spec", dep_res.spec.model_dump())
+            return task_params
 
-            # Передаём контекст из зависимостей (даже если предыдущая задача частично упала).
-            # Инжектим ТОЛЬКО полезные примитивы (data, source_sql). Полные объекты result_from_*
-            # больше не кладём в params — они мешали нормализации и не нужны leaf-агентам.
-            for dep_id in task.depends_on:
-                if dep_id in context:
-                    dep_res = context[dep_id]
-                    if dep_res is not None:
-                        if hasattr(dep_res, "data") and getattr(dep_res, "data", None):
-                            task_params.setdefault("data", dep_res.data)
-                        if hasattr(dep_res, "sql"):
-                            task_params.setdefault("source_sql", dep_res.sql)
-                        # Больше не делаем: task_params[f"result_from_{dep_id}"] = dep_res
-
-            try:
-                start_ts = time.time()
-                res = self._invoke_agent(task.agent_name, task_params, original_question)
-                duration = int((time.time() - start_ts) * 1000)
-
-                success = getattr(res, "success", True)
-                context[task.id] = res
-
-                # Краткий результат для UI
-                brief = self._make_brief_result(res, task.agent_name)
-
-                plan_execution.append(
-                    {
-                        "num": len(plan_execution) + 1,
-                        "agent_name": task.agent_name,
-                        "description": task.description,
-                        "status": "успешно" if success else "ошибка",
-                        "brief_result": brief,
-                        "depends_on": task.depends_on or [],
-                    }
+        def submit_ready(pool: ThreadPoolExecutor) -> None:
+            with lock:
+                completed_ids = set(context.keys())
+            ready = [
+                tasks[tid]
+                for tid in list(pending)
+                if all(dep in completed_ids for dep in tasks[tid].depends_on)
+            ]
+            for task in ready:
+                params = build_params(task)
+                future = pool.submit(self._invoke_agent, task.agent_name, params, original_question)
+                running[future] = (task, params, time.time())
+                pending.remove(task.id)
+                logger.info(
+                    f"[PlannerAgent] submitted task {task.id} ({task.agent_name}) deps={task.depends_on or []}"
                 )
 
-                # Для логов/трассировки показываем, что именно передали (без огромных объектов)
-                input_summary = str(
-                    {k: v for k, v in task_params.items() if not str(k).startswith("result_from_")}
-                )[:250]
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="planner") as pool:
+            submit_ready(pool)
+            while running or pending:
+                if not running:
+                    with lock:
+                        for tid in list(pending):
+                            task = tasks[tid]
+                            err = AgentResult(
+                                success=False,
+                                error="Не удалось выполнить задачу: зависимости не были разрешены",
+                                reasoning=f"Задача {task.id} пропущена из-за unresolved dependencies",
+                            )
+                            context[task.id] = err
+                            plan_execution.append(
+                                {
+                                    "num": len(plan_execution) + 1,
+                                    "agent_name": task.agent_name,
+                                    "description": task.description,
+                                    "status": "ошибка",
+                                    "brief_result": err.error,
+                                    "depends_on": task.depends_on or [],
+                                }
+                            )
+                            executed_calls.append(
+                                AgentCall(
+                                    agent_name=task.agent_name,
+                                    input_summary=str(task.params)[:250],
+                                    success=False,
+                                    error=err.error,
+                                )
+                            )
+                            pending.remove(tid)
+                    break
 
-                executed_calls.append(
-                    AgentCall(
-                        agent_name=task.agent_name,
-                        input_summary=input_summary,
-                        success=success,
-                        duration_ms=duration,
-                        reasoning=getattr(res, "reasoning", ""),
-                        output_summary=brief,
-                    )
-                )
-                logger.info(f"[PlannerAgent] task {task.id} ({task.agent_name}) → {brief}")
+                done, _ = wait(running.keys(), return_when=FIRST_COMPLETED)
+                for future in done:
+                    task, task_params, start_ts = running.pop(future)
+                    duration = int((time.time() - start_ts) * 1000)
+                    try:
+                        res = future.result()
+                    except Exception as ex:
+                        logger.error(
+                            f"[PlannerAgent] task {task.id} ({task.agent_name}) failed: {ex}"
+                        )
+                        res = AgentResult(
+                            success=False,
+                            error=str(ex),
+                            reasoning=f"Ошибка в задаче {task.id}",
+                        )
 
-            except Exception as ex:
-                logger.error(f"[PlannerAgent] task {task.id} ({task.agent_name}) failed: {ex}")
-                err = AgentResult(
-                    success=False, error=str(ex), reasoning=f"Ошибка в задаче {task.id}"
-                )
-                context[task.id] = err
+                    success = getattr(res, "success", True)
+                    brief = self._make_brief_result(res, task.agent_name)
+                    input_summary = str(task_params)[:250]
 
-                plan_execution.append(
-                    {
-                        "num": len(plan_execution) + 1,
-                        "agent_name": task.agent_name,
-                        "description": task.description,
-                        "status": "ошибка",
-                        "brief_result": f"Ошибка: {str(ex)[:100]}",
-                        "depends_on": task.depends_on or [],
-                    }
-                )
+                    with lock:
+                        context[task.id] = res
+                        plan_execution.append(
+                            {
+                                "num": len(plan_execution) + 1,
+                                "agent_name": task.agent_name,
+                                "description": task.description,
+                                "status": "успешно" if success else "ошибка",
+                                "brief_result": brief,
+                                "depends_on": task.depends_on or [],
+                            }
+                        )
+                        executed_calls.append(
+                            AgentCall(
+                                agent_name=task.agent_name,
+                                input_summary=input_summary,
+                                success=success,
+                                duration_ms=duration,
+                                reasoning=getattr(res, "reasoning", ""),
+                                error=getattr(res, "error", None),
+                                output_summary=brief,
+                            )
+                        )
+                    logger.info(f"[PlannerAgent] task {task.id} ({task.agent_name}) → {brief}")
 
-                executed_calls.append(
-                    AgentCall(
-                        agent_name=task.agent_name,
-                        input_summary=str(task_params)[:250],
-                        success=False,
-                        error=str(ex),
-                    )
-                )
+                submit_ready(pool)
 
-        last_task = ordered[-1] if ordered else None
-        final_result = (
-            context.get(last_task.id)
-            if last_task
-            else AgentResult(success=False, error="План не содержал задач")
-        )
+        final_result = self._aggregate_result(plan, context, original_question)
 
-        # Прикрепляем данные для UI (экспандер "Что было сделано" + история)
         try:
-            if final_result is not None:
-                final_result._executed_plan = plan
-                final_result._plan_execution = plan_execution
-                final_result._agent_calls = executed_calls
+            final_result._executed_plan = plan
+            final_result._plan_execution = plan_execution
+            final_result._agent_calls = executed_calls
         except Exception:
             pass
 
         return final_result
+
+    def _aggregate_result(
+        self, plan: Plan, context: dict[str, AgentResult], original_question: str
+    ) -> AgentResult:
+        """Aggregate parallel task outputs into the most UI-compatible result."""
+        results_in_plan_order = [context[t.id] for t in plan.tasks if t.id in context]
+        successful = [r for r in results_in_plan_order if getattr(r, "success", True)]
+
+        for agent_name in ("dashboard_agent", "presentation_agent"):
+            for task in plan.tasks:
+                if task.agent_name == agent_name and task.id in context:
+                    return context[task.id]
+
+        data_res = next(
+            (context[t.id] for t in plan.tasks if t.agent_name == "data_agent" and t.id in context),
+            None,
+        )
+        analysis_res = next(
+            (
+                context[t.id]
+                for t in plan.tasks
+                if t.agent_name == "analyst_agent" and t.id in context
+            ),
+            None,
+        )
+        chart_res = next(
+            (
+                context[t.id]
+                for t in plan.tasks
+                if t.agent_name == "chart_agent" and t.id in context
+            ),
+            None,
+        )
+
+        if data_res is not None and (analysis_res is not None or chart_res is not None):
+            result = AskResult(question=original_question, sql="", data=[])
+            result.sql = getattr(data_res, "sql", "") or ""
+            result.data = getattr(data_res, "data", []) or []
+            if analysis_res is not None and hasattr(analysis_res, "insights"):
+                result.analysis = analysis_res  # type: ignore[assignment]
+            if chart_res is not None and hasattr(chart_res, "spec"):
+                result.chart_spec = chart_res.spec
+
+            if result.chart_spec is not None and result.data:
+                try:
+                    out_dir = Path("out")
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    df = pd.DataFrame(result.data)
+                    fig = build_chart(df, result.chart_spec)
+                    png_file = out_dir / f"chart_{self._slug(original_question)}.png"
+                    export_png(fig, png_file, scale=2.0)
+                    result.png_path = str(png_file)
+                except Exception as e:
+                    result.png_path = f"ERROR rendering: {e}"
+                    logger.info(f"[PlannerAgent] aggregate render_error: {e}")
+
+            result.reasoning = (
+                "PlannerAgent выполнил граф задач (Diamond или параллельные ветки) "
+                "и агрегировал Data/Chart/Analyst в AskResult для совместимости с UI."
+            )
+            return result
+
+        if successful:
+            return successful[-1]
+        if results_in_plan_order:
+            return results_in_plan_order[-1]
+        return AgentResult(success=False, error="План не содержал исполнимых задач")
+
+    def _slug(self, text: str, max_len: int = 40) -> str:
+        import re
+
+        slug = re.sub(r"[^a-zA-Zа-яА-Я0-9]+", "_", text.lower()).strip("_")
+        return slug[:max_len] or "result"
 
     def _make_brief_result(self, res: Any, agent_name: str) -> str:
         """Генерирует короткое человекочитаемое описание результата задачи."""
@@ -619,21 +737,25 @@ class PlannerAgent(BaseAgent):
         Это основная защита от симптома "data_agent получил строки, а analyst/chart их не увидел".
         """
         fixed: list[Task] = []
-        last_data_id: str | None = None
+        data_ids = [t.id for t in tasks if t.agent_name == "data_agent"]
+        chart_ids = [t.id for t in tasks if t.agent_name == "chart_agent"]
+        last_data_id = data_ids[0] if data_ids else None
+        last_chart_id = chart_ids[0] if chart_ids else None
 
         for t in tasks:
             params = dict(t.params or {})
             deps = list(t.depends_on or [])
 
-            # 1. Ремонт depends_on для data-зависимых агентов
-            if (
-                t.agent_name in ("analyst_agent", "chart_agent")
-                and last_data_id
-                and last_data_id not in deps
-            ):
+            if t.agent_name == "chart_agent" and last_data_id and last_data_id not in deps:
                 deps.append(last_data_id)
 
-            # 2. Ремонт "question" — самая частая недостача в params от LLM
+            if t.agent_name == "analyst_agent":
+                if last_data_id and last_data_id not in deps:
+                    deps.append(last_data_id)
+                if last_chart_id and last_chart_id not in deps:
+                    deps.append(last_chart_id)
+
+            # Ремонт "question" — самая частая недостача в params от LLM
             if not params.get("question"):
                 # Для большинства задач достаточно оригинального вопроса пользователя.
                 # Более точный под-вопрос (если модель его сгенерировала) мы оставляем.
@@ -650,9 +772,6 @@ class PlannerAgent(BaseAgent):
                     depends_on=deps,
                 )
             )
-
-            if t.agent_name == "data_agent":
-                last_data_id = t.id
 
         return fixed
 

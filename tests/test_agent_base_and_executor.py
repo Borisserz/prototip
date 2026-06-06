@@ -95,10 +95,10 @@ def test_executor_error_returns_failed_agent_result():
 
 
 def test_orchestrator_uses_executor_and_agents_have_reasoning():
-    """Проверка, что Orchestrator теперь использует executor и результаты несут reasoning."""
+    """Проверка, что Orchestrator делегирует ask() в PlannerAgent и возвращает AskResult."""
     from unittest.mock import patch
 
-    from app.agents.models import AnalysisResult, SqlResult
+    from app.agents.models import AnalysisResult, AskResult, SqlResult
     from app.orchestrator import Orchestrator
     from core.models import ChartSpec
 
@@ -110,22 +110,21 @@ def test_orchestrator_uses_executor_and_agents_have_reasoning():
     fake_an = AnalysisResult(insights=["1", "2", "3"], key_conclusion="ok", reasoning="an r")
     fake_spec = ChartSpec(chart_type="bar", title="t", x="a", y="a", rationale="test r")
 
-    with (
-        patch.object(orch.data_agent, "run", return_value=fake_sql),
-        patch.object(orch.analyst_agent, "run", return_value=fake_an),
-        patch.object(
-            orch.chart_agent,
-            "run",
-            return_value=type("C", (), {"spec": fake_spec, "success": True, "reasoning": "c r"})(),
-        ),
-        patch("app.orchestrator.build_chart"),
-        patch("app.orchestrator.export_png"),
-    ):
+    fake_ask = AskResult(
+        question="Простой вопрос?",
+        sql=fake_sql.sql,
+        data=fake_sql.data,
+        analysis=fake_an,
+        chart_spec=fake_spec,
+        png_path="out/chart_test.png",
+        reasoning="planner aggregate",
+    )
+
+    with patch("app.agents.planner_agent.PlannerAgent.run", return_value=fake_ask):
         res = orch.ask("Простой вопрос?")
 
-    assert res.success  # AskResult теперь тоже AgentResult
+    assert res.success
     assert getattr(res, "reasoning", "")
-    # Под-результаты тоже должны иметь reasoning (через executor или прямое заполнение)
     if res.analysis:
         assert getattr(res.analysis, "reasoning", "")
 
@@ -164,3 +163,39 @@ def test_planner_repair_plan_adds_missing_depends_on_and_question():
 
     # data_agent не должен был получить лишних deps
     assert repaired[0].depends_on == []
+
+
+def test_planner_repair_plan_diamond_adds_chart_dep_to_analyst():
+    """Diamond: analyst_agent в плане с chart_agent получает depends_on на оба."""
+    from app.agents.models import Task
+    from app.agents.planner_agent import PlannerAgent
+
+    p = PlannerAgent()
+    tasks = [
+        Task(
+            id="t1",
+            description="Данные",
+            agent_name="data_agent",
+            params={"question": "задолженность по region, debt"},
+            depends_on=[],
+        ),
+        Task(
+            id="t2",
+            description="График",
+            agent_name="chart_agent",
+            params={"question": "топ по debt"},
+            depends_on=[],
+        ),
+        Task(
+            id="t3",
+            description="Выводы",
+            agent_name="analyst_agent",
+            params={"question": "выводы"},
+            depends_on=[],
+        ),
+    ]
+
+    repaired = p._repair_plan(tasks)
+
+    assert repaired[1].depends_on == ["t1"]
+    assert set(repaired[2].depends_on) == {"t1", "t2"}

@@ -12,9 +12,53 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.agents.dashboard_agent import DashboardAgent
-from app.schemas import DashboardLayout, DashboardRequest, DashboardResult, KpiCard
+from app.schemas import (
+    AnalysisResult,
+    ChartAgentResult,
+    DashboardLayout,
+    DashboardRequest,
+    DashboardResult,
+    KpiCard,
+    SqlResult,
+)
 from core.llm import is_ollama_available
 from core.models import ChartSpec
+
+
+def _mock_executor(
+    *, data_rows: list[dict], sql: str = "", analyst_insights: list[str] | None = None
+):
+    """Возвращает мок AgentExecutor для DashboardAgent (tool-calling через get_executor)."""
+    mock_ex = MagicMock()
+
+    def run_side_effect(agent_name: str, *args, **kwargs):
+        if agent_name == "data_agent":
+            return SqlResult(
+                sql=sql, data=data_rows, row_count=len(data_rows), reasoning="mock data"
+            )
+        if agent_name == "analyst_agent":
+            return AnalysisResult(
+                insights=analyst_insights or ["Дополнительный инсайт из Analyst"],
+                key_conclusion="ok",
+                reasoning="mock analyst",
+            )
+        if agent_name == "chart_agent":
+            idea = args[0] if args else "chart"
+            return ChartAgentResult(
+                spec=ChartSpec(
+                    chart_type="horizontal_bar",
+                    title=str(idea)[:60],
+                    x="region",
+                    y="total_debt",
+                    agg="sum",
+                    rationale="mock chart",
+                ),
+                reasoning="mock chart",
+            )
+        return MagicMock(success=False, error=f"unknown agent {agent_name}")
+
+    mock_ex.run.side_effect = run_side_effect
+    return mock_ex
 
 
 def test_dashboard_agent_mock_returns_full_result() -> None:
@@ -46,6 +90,10 @@ def test_dashboard_agent_mock_returns_full_result() -> None:
             rationale="Доли по налогам — donut",
         ),
     ]
+    fake_composition.chart_ideas = [
+        "Топ регионов по задолженности",
+        "Структура по видам налогов",
+    ]
     fake_composition.layout = DashboardLayout(type="kpi_top_grid", columns=2)
     fake_composition.insights = [
         "Гомельская область лидирует по абсолютной задолженности",
@@ -53,25 +101,18 @@ def test_dashboard_agent_mock_returns_full_result() -> None:
     ]
     fake_composition.reasoning = "Выбрали horizontal_bar + donut как классическую пару для ранжирования и структуры. Layout grid для KPI сверху."
 
+    sample_data = [
+        {"region": "Гомельская область", "debt": 5000000000, "accrued": 30000000000},
+        {"region": "г. Минск", "debt": 800000000, "accrued": 45000000000},
+    ]
+    sample_sql = "SELECT region, SUM(debt) as total_debt FROM df GROUP BY region ORDER BY total_debt DESC LIMIT 10"
+
     with patch("app.agents.dashboard_agent.call_structured") as mock_call:
         mock_call.return_value = fake_composition
-        # Также мокаем DataAgent и Analyst, чтобы не зависеть от реальных данных/LLM
-        with (
-            patch("app.agents.dashboard_agent._get_data_agent") as mock_data,
-            patch("app.agents.dashboard_agent._get_analyst_agent") as mock_analyst,
+        with patch(
+            "app.agents.dashboard_agent.get_executor",
+            return_value=_mock_executor(data_rows=sample_data, sql=sample_sql),
         ):
-            mock_data_inst = MagicMock()
-            mock_data_inst.run.return_value.data = [
-                {"region": "Гомельская область", "debt": 5000000000, "accrued": 30000000000},
-                {"region": "г. Минск", "debt": 800000000, "accrued": 45000000000},
-            ]
-            mock_data_inst.run.return_value.sql = "SELECT region, SUM(debt) as total_debt FROM df GROUP BY region ORDER BY total_debt DESC LIMIT 10"
-            mock_data.return_value = mock_data_inst
-
-            mock_anal = MagicMock()
-            mock_anal.run.return_value.insights = ["Дополнительный инсайт из Analyst"]
-            mock_analyst.return_value = mock_anal
-
             req = DashboardRequest(
                 question="Покажи дашборд по задолженности по регионам",
                 max_charts=3,
@@ -86,9 +127,7 @@ def test_dashboard_agent_mock_returns_full_result() -> None:
     assert result.layout.type in {"kpi_top_grid", "two_column", "tabs", "single_column"}
     assert len(result.insights) >= 1
     assert result.reasoning
-    # KPI могут быть от LLM или от _compute_basic_kpis
     assert isinstance(result.kpi_cards, list)
-    # Новые поля для рендера/отладки (data + source_sql)
     assert isinstance(result.data, list)
     assert result.source_sql is not None and "SELECT" in (result.source_sql or "").upper()
 
@@ -97,12 +136,10 @@ def test_dashboard_agent_graceful_no_data() -> None:
     """Graceful degradation: нет данных → валидный минимальный результат без падения."""
     agent = DashboardAgent()
 
-    with patch("app.agents.dashboard_agent._get_data_agent") as mock_data:
-        mock_data_inst = MagicMock()
-        mock_data_inst.run.return_value.data = []
-        mock_data_inst.run.return_value.sql = ""
-        mock_data.return_value = mock_data_inst
-
+    with patch(
+        "app.agents.dashboard_agent.get_executor",
+        return_value=_mock_executor(data_rows=[], sql=""),
+    ):
         req = DashboardRequest(question="Дашборд по несуществующему фильтру")
         result = agent.run(req)
 
@@ -133,5 +170,4 @@ def test_dashboard_agent_live_minimal() -> None:
     assert result.title
     assert len(result.charts) <= 3
     assert result.reasoning
-    # На реальных данных должны быть хотя бы KPI или графики
     assert result.kpi_cards or result.charts
