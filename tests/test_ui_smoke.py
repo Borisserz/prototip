@@ -51,3 +51,12 @@ def test_ui_streamlit_app_imports_without_error():
     # Dashboard smoke (plan step6)
     assert hasattr(ui.streamlit_app, "_render_dashboard")
     # (tabs count проверяется рантаймом в smoke; здесь достаточно импорта + наличие)
+
+    # Tier 1 UI improvements smoke (data explorer, onboarding, history hints, pres outline)
+    with open("ui/streamlit_app.py", encoding="utf-8") as f:
+        src = f.read()
+    assert "Набор данных (демо)" in src
+    assert "Как быстро начать" in src or "Как пользоваться платформой" in src
+    assert "Предыдущие вопросы" in src or "Предыдущие дашборды" in src
+    assert "Основные темы в презентации" in src or "Тема презентации" in src
+    assert "Как был построен этот дашборд" in src  # planner-prep surface (collapsed)
