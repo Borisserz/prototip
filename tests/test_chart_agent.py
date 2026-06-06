@@ -42,6 +42,7 @@ def test_chart_agent_mock_returns_spec() -> None:
     assert "регион" in result.spec.title.lower() or "начислено" in result.spec.title.lower()
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not is_ollama_available(), reason="Ollama недоступен для живого Phase 4 теста")
 def test_chart_agent_live_and_e2e_with_dataagent() -> None:
     """Живой ChartAgent + end-to-end с DataAgent + build_chart на 2-3 вопросах."""

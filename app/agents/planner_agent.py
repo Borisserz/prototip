@@ -1,11 +1,8 @@
-"""PlannerAgent (первая версия, Вариант A).
+"""PlannerAgent v2.5 — иерархический планировщик с DAG-выполнением.
 
-Простой intent-based роутер.
-Принимает вопрос → определяет intent → вызывает ровно один основной агент
-через AgentExecutor → возвращает его результат.
-
-Всё происходит скрыто: пользователь не видит план, вызванные агенты
-и внутренний reasoning.
+Генерирует structured plan (1–3 задачи), repair/self-correction, параллельные волны
+через ThreadPoolExecutor, context injection по depends_on, агрегация в AskResult/DashboardResult.
+Трассировка — formal PlannerTrace на AgentResult.trace.
 """
 
 from __future__ import annotations
@@ -28,9 +25,18 @@ from app.agents.models import (
     AgentResult,
     AskResult,
     DashboardRequest,
+    DataAgentInput,
+    DrilldownContext,
     Plan,
     Task,
 )
+from app.pipeline_progress import (
+    emit_agent_finished,
+    emit_agent_started,
+    emit_cache_hit_progress,
+    emit_pipeline_stage,
+)
+from app.planner_utils import PlannerResultCache, attach_planner_trace, make_planner_trace, planner_cache_key
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
 
@@ -162,7 +168,7 @@ class PlannerAgent(BaseAgent):
     def __init__(self, use_shared_executor: bool = True) -> None:
         self.executor = get_executor(include_planner=False, fresh=not use_shared_executor)
         self.registry = self.executor.registry
-        self._cache: dict[str, AgentResult] = {}
+        self._cache = PlannerResultCache()
 
     def _validate_plan(self, plan: Plan) -> list[str]:
         """Проверяет план на корректность. Возвращает список ошибок (пустой = план валиден)."""
@@ -412,7 +418,13 @@ class PlannerAgent(BaseAgent):
 
         if agent_name == "data_agent":
             arg = q or original_question
+            dd = p.get("drilldown_filters")
             logger.info(f"[PlannerAgent] _invoke data_agent q={arg[:60]!r}")
+            if dd:
+                return self.executor.run(
+                    agent_name,
+                    DataAgentInput(question=arg, drilldown_filters=dd),
+                )
             return self.executor.run(agent_name, arg)
 
         if agent_name == "chart_agent":
@@ -476,7 +488,12 @@ class PlannerAgent(BaseAgent):
         logger.warning(f"[PlannerAgent] _invoke unknown agent {agent_name}")
         return self.executor.run(agent_name, p if p else original_question)
 
-    def _execute_plan(self, plan: Plan, original_question: str) -> AgentResult:
+    def _execute_plan(
+        self,
+        plan: Plan,
+        original_question: str,
+        drilldown: DrilldownContext | None = None,
+    ) -> AgentResult:
         """Execute plan in dependency-aware parallel waves."""
         context: dict[str, AgentResult] = {}
         executed_calls: list[AgentCall] = []
@@ -490,6 +507,8 @@ class PlannerAgent(BaseAgent):
 
         def build_params(task: Task) -> dict[str, Any]:
             task_params = dict(task.params or {})
+            if drilldown and drilldown.filters and task.agent_name == "data_agent":
+                task_params.setdefault("drilldown_filters", drilldown.filters)
             with lock:
                 dependency_results = [context.get(dep_id) for dep_id in task.depends_on]
             for dep_res in dependency_results:
@@ -512,6 +531,10 @@ class PlannerAgent(BaseAgent):
             ]
             for task in ready:
                 params = build_params(task)
+                emit_agent_started(
+                    task.agent_name,
+                    f"{task.agent_name}: {task.description[:80]}",
+                )
                 future = pool.submit(self._invoke_agent, task.agent_name, params, original_question)
                 running[future] = (task, params, time.time())
                 pending.remove(task.id)
@@ -549,6 +572,12 @@ class PlannerAgent(BaseAgent):
                                     success=False,
                                     error=err.error,
                                 )
+                            )
+                            emit_agent_finished(
+                                task.agent_name,
+                                success=False,
+                                brief=err.error or "Зависимости не разрешены",
+                                error=err.error,
                             )
                             pending.remove(tid)
                     break
@@ -597,18 +626,19 @@ class PlannerAgent(BaseAgent):
                             )
                         )
                     logger.info(f"[PlannerAgent] task {task.id} ({task.agent_name}) → {brief}")
+                    emit_agent_finished(
+                        task.agent_name,
+                        success=success,
+                        brief=brief,
+                        error=getattr(res, "error", None) if not success else None,
+                    )
 
                 submit_ready(pool)
 
         final_result = self._aggregate_result(plan, context, original_question)
-
-        try:
-            final_result._executed_plan = plan
-            final_result._plan_execution = plan_execution
-            final_result._agent_calls = executed_calls
-        except Exception:
-            pass
-
+        trace = make_planner_trace(plan, plan_execution, executed_calls)
+        if isinstance(final_result, AgentResult):
+            attach_planner_trace(final_result, trace)
         return final_result
 
     def _aggregate_result(
@@ -655,15 +685,29 @@ class PlannerAgent(BaseAgent):
 
             if result.chart_spec is not None and result.data:
                 try:
+                    emit_pipeline_stage(
+                        "viz",
+                        "running",
+                        "Экспорт PNG высокого качества (Kaleido)...",
+                        agent="planner_agent",
+                    )
                     out_dir = Path("out")
                     out_dir.mkdir(parents=True, exist_ok=True)
                     df = pd.DataFrame(result.data)
                     fig = build_chart(df, result.chart_spec)
-                    png_file = out_dir / f"chart_{self._slug(original_question)}.png"
+                    png_file = (out_dir / f"chart_{self._slug(original_question)}.png").resolve()
                     export_png(fig, png_file, scale=2.0)
                     result.png_path = str(png_file)
+                    emit_pipeline_stage("viz", "done", f"Артефакт: {png_file.name}", agent="planner_agent")
                 except Exception as e:
                     result.png_path = f"ERROR rendering: {e}"
+                    emit_pipeline_stage(
+                        "viz",
+                        "error",
+                        "Не удалось экспортировать PNG",
+                        agent="planner_agent",
+                        error=str(e),
+                    )
                     logger.info(f"[PlannerAgent] aggregate render_error: {e}")
 
             result.reasoning = (
@@ -781,11 +825,11 @@ class PlannerAgent(BaseAgent):
 
     def execute_plan(self, plan: Plan) -> AgentResult:
         """Выполняет уже готовый план и возвращает результат.
-        Прикрепляет _executed_plan и _plan_execution для отображения в UI.
+        Прикрепляет PlannerTrace в result.trace для отображения в UI.
         """
         return self._execute_plan(plan, getattr(plan, "goal", ""))
 
-    def run(self, question: str) -> AgentResult:
+    def run(self, question: str, drilldown: DrilldownContext | None = None) -> AgentResult:
         """Главная точка входа (автоматический режим: генерирует план и сразу выполняет).
 
         Для интерактивного сценария с подтверждением используйте:
@@ -795,22 +839,37 @@ class PlannerAgent(BaseAgent):
         """
         logger.info(f"[PlannerAgent] start (v2.5): question={question[:70]}...")
 
-        cache_key = question.strip().lower()[:120]
-        if cache_key in self._cache:
+        cache_key = planner_cache_key(question, drilldown)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
             logger.info("[PlannerAgent] cache hit")
-            return self._cache[cache_key]
+            emit_cache_hit_progress()
+            return cached
 
         try:
+            emit_pipeline_stage(
+                "intent",
+                "running",
+                "PlannerAgent анализирует намерение и строит план...",
+                agent="planner_agent",
+            )
             plan = self._generate_plan(question)
-            result = self._execute_plan(plan, question)
+            emit_pipeline_stage(
+                "intent",
+                "done",
+                f"План готов: {len(plan.tasks)} задач · {plan.strategy[:60]}",
+                agent="planner_agent",
+            )
+            result = self._execute_plan(plan, question, drilldown=drilldown)
 
             if getattr(result, "success", True):
-                self._cache[cache_key] = result
+                self._cache.set(cache_key, result)
 
             return result
 
         except Exception as e:
             logger.error(f"[PlannerAgent] run failed: {e}")
+            emit_pipeline_stage("intent", "error", "Сбой планировщика", agent="planner_agent", error=str(e))
             return AgentResult(
                 success=False,
                 reasoning="Не удалось построить или выполнить план. Попробуйте переформулировать вопрос.",

@@ -16,6 +16,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from app.agents.base_agent import BaseAgent
+from app.pipeline_progress import emit_pipeline_stage
 from app.agents.models import DataAgentInput, SqlResult
 from core.llm import call_structured, setup_logging
 
@@ -117,7 +118,29 @@ class DataAgent(BaseAgent):
         finally:
             con.close()
 
-    def _build_prompt(self, question: str, previous_error: str | None = None) -> str:
+    def _format_drilldown_constraints(self, filters: dict[str, str] | None) -> str:
+        if not filters:
+            return ""
+        real = {k: v for k, v in filters.items() if k in ALLOWED_COLUMNS and v}
+        if not real:
+            return ""
+        clauses = []
+        for col, val in real.items():
+            safe_val = str(val).replace("'", "''")
+            clauses.append(f"{col} = '{safe_val}'")
+        return (
+            "\n\nОБЯЗАТЕЛЬНЫЕ фильтры drill-down (добавь в WHERE): "
+            + " AND ".join(clauses)
+            + "."
+        )
+
+    def _build_prompt(
+        self,
+        question: str,
+        previous_error: str | None = None,
+        *,
+        drilldown_filters: dict[str, str] | None = None,
+    ) -> str:
         schema_info = f"Доступные колонки: {', '.join(sorted(ALLOWED_COLUMNS))}. Таблица: df (pandas + duckdb)."
         prompt = f"""Ты — эксперт по SQL для аналитики налогов в Республике Беларусь (синтетические данные, включая Phase 2 колонки типа penalties).
 
@@ -130,24 +153,44 @@ class DataAgent(BaseAgent):
 {FEW_SHOT}
 
 Вопрос пользователя: {question}
+{self._format_drilldown_constraints(drilldown_filters)}
 """
         if previous_error:
             prompt += f"\nПредыдущий SQL вызвал ошибку: {previous_error}\nИсправь запрос и верни только корректный SQL."
         prompt += '\nВерни JSON строго по схеме: {"sql": "..."}'
         return prompt
 
-    def run(self, question: str) -> SqlResult:
+    def run(self, request: str | DataAgentInput) -> SqlResult:
         """Основной вход: вопрос → (sql, data). С self-correction."""
+        if isinstance(request, DataAgentInput):
+            inp = request
+        else:
+            inp = DataAgentInput(question=str(request))
         start = time.time()
-        logger.info(f"[DataAgent] start: question={question[:60]}...")
-        inp = DataAgentInput(question=question)
+        logger.info(f"[DataAgent] start: question={inp.question[:60]}...")
         last_error: str | None = None
+        sql_succeeded = False
 
         for attempt in range(self.max_retries):
-            prompt = self._build_prompt(inp.question, last_error)
+            prompt = self._build_prompt(
+                inp.question, last_error, drilldown_filters=inp.drilldown_filters
+            )
             try:
+                emit_pipeline_stage(
+                    "sql",
+                    "running",
+                    "LLM генерирует безопасный SELECT...",
+                    agent="data_agent",
+                )
                 sql_obj = call_structured(prompt, schema=_SqlOnly, model=self.model)
                 sql = sql_obj.sql.strip()
+                emit_pipeline_stage(
+                    "sql",
+                    "done",
+                    f"SQL сформирован ({len(sql)} символов)",
+                    agent="data_agent",
+                )
+                sql_succeeded = True
 
                 # Валидация whitelist (грубая)
                 lowered = sql.lower()
@@ -155,7 +198,19 @@ class DataAgent(BaseAgent):
                     if bad in lowered:
                         raise ValueError(f"Запрещённая операция в SQL: {bad}")
 
+                emit_pipeline_stage(
+                    "duckdb",
+                    "running",
+                    "DuckDB выполняет запрос к датасету...",
+                    agent="data_agent",
+                )
                 data = self._execute_sql(sql)
+                emit_pipeline_stage(
+                    "duckdb",
+                    "done",
+                    f"Обработано строк: {len(data)}",
+                    agent="data_agent",
+                )
                 elapsed = int((time.time() - start) * 1000)
                 logger.info(f"[DataAgent] end: rows={len(data)} sql_len={len(sql)} ({elapsed}ms)")
                 return SqlResult(
@@ -167,6 +222,21 @@ class DataAgent(BaseAgent):
 
             except Exception as e:
                 last_error = str(e)
+                emit_pipeline_stage(
+                    "sql",
+                    "error",
+                    "Ошибка генерации или выполнения SQL",
+                    agent="data_agent",
+                    error=last_error,
+                )
+                if sql_succeeded:
+                    emit_pipeline_stage(
+                        "duckdb",
+                        "error",
+                        "DuckDB не выполнил запрос",
+                        agent="data_agent",
+                        error=last_error,
+                    )
                 if attempt == self.max_retries - 1:
                     elapsed = int((time.time() - start) * 1000)
                     logger.info(f"[DataAgent] error: {last_error} ({elapsed}ms)")

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -19,12 +20,14 @@ from pathlib import Path
 import pandas as pd
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 from app.agents.base_agent import BaseAgent
 from app.agents.factory import get_executor
 from app.agents.models import AskResult, DeckNarrative, PresentationInput, PresentationResult
+from app.pipeline_progress import emit_pipeline_stage, suppress_pipeline_emit
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
 from viz.style import format_number_ru
@@ -35,7 +38,15 @@ logger = logging.getLogger("PresentationAgent")
 
 DARK_BLUE = RGBColor(0, 51, 102)
 GRAY = RGBColor(80, 80, 80)
+BODY_GRAY = RGBColor(60, 60, 60)
+CARD_BG = RGBColor(245, 247, 250)
 FOOTER_COLOR = RGBColor(128, 128, 128)
+
+SLIDE_WIDTH_IN = 13.333
+SLIDE_MARGIN_H_IN = 0.45
+SLIDE_CONTENT_GAP_IN = 0.15
+SLIDE_CONTENT_TOP_IN = 1.05
+SLIDE_CONTENT_HEIGHT_IN = 5.75
 
 CHART_TYPE_RU: dict[str, str] = {
     "bar": "столбчатая",
@@ -46,6 +57,9 @@ CHART_TYPE_RU: dict[str, str] = {
     "donut": "круговая",
     "kpi": "KPI-индикатор",
     "heatmap": "тепловая карта",
+    "area": "областная",
+    "scatter": "точечная",
+    "waterfall": "водопад",
 }
 
 
@@ -105,6 +119,13 @@ class PresentationAgent(BaseAgent):
         После всех — один structured вызов для DeckNarrative.
         """
         start = time.time()
+        presentation_id = uuid.uuid4().hex[:10]
+        emit_pipeline_stage(
+            "synthesis",
+            "running",
+            f"Сборка презентации ({presentation_id})...",
+            agent="presentation_agent",
+        )
         # нормализация входа (поддержка prefs из формы)
         qlist: list[dict] = []
         if isinstance(questions, PresentationInput):
@@ -162,20 +183,29 @@ class PresentationAgent(BaseAgent):
         # === 1. Собрать результаты по всем вопросам (логика в Orchestrator) ===
         # (используем все qs; срез/appendix решим по num_slides после)
         results: list[AskResult] = []
-        for q in qs:
-            raw = executor.run("planner_agent", q)
-            if isinstance(raw, AskResult):
-                res = raw
-            else:
-                res = AskResult(
-                    question=q,
-                    sql=getattr(raw, "source_sql", "") or "",
-                    data=getattr(raw, "data", []) or [],
-                    reasoning=getattr(raw, "reasoning", "PresentationAgent received non-AskResult"),
-                    error=getattr(raw, "error", None),
-                    success=getattr(raw, "success", True),
+        with suppress_pipeline_emit():
+            for qi, q in enumerate(qs):
+                emit_pipeline_stage(
+                    "synthesis",
+                    "running",
+                    f"Вопрос {qi + 1}/{len(qs)}: {str(q)[:50]}...",
+                    agent="presentation_agent",
                 )
-            results.append(res)
+                raw = executor.run("planner_agent", q)
+                if isinstance(raw, AskResult):
+                    res = raw
+                else:
+                    res = AskResult(
+                        question=q,
+                        sql=getattr(raw, "source_sql", "") or "",
+                        data=getattr(raw, "data", []) or [],
+                        reasoning=getattr(
+                            raw, "reasoning", "PresentationAgent received non-AskResult"
+                        ),
+                        error=getattr(raw, "error", None),
+                        success=getattr(raw, "success", True),
+                    )
+                results.append(res)
         logger.info(f"[PresentationAgent] collected {len(results)} results")
 
         # === 2. DeckNarrative (один structured call, логируем) ===
@@ -334,34 +364,33 @@ class PresentationAgent(BaseAgent):
             color=FOOTER_COLOR,
         )
 
-        # === 6. По слайду на вопрос (с ребилдом графика без заголовка + стиль) ===
+        slide_png_paths: list[str] = []
+
+        # === 6. По слайду на вопрос (корпоративный layout 65/35 + sidebar card) ===
+        usable_w = SLIDE_WIDTH_IN - 2 * SLIDE_MARGIN_H_IN
+        chart_panel_w = usable_w * 0.65
+        text_panel_w = usable_w * 0.35
+
         for idx, (q, res) in enumerate(zip(questions, results)):  # noqa: B905
             slide = prs.slides.add_slide(blank_layout)
 
-            # Шапка = тема-утверждение (предпочитаем title из ChartSpec)
             header = q
             if res.chart_spec and getattr(res.chart_spec, "title", None):
                 header = res.chart_spec.title
-            self._add_title_text(
-                slide, header, top=Inches(0.2), font_size=24, bold=True, color=DARK_BLUE
-            )
+            self._add_question_slide_header(slide, header)
 
-            # Крупный график (ребилд с title="" ... + оверрайд user pref chart_type если передан)
             graph_added = False
             if res.chart_spec and res.data:
                 try:
                     df = pd.DataFrame(res.data)
                     slide_spec = res.chart_spec.model_copy()
-                    # Уважить pref из формы (если был "horizontal_bar" а LLM дал bar и т.п.)
                     user_pref = prefs.get(idx)
                     if user_pref:
                         slide_spec.chart_type = user_pref
-                    slide_spec.title = ""  # убираем заголовок графика — его несёт шапка слайда
+                    slide_spec.title = ""
                     fig = build_chart(df, slide_spec)
-                    # extra: явно убрать title в layout (на случай если apply добавил)
                     with suppress(Exception):
                         fig.update_layout(title=dict(text=""))
-                    # убрать дублирующий source annotation из PNG (у слайда свой footer внизу)
                     try:
                         if getattr(fig.layout, "annotations", None):
                             fig.layout.annotations = [
@@ -372,90 +401,36 @@ class PresentationAgent(BaseAgent):
                             ]
                     except Exception:
                         pass
-                    # экспортируем специально для слайда (гарантируем стиль: палитра, русские лейблы, Br)
-                    slide_png = out_dir / f"pres_slide_{idx}_{self._slug(header)}.png"
+                    slide_png = out_dir / f"pres_slide_{presentation_id}_{idx}_{self._slug(header)}.png"
                     export_png(fig, slide_png, scale=2.0)
-                    # крупный, с сохранением пропорций (шире, чем раньше)
+                    slide_png_paths.append(str(slide_png.resolve()))
                     slide.shapes.add_picture(
-                        str(slide_png), Inches(0.3), Inches(0.9), width=Inches(8.2)
+                        str(slide_png),
+                        Inches(SLIDE_MARGIN_H_IN),
+                        Inches(SLIDE_CONTENT_TOP_IN),
+                        width=Inches(chart_panel_w),
                     )
                     graph_added = True
                 except Exception as e:
                     logger.info(f"[PresentationAgent] slide_graph_error: {e}")
 
-            # Текст справа/под (инсайты + вывод + подпись диаграммы + аномалия)
-            text_left = Inches(8.8) if graph_added else Inches(0.5)
-            text_top = Inches(0.9)
-            text_width = Inches(4.2) if graph_added else Inches(12.3)
-            text_height = Inches(5.8)
-            txBox = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
-            tf = txBox.text_frame
-            tf.word_wrap = True
+            if graph_added:
+                card_left = SLIDE_MARGIN_H_IN + chart_panel_w + SLIDE_CONTENT_GAP_IN
+                card_width = text_panel_w - SLIDE_CONTENT_GAP_IN
+            else:
+                card_left = SLIDE_MARGIN_H_IN
+                card_width = usable_w
 
-            if res.analysis:
-                # Инсайты
-                p = tf.paragraphs[0]
-                p.text = "Инсайты"
-                p.font.size = Pt(14)
-                p.font.bold = True
-                p.font.name = "Arial"
-                p.font.color.rgb = DARK_BLUE
-                for insight in (res.analysis.insights or [])[:3]:
-                    p = tf.add_paragraph()
-                    p.text = f"• {insight}"
-                    p.font.size = Pt(11)
-                    p.font.name = "Arial"
-                    p.space_before = Pt(3)
-
-                # Ключевой вывод
-                p = tf.add_paragraph()
-                p.text = ""
-                p = tf.add_paragraph()
-                p.text = "Ключевой вывод"
-                p.font.size = Pt(14)
-                p.font.bold = True
-                p.font.name = "Arial"
-                p.font.color.rgb = DARK_BLUE
-                p = tf.add_paragraph()
-                p.text = res.analysis.key_conclusion or ""
-                p.font.size = Pt(11)
-                p.font.name = "Arial"
-                p.space_before = Pt(4)
-
-                # Аномалия если есть
-                if res.analysis.anomaly_or_trend:
-                    p = tf.add_paragraph()
-                    p.text = ""
-                    p = tf.add_paragraph()
-                    p.text = "Аномалия / тренд"
-                    p.font.size = Pt(12)
-                    p.font.bold = True
-                    p.font.name = "Arial"
-                    p.font.color.rgb = DARK_BLUE
-                    p = tf.add_paragraph()
-                    p.text = res.analysis.anomaly_or_trend
-                    p.font.size = Pt(10)
-                    p.font.name = "Arial"
-
-            # Подпись диаграммы (используем user_pref если был, иначе из spec)
-            p = tf.add_paragraph()
-            p.text = ""
-            p = tf.add_paragraph()
-            ctype_for_ru = prefs.get(idx) or (
-                getattr(res.chart_spec, "chart_type", "") if res.chart_spec else ""
+            self._add_insights_sidebar_card(
+                slide,
+                left_in=card_left,
+                top_in=SLIDE_CONTENT_TOP_IN,
+                width_in=card_width,
+                height_in=SLIDE_CONTENT_HEIGHT_IN,
+                res=res,
+                chart_pref=prefs.get(idx),
             )
-            ctype_ru = CHART_TYPE_RU.get(ctype_for_ru, "диаграмма")
-            p.text = f"Диаграмма: {ctype_ru}"
-            p.font.size = Pt(10)
-            p.font.name = "Arial"
-            p.font.color.rgb = GRAY
-            p = tf.add_paragraph()
-            p.text = "Источник: Синтетические данные (демо), Республика Беларусь"
-            p.font.size = Pt(9)
-            p.font.name = "Arial"
-            p.font.color.rgb = GRAY
 
-            # Footer со номером слайда (текущий len после add)
             slide_num = len(prs.slides)
             self._add_centered_text(
                 slide,
@@ -571,9 +546,142 @@ class PresentationAgent(BaseAgent):
         )
         # Минимальное заполнение reasoning (презентация — композитный агент)
         pres_reasoning = f"Собрано {len(prs.slides)} слайдов из {len(questions)} вопросов. Нарратив + графики (PNG via viz) + DeckNarrative."
-        return PresentationResult(
-            pptx_path=str(pptx_path), num_slides=len(prs.slides), reasoning=pres_reasoning
+        emit_pipeline_stage(
+            "viz",
+            "done",
+            f"Презентация: {len(prs.slides)} слайдов, {len(slide_png_paths)} превью",
+            agent="presentation_agent",
         )
+        return PresentationResult(
+            pptx_path=str(pptx_path),
+            num_slides=len(prs.slides),
+            slide_png_paths=slide_png_paths,
+            presentation_id=presentation_id,
+            reasoning=pres_reasoning,
+        )
+
+    def _add_question_slide_header(self, slide, title: str) -> None:
+        """Заголовок слайда: Pt 28, слева + акцентная линия на всю ширину."""
+        self._add_title_text(
+            slide,
+            title,
+            top=Inches(0.28),
+            font_size=28,
+            bold=True,
+            color=DARK_BLUE,
+        )
+        accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(SLIDE_MARGIN_H_IN),
+            Inches(0.82),
+            Inches(SLIDE_WIDTH_IN - 2 * SLIDE_MARGIN_H_IN),
+            Inches(0.03),
+        )
+        accent.fill.solid()
+        accent.fill.fore_color.rgb = DARK_BLUE
+        accent.line.fill.background()
+
+    def _add_insights_sidebar_card(
+        self,
+        slide,
+        *,
+        left_in: float,
+        top_in: float,
+        width_in: float,
+        height_in: float,
+        res: AskResult,
+        chart_pref: str | None,
+    ) -> None:
+        """Информационная карточка справа: фон + инсайты и выводы."""
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(left_in),
+            Inches(top_in),
+            Inches(width_in),
+            Inches(height_in),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = CARD_BG
+        card.line.fill.background()
+
+        pad = 0.2
+        tx_box = slide.shapes.add_textbox(
+            Inches(left_in + pad),
+            Inches(top_in + pad),
+            Inches(max(0.5, width_in - 2 * pad)),
+            Inches(max(0.5, height_in - 2 * pad)),
+        )
+        tf = tx_box.text_frame
+        tf.word_wrap = True
+
+        if res.analysis:
+            p = tf.paragraphs[0]
+            p.text = "Инсайты"
+            p.font.size = Pt(14)
+            p.font.bold = True
+            p.font.name = "Arial"
+            p.font.color.rgb = DARK_BLUE
+            for insight in (res.analysis.insights or [])[:3]:
+                p = tf.add_paragraph()
+                p.text = f"• {insight}"
+                p.font.size = Pt(12)
+                p.font.name = "Arial"
+                p.font.color.rgb = BODY_GRAY
+                p.space_before = Pt(6)
+                p.line_spacing = 1.15
+
+            p = tf.add_paragraph()
+            p.text = ""
+            p = tf.add_paragraph()
+            p.text = "Ключевой вывод"
+            p.font.size = Pt(14)
+            p.font.bold = True
+            p.font.name = "Arial"
+            p.font.color.rgb = DARK_BLUE
+            p.space_before = Pt(10)
+            p = tf.add_paragraph()
+            p.text = res.analysis.key_conclusion or ""
+            p.font.size = Pt(11)
+            p.font.name = "Arial"
+            p.font.color.rgb = BODY_GRAY
+            p.space_before = Pt(5)
+            p.line_spacing = 1.2
+
+            if res.analysis.anomaly_or_trend:
+                p = tf.add_paragraph()
+                p.text = ""
+                p = tf.add_paragraph()
+                p.text = "Аномалия / тренд"
+                p.font.size = Pt(14)
+                p.font.bold = True
+                p.font.name = "Arial"
+                p.font.color.rgb = DARK_BLUE
+                p.space_before = Pt(10)
+                p = tf.add_paragraph()
+                p.text = res.analysis.anomaly_or_trend
+                p.font.size = Pt(11)
+                p.font.name = "Arial"
+                p.font.color.rgb = BODY_GRAY
+                p.space_before = Pt(5)
+                p.line_spacing = 1.2
+
+        ctype_for_ru = chart_pref or (
+            getattr(res.chart_spec, "chart_type", "") if res.chart_spec else ""
+        )
+        ctype_ru = CHART_TYPE_RU.get(ctype_for_ru, "диаграмма")
+        p = tf.add_paragraph()
+        p.text = ""
+        p = tf.add_paragraph()
+        p.text = f"Диаграмма: {ctype_ru}"
+        p.font.size = Pt(9)
+        p.font.name = "Arial"
+        p.font.color.rgb = FOOTER_COLOR
+        p.space_before = Pt(12)
+        p = tf.add_paragraph()
+        p.text = "Источник: синтетические данные (демо), РБ"
+        p.font.size = Pt(8)
+        p.font.name = "Arial"
+        p.font.color.rgb = FOOTER_COLOR
 
     def _add_centered_text(
         self,
@@ -608,8 +716,8 @@ class PresentationAgent(BaseAgent):
         color: RGBColor = DARK_BLUE,
     ) -> None:
         """Helper: left-aligned title."""
-        left = Inches(0.5)
-        width = Inches(12.333)
+        left = Inches(SLIDE_MARGIN_H_IN)
+        width = Inches(SLIDE_WIDTH_IN - 2 * SLIDE_MARGIN_H_IN)
         height = Inches(0.8)
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame

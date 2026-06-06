@@ -9,7 +9,7 @@
 - Графики: фабрика 11 типов (bar/.../line/area/scatter/waterfall/horizontal_bar/donut/kpi/heatmap), Okabe-Ito + RU/Br стиль в viz/, spec-first (LLM только ChartSpec, детерминированный рендер), PNG/HTML экспорт, live plotly.
 - Презентация: .pptx с exact count, prefs per-q, visuals из specs, narrative, recs; поддержка "from dashboard" / Planner.
 - Логирование: [Agent]..., [AgentExecutor]..., stdout + артефакты.
-- UI: streamlit run ui/streamlit_app.py — "🤖 Главный агент" (preview плана + редактирование + execute status + clean textual results + "Что было сделано" + trace JSON dl + iteration buttons + history), + dedicated tabs (полные визуалы + editors). Две render path. Тонкий клиент.
+- UI: `streamlit run ui/streamlit_app.py` — чат с live pipeline log, drill-down, pinned dashboard, trace expander «Что было сделано» + JSON download, презентация через Orchestrator.
 - Тесты: per-agent + viz + orchestrator + ui_smoke (Phase 1/2 polish: editing/trace/iteration/penalties/new types) + новый test_planner_agent.py (детальный: repair/invoke/execute/error/quality/Planner-orchestrated + penalties/new types) + DETAILED_TEST_PLAN.md. ruff + pytest зелёные.
 - /health цел.
 
@@ -33,11 +33,10 @@ ruff check . && ruff format .
 # UI
 streamlit run ui/streamlit_app.py
 
-# или прямая презентация (3 вопроса)
+# или презентация через Orchestrator
 python -c '
-from app.agents.presentation_agent import PresentationAgent
-agent = PresentationAgent()
-res = agent.run([
+from app.orchestrator import Orchestrator
+res = Orchestrator().presentation([
     "Какие регионы имеют наибольшую задолженность по НДС?",
     "Динамика начислений подоходного налога в г. Минск по месяцам?",
     "Топ-3 региона по сумме имущественных налогов?",
@@ -63,7 +62,7 @@ PlannerAgent (Главный) — generate_plan (structured + repair + correctio
   - Высокоуровневые (dashboard/presentation) сами вызывают sub (Data/Analyst/Chart/Orch) — sub не в Planner trace
   - Низкоуровневые цепочки (data → chart/analyst) — repair + injection
         ↓
-Orchestrator.ask / .dashboard (legacy linear + для sub-calls внутри high-level)
+Orchestrator.ask / .dashboard / .presentation (единый фасад; ask → PlannerAgent)
         ↓
 DataAgent (Text-to-SQL DuckDB, penalties-aware) → Analyst + ChartAgent (structured → ChartSpec 11 типов)
         ↓

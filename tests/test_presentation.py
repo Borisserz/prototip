@@ -102,6 +102,7 @@ def test_presentation_agent_mock():
     assert "presentation.pptx" in res.pptx_path
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(),
     reason="Ollama + qwen2.5-coder:7b-instruct недоступен для live теста Phase 6",

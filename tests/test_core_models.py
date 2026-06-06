@@ -73,8 +73,8 @@ def test_chart_spec_json_roundtrip_for_llm() -> None:
     assert restored.chart_type == "donut"
 
 
-def test_chart_type_literal_contains_all_eight() -> None:
-    """ChartType покрывает ровно 8 типов из spec Phase 1."""
+def test_chart_type_literal_contains_all_eleven() -> None:
+    """ChartType покрывает 11 типов (Phase 1 + area/scatter/waterfall)."""
     types: list[ChartType] = [
         "bar",
         "grouped_bar",
@@ -84,8 +84,10 @@ def test_chart_type_literal_contains_all_eight() -> None:
         "donut",
         "kpi",
         "heatmap",
+        "area",
+        "scatter",
+        "waterfall",
     ]
     for t in types:
-        # Просто проверяем, что Literal принимает
         ChartSpec(chart_type=t, title="t", x="x", y="y", rationale="r")
-    assert len(types) == 8
+    assert len(types) == 11

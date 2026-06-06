@@ -13,3 +13,14 @@ quote-style = "double"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q --tb=short"
+markers = [
+    "live: tests requiring local Ollama model",
+]
+
+[tool.coverage.run]
+source = ["app", "core", "viz", "ui"]
+omit = ["tests/*", "ui/streamlit_app.py"]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true

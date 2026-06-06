@@ -17,6 +17,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.models import AgentResult
+from app.pipeline_progress import emit_agent_finished, emit_agent_started, pipeline_emit_enabled
 from core.llm import setup_logging
 
 setup_logging()
@@ -85,6 +86,17 @@ class AgentExecutor:
             f"[AgentExecutor] call: agent={agent_name} request_type={type(request).__name__}"
         )
 
+        emit_detail = f"{agent_name}: выполнение..."
+        _PIPELINE_AGENTS = (
+            "data_agent",
+            "chart_agent",
+            "analyst_agent",
+            "dashboard_agent",
+            "presentation_agent",
+        )
+        if pipeline_emit_enabled() and agent_name in _PIPELINE_AGENTS:
+            emit_agent_started(agent_name, emit_detail)
+
         try:
             agent = self.registry.get(agent_name)
             raw_result = agent.run(request, **call_kwargs)
@@ -106,11 +118,21 @@ class AgentExecutor:
             logger.info(
                 f"[AgentExecutor] done: agent={agent_name} success={raw_result.success} ({elapsed}ms)"
             )
+            if pipeline_emit_enabled() and agent_name in _PIPELINE_AGENTS:
+                brief = getattr(raw_result, "reasoning", "")[:80] or "Готово"
+                emit_agent_finished(
+                    agent_name,
+                    success=raw_result.success,
+                    brief=brief,
+                    error=getattr(raw_result, "error", None) if not raw_result.success else None,
+                )
             return raw_result
 
         except Exception as exc:
             elapsed = int((time.time() - start) * 1000)
             logger.info(f"[AgentExecutor] error: agent={agent_name} {exc} ({elapsed}ms)")
+            if pipeline_emit_enabled() and agent_name in _PIPELINE_AGENTS:
+                emit_agent_finished(agent_name, success=False, error=str(exc))
             return AgentResult(
                 success=False,
                 reasoning=f"Executor caught exception while running {agent_name}",

@@ -72,6 +72,7 @@ def test_data_agent_self_correction_on_error() -> None:
     assert "region" in result.sql.lower() or "count" in result.sql.lower()
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(),
     reason="Ollama + qwen2.5-coder:7b-instruct недоступен для живого теста",
@@ -102,6 +103,7 @@ def test_data_agent_live_5_questions() -> None:
             assert has_known or has_aggregate or len(row0) > 0
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(),
     reason="Ollama + qwen2.5-coder:7b-instruct недоступен для живого регресс-теста",

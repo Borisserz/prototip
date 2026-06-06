@@ -1,89 +1,125 @@
-"""FastAPI app skeleton for prototip (Phase 0+).
-
-Thin API layer. Business logic lives in orchestrator/agents (later phases).
-"""
+"""FastAPI — thin layer над Orchestrator."""
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from typing import Any
 
-from app.schemas import DashboardRequest, DashboardResult, PresentationRequest, PresentationResult
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+from app.config import config
+from app.logging_utils import new_correlation_id
+from app.orchestrator import Orchestrator
+from app.schemas import (
+    DashboardRequest,
+    DashboardResult,
+    DrilldownContext,
+    PresentationRequest,
+    PresentationResult,
+)
 
 app = FastAPI(
     title="prototip BI",
-    version="0.1.0",
+    version=config.app_version,
     description="Локальная мультиагентная BI-платформа для налоговой аналитики (прототип).",
 )
+
+_orchestrator: Orchestrator | None = None
+
+
+def get_orchestrator() -> Orchestrator:
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = Orchestrator()
+    return _orchestrator
+
+
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=3)
+    drilldown: DrilldownContext | None = None
 
 
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
-    """Health check endpoint.
-
-    Returns basic status. Used to verify Phase 0 skeleton is running.
-    """
-    return {"status": "ok", "phase": "0"}
+    return {
+        "status": "ok",
+        "phase": config.app_phase,
+        "version": config.app_version,
+    }
 
 
 @app.get("/", tags=["system"])
 def root() -> dict[str, str]:
-    """Root endpoint (informational)."""
     return {
-        "message": "prototip — Text-to-SQL + красивые графики (Phase 0 каркас готов)",
+        "message": "prototip — мультиагентная BI-аналитика (PlannerAgent + Orchestrator)",
         "health": "/health",
         "docs": "/docs",
+        "phase": config.app_phase,
     }
 
 
-@app.post("/generate_presentation", response_model=PresentationResult, tags=["presentation"])
-def generate_presentation(payload: PresentationRequest) -> PresentationResult:
-    """Генерация презентации по структурированному payload из формы UI.
-    Thin: основная логика в PresentationAgent (и LLM structured для free mode).
-    """
-    from app.agents.presentation_agent import PresentationAgent
-    from core.llm import call_structured
-
-    # Для free_topic / one_sentence — разложить в список вопросов через structured LLM
-    questions = [q.text for q in payload.questions]
-    if payload.mode != "По вопросам" and payload.overall_theme:
-        # structured expand
-        expand_prompt = f"Разложи тему '{payload.overall_theme}' в 3-5 конкретных вопросов для презентации по налоговой аналитике РБ (на русском, коротко)."
-        # простая схема для списка
-        from pydantic import BaseModel
-
-        class QList(BaseModel):
-            questions: list[str]
-
-        qlist = call_structured(
-            expand_prompt, schema=QList, system="Только список вопросов на русском."
-        )
-        questions = qlist.questions
-
-    if not questions:
-        questions = ["Структура налогов по видам (доли)"]  # fallback
-
-    pa = PresentationAgent()
-    # Передаём полный payload (вопросы с prefs + настройки) — агент сам сделает exact count + respect includes/prefs
-    # Для free/expand используем list[str] если нет блоков; run поддерживает оба
-    q_for_agent = (
-        payload.questions
-        if payload.questions and any(getattr(q, "text", "") for q in payload.questions)
-        else questions
+@app.post("/ask", tags=["orchestrator"])
+def ask_endpoint(payload: AskRequest) -> dict[str, Any]:
+    """Универсальный запрос через PlannerAgent."""
+    cid = new_correlation_id()
+    res = get_orchestrator().ask(
+        payload.question,
+        drilldown=payload.drilldown,
+        correlation_id=cid,
     )
-    return pa.run(
-        q_for_agent,
-        num_slides=payload.num_slides,
-        include_title=payload.include_title,
-        include_recommendations=payload.include_recommendations,
-    )
+    if hasattr(res, "model_dump"):
+        return res.model_dump(mode="json")
+    return {"result": str(res), "correlation_id": cid}
 
 
 @app.post("/generate_dashboard", response_model=DashboardResult, tags=["dashboard"])
 def generate_dashboard(payload: DashboardRequest) -> DashboardResult:
-    """Генерация дашборда (KPI + несколько ChartSpec + layout + insights) по одному вопросу.
-    Thin: логика в DashboardAgent (с reuse Data/Analyst/Chart).
-    """
-    from app.agents.dashboard_agent import DashboardAgent
+    """Явный fast-path дашборда через Orchestrator.dashboard()."""
+    cid = new_correlation_id()
+    drilldown = None
+    if payload.drilldown_filters:
+        drilldown = DrilldownContext(filters=payload.drilldown_filters)
+    return get_orchestrator().dashboard(
+        payload.question,
+        max_charts=payload.max_charts,
+        include_kpi=payload.include_kpi,
+        data=payload.data,
+        drilldown=drilldown,
+        correlation_id=cid,
+    )
 
-    da = DashboardAgent()
-    return da.run(payload)
+
+@app.post("/generate_presentation", response_model=PresentationResult, tags=["presentation"])
+def generate_presentation(payload: PresentationRequest) -> PresentationResult:
+    """Генерация презентации через Orchestrator.presentation()."""
+    from core.llm import call_structured
+
+    cid = new_correlation_id()
+    questions = [q.text for q in payload.questions]
+    if payload.mode != "По вопросам" and payload.overall_theme:
+        class QList(BaseModel):
+            questions: list[str]
+
+        qlist = call_structured(
+            f"Разложи тему '{payload.overall_theme}' в 3-5 конкретных вопросов "
+            "для презентации по налоговой аналитике РБ (на русском, коротко).",
+            schema=QList,
+            system="Только список вопросов на русском.",
+        )
+        questions = qlist.questions
+
+    if not questions:
+        questions = ["Структура налогов по видам (доли)"]
+
+    q_for_agent: Any = (
+        payload.questions
+        if payload.questions and any(getattr(q, "text", "") for q in payload.questions)
+        else questions
+    )
+    return get_orchestrator().presentation(
+        q_for_agent,
+        num_slides=payload.num_slides,
+        include_title=payload.include_title,
+        include_recommendations=payload.include_recommendations,
+        correlation_id=cid,
+    )

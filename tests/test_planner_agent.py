@@ -360,14 +360,12 @@ def test_execute_plan_context_injection_and_graceful_error(
         result = planner.execute_plan(plan)
 
     assert result.success
-    assert hasattr(result, "_executed_plan") and result._executed_plan is not None
-    assert hasattr(result, "_plan_execution") and isinstance(result._plan_execution, list)
-    assert len(result._plan_execution) == 2
-    # briefs present
-    briefs = [s.get("brief_result", "") for s in result._plan_execution]
+    assert result.trace is not None
+    assert result.trace.executed_plan is not None
+    assert len(result.trace.plan_execution) == 2
+    briefs = [s.brief_result for s in result.trace.plan_execution]
     assert any("area" in str(b).lower() or "chart" in str(b).lower() for b in briefs)
-    # trace also has agent_calls or equivalent
-    assert hasattr(result, "_agent_calls") or True  # attached in real path
+    assert len(result.trace.agent_calls) >= 1
 
     # now error injection in second task
     def fake_run_err(agent_name, request, **kw):
@@ -378,10 +376,9 @@ def test_execute_plan_context_injection_and_graceful_error(
     plan2 = Plan(goal="e", tasks=[plan.tasks[0], plan.tasks[1]])
     with patch.object(planner.executor, "run", side_effect=fake_run_err):
         res2 = planner.execute_plan(plan2)
-    exec2 = getattr(res2, "_plan_execution", [])
-    # first ok, second error status
-    assert any(s.get("status") == "успешно" for s in exec2)
-    assert any(s.get("status") == "ошибка" for s in exec2)
+    exec2 = res2.trace.plan_execution if res2.trace else []
+    assert any(s.status == "успешно" for s in exec2)
+    assert any(s.status == "ошибка" for s in exec2)
 
 
 def test_planner_orchestrated_chart_new_type_with_penalties_data(
@@ -431,9 +428,9 @@ def test_planner_orchestrated_chart_new_type_with_penalties_data(
         res = planner.execute_plan(plan)
 
     assert res.success
-    exec_steps = getattr(res, "_plan_execution", [])
-    briefs = [str(s.get("brief_result", "")) for s in exec_steps]
-    # brief may be "Построен график типа scatter" or generic; just ensure we have chart step recorded
+    assert res.trace is not None
+    exec_steps = res.trace.plan_execution
+    briefs = [str(s.brief_result) for s in exec_steps]
     assert any("chart" in b.lower() or "график" in b.lower() or "scatter" in b.lower() for b in briefs) or len(exec_steps) >= 2
 
     # The spec in trace/result should be buildable (new type + penalties cols)
@@ -475,7 +472,7 @@ def test_planner_dashboard_and_pres_from_prior(planner: PlannerAgent) -> None:
     with patch.object(planner.executor, "run", return_value=fake_db):
         rdb = planner.execute_plan(db_plan)
     assert rdb.success
-    assert getattr(rdb, "_executed_plan", None) is not None
+    assert rdb.trace is not None and rdb.trace.executed_plan is not None
 
     # pres "from this dashboard" simulation (as UI action would feed questions + prefs from prior trace)
     pres_plan = Plan(
@@ -490,16 +487,16 @@ def test_planner_dashboard_and_pres_from_prior(planner: PlannerAgent) -> None:
         ],
     )
     fake_pres = PresentationResult(
-        pptx_path="/tmp/f.pptx", num_slides=3, title="p", narrative="n", slides=[]
+        pptx_path="/tmp/f.pptx",
+        num_slides=3,
+        slide_png_paths=[],
+        presentation_id="test",
     )
     with patch.object(planner.executor, "run", return_value=fake_pres):
         rpres = planner.execute_plan(pres_plan)
     assert rpres.success
-    assert (
-        "presentation"
-        in str(getattr(rpres, "_plan_execution", [{}])[0].get("agent_name", "")).lower()
-        or True
-    )
+    assert rpres.trace is not None
+    assert rpres.trace.plan_execution[0].agent_name == "presentation_agent"
 
 
 def test_generate_fallback_on_llm_error_and_error_in_trace(planner: PlannerAgent) -> None:
@@ -516,8 +513,8 @@ def test_generate_fallback_on_llm_error_and_error_in_trace(planner: PlannerAgent
     )
     with patch.object(planner.executor, "run", side_effect=RuntimeError("boom")):
         res = planner.execute_plan(bad_plan)
-    execs = getattr(res, "_plan_execution", [])
-    assert any(s.get("status") == "ошибка" for s in execs)
+    assert res.trace is not None
+    assert any(s.status == "ошибка" for s in res.trace.plan_execution)
     # still returns a result (graceful)
     assert hasattr(res, "success")
 

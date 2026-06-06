@@ -29,6 +29,49 @@ from .style import (
 )
 
 
+def _annotate_max_point(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> None:
+    """Стрелка на максимум для bar / horizontal_bar / line (говорящий график)."""
+    try:
+        if ctype not in ("bar", "horizontal_bar", "line"):
+            return
+        val_col, cat_col = spec.y, spec.x
+        if val_col not in dff.columns or cat_col not in dff.columns:
+            return
+        numeric = pd.to_numeric(dff[val_col], errors="coerce")
+        if numeric.isna().all():
+            return
+        idx = numeric.idxmax()
+        row = dff.loc[idx]
+        max_val = float(row[val_col])
+
+        if ctype == "horizontal_bar":
+            ann_x, ann_y = max_val, row[cat_col]
+            ax, ay = -55, 0
+        else:
+            ann_x, ann_y = row[cat_col], max_val
+            ax, ay = 0, -48
+
+        fig.add_annotation(
+            x=ann_x,
+            y=ann_y,
+            text="Максимум",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.5,
+            arrowcolor="#D55E00",
+            ax=ax,
+            ay=ay,
+            font=dict(family="Arial", size=10, color="#D55E00"),
+            bgcolor="rgba(255, 248, 240, 0.95)",
+            bordercolor="#D55E00",
+            borderwidth=1,
+            borderpad=4,
+        )
+    except Exception:
+        pass
+
+
 def _prepare_agg(df: pd.DataFrame, spec: ChartSpec) -> pd.DataFrame:
     """Внутренняя агрегация по spec.agg (если не none). Возвращает копию/агг df."""
     if not spec.agg or spec.agg == "none":
@@ -191,7 +234,9 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
                 fig.update_traces(marker_color=PALETTE[0], marker=dict(color=PALETTE[0]))
         # margin bump (справа для текста labels на x-axis horizontal bars)
         with suppress(Exception):
-            fig.update_layout(margin=dict(l=80, r=140, t=80, b=90))
+            fig.update_layout(margin=dict(l=200, r=140, t=80, b=120))
+            fig.update_xaxes(automargin=True)
+            fig.update_yaxes(automargin=True)
         # тик-форматтер на value axis (x) без "14B"
         with suppress(Exception):
             if y in dff.columns and len(dff) > 0:
@@ -237,6 +282,9 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> go.Figure:
     # Фиксируем размер для экспорта (kpi уже свой)
     if ctype != "kpi":
         fig.update_layout(width=CHART_WIDTH, height=CHART_HEIGHT)
+
+    if ctype in ("bar", "horizontal_bar", "line"):
+        _annotate_max_point(fig, dff, spec, ctype)
 
     return fig
 

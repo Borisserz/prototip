@@ -26,7 +26,7 @@ PALETTE: list[str] = [
 FONT_FAMILY: str = "Arial, sans-serif"
 CHART_WIDTH: int = 1000
 CHART_HEIGHT: int = 600
-MARGINS: dict[str, int] = {"l": 70, "r": 40, "t": 115, "b": 105}
+MARGINS: dict[str, int] = {"l": 120, "r": 40, "t": 115, "b": 140}
 
 
 def format_number_ru(value: float | int, decimals: int = 0, suffix: str = "Br") -> str:
@@ -152,11 +152,13 @@ def apply_common_style(fig: go.Figure, spec: Any) -> go.Figure:
         title=dict(text=x_label, font=dict(family=FONT_FAMILY, size=12)),
         gridcolor="#E8E8E8",
         linecolor="#CCCCCC",
+        automargin=True,
     )
     fig.update_yaxes(
         title=dict(text=y_label, font=dict(family=FONT_FAMILY, size=12)),
         gridcolor="#E8E8E8",
         linecolor="#CCCCCC",
+        automargin=True,
     )
 
     # Форматирование тиков Y для денег (если большие значения)
@@ -180,7 +182,7 @@ def apply_common_style(fig: go.Figure, spec: Any) -> go.Figure:
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.2,
+            y=-0.25,
             xanchor="left",
             x=0,
             font=dict(family=FONT_FAMILY, size=10),

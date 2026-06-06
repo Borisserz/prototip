@@ -19,6 +19,9 @@ ChartType = Literal[
     "donut",
     "kpi",
     "heatmap",
+    "area",
+    "scatter",
+    "waterfall",
 ]
 
 

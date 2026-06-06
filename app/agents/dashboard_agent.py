@@ -24,6 +24,7 @@ import time
 from pydantic import BaseModel
 
 from app.agents.base_agent import BaseAgent
+from app.pipeline_progress import emit_pipeline_stage
 from app.agents.factory import get_executor
 from app.agents.models import (
     DashboardLayout,
@@ -134,7 +135,14 @@ class DashboardAgent(BaseAgent):
         data_source = "provided"
         if not data:
             try:
-                sql_res = get_executor(include_planner=False).run("data_agent", q)
+                from app.agents.models import DataAgentInput
+
+                emit_pipeline_stage("sql", "running", "Загрузка данных для дашборда...", agent="dashboard_agent")
+                dd = request.drilldown_filters
+                data_req: str | DataAgentInput = (
+                    DataAgentInput(question=q, drilldown_filters=dd) if dd else q
+                )
+                sql_res = get_executor(include_planner=False).run("data_agent", data_req)
                 if not sql_res.success:
                     raise RuntimeError(sql_res.error or "DataAgent failed")
                 data = sql_res.data
@@ -169,16 +177,41 @@ class DashboardAgent(BaseAgent):
         # 2. Insights от AnalystAgent (опционально, для качества)
         insights: list[str] = []
         try:
+            emit_pipeline_stage(
+                "synthesis",
+                "running",
+                "AnalystAgent: текстовые инсайты для дашборда...",
+                agent="dashboard_agent",
+            )
             analysis = get_executor(include_planner=False).run("analyst_agent", q, data=data)
             if not analysis.success:
                 raise RuntimeError(analysis.error or "AnalystAgent failed")
             insights = analysis.insights or []
+            emit_pipeline_stage(
+                "synthesis",
+                "done",
+                f"Получено инсайтов: {len(insights)}",
+                agent="dashboard_agent",
+            )
             logger.info(f"[DashboardAgent] analyst: got {len(insights)} insights")
         except Exception as e:
             logger.info(f"[DashboardAgent] analyst_error: {e} — will use LLM insights only")
+            emit_pipeline_stage(
+                "synthesis",
+                "error",
+                "AnalystAgent недоступен — продолжаем с LLM",
+                agent="dashboard_agent",
+                error=str(e),
+            )
             insights = []
 
         # 3. Подготовка промпта + structured вызов для композиции
+        emit_pipeline_stage(
+            "viz",
+            "running",
+            "Компоновка KPI и спецификаций графиков...",
+            agent="dashboard_agent",
+        )
         sample = data[:6]
         total_rows = len(data)
         columns = list(data[0].keys()) if data else []
@@ -286,6 +319,13 @@ class DashboardAgent(BaseAgent):
             data=data,
             source_sql=source_sql,
             reasoning=composition.reasoning,
+        )
+
+        emit_pipeline_stage(
+            "viz",
+            "done",
+            f"Дашборд: {len(result.charts)} графиков · {len(result.kpi_cards)} KPI",
+            agent="dashboard_agent",
         )
 
         elapsed = int((time.time() - start) * 1000)

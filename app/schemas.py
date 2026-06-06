@@ -13,7 +13,6 @@ from __future__ import annotations
 # (включая AgentResult как базовый для результатов агентов + Task/Plan/AgentCall).
 # Здесь просто ре-экспорт, чтобы не ломать существующие импорты по всей кодовой базе.
 from app.agents.models import (  # noqa: F401
-    # AgentCall тоже доступен при необходимости
     AgentCall,
     AgentResult,
     AnalysisResult,
@@ -24,9 +23,12 @@ from app.agents.models import (  # noqa: F401
     DashboardRequest,
     DashboardResult,
     DataAgentInput,
+    DrilldownContext,
     DeckNarrative,
     KpiCard,
     Plan,
+    PlanExecutionStep,
+    PlannerTrace,
     PresentationInput,
     PresentationRequest,
     PresentationResult,
@@ -50,6 +52,7 @@ __all__ = [
     "DashboardRequest",
     "DashboardResult",
     "DataAgentInput",
+    "DrilldownContext",
     "DeckNarrative",
     "KpiCard",
     "Plan",
@@ -60,4 +63,6 @@ __all__ = [
     "SqlResult",
     "Task",
     "AgentCall",
+    "PlanExecutionStep",
+    "PlannerTrace",
 ]

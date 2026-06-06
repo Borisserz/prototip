@@ -14,6 +14,7 @@ from app.orchestrator import Orchestrator
 from core.llm import is_ollama_available
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(),
     reason="Нужна модель Ollama qwen2.5-coder:7b-instruct для e2e Phase 8",

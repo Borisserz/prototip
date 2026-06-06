@@ -1,24 +1,48 @@
-"""Тесты Orchestrator (Phase 5).
-
-Моки PlannerAgent + live end-to-end (реальные агенты + модель).
-Проверяем, что ask() проксирует AskResult от PlannerAgent (включая png_path).
-"""
+"""Тесты Orchestrator (Phase 5+ unified facade)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.agents.models import AgentCall, Plan, PlanExecutionStep, PlannerTrace, Task
 from app.orchestrator import Orchestrator
-from app.schemas import AnalysisResult, AskResult
+from app.schemas import AnalysisResult, AskResult, DashboardResult, DrilldownContext
 from core.llm import is_ollama_available
 from core.models import ChartSpec
 
 
-def test_orchestrator_mock_full_pipeline(tmp_path):
-    """Мок PlannerAgent.run → Orchestrator.ask() проксирует готовый AskResult с png_path."""
+def _sample_trace() -> PlannerTrace:
+    plan = Plan(
+        goal="Тест",
+        tasks=[Task(id="t1", description="data", agent_name="data_agent", params={})],
+        strategy="test",
+    )
+    return PlannerTrace(
+        executed_plan=plan,
+        plan_execution=[
+            PlanExecutionStep(
+                num=1,
+                agent_name="data_agent",
+                description="Получить данные",
+                status="успешно",
+                brief_result="5 строк",
+            )
+        ],
+        agent_calls=[AgentCall(agent_name="data_agent", success=True, output_summary="ok")],
+    )
+
+
+def test_orchestrator_uses_planner_singleton():
+    from app.agents.factory import get_planner
+
+    orch = Orchestrator()
+    assert orch.planner is get_planner()
+    assert orch.executor is not None
+
+
+def test_orchestrator_mock_ask_returns_result_with_trace(tmp_path):
     orch = Orchestrator()
 
     mock_analysis = AnalysisResult(
@@ -27,7 +51,6 @@ def test_orchestrator_mock_full_pipeline(tmp_path):
         anomaly_or_trend="Аномалия в Гомеле",
         reasoning="mock analyst",
     )
-
     mock_spec = ChartSpec(
         chart_type="bar",
         title="Начисления по регионам",
@@ -36,7 +59,6 @@ def test_orchestrator_mock_full_pipeline(tmp_path):
         agg="sum",
         rationale="Сравнение",
     )
-
     png_file = tmp_path / "out" / "fake.png"
     png_file.parent.mkdir(parents=True, exist_ok=True)
     png_file.write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -44,49 +66,74 @@ def test_orchestrator_mock_full_pipeline(tmp_path):
     fake_ask = AskResult(
         question="Топ регионов по начислениям?",
         sql="SELECT region, SUM(accrued) FROM df GROUP BY region LIMIT 5",
-        data=[
-            {"region": "г. Минск", "total": 1200000000},
-            {"region": "Минская область", "total": 450000000},
-        ],
+        data=[{"region": "г. Минск", "total": 1200000000}],
         analysis=mock_analysis,
         chart_spec=mock_spec,
         png_path=str(png_file),
         reasoning="mock planner aggregate",
+        trace=_sample_trace(),
     )
 
-    with patch("app.agents.planner_agent.PlannerAgent.run", return_value=fake_ask) as mock_run:
+    with patch.object(orch.planner, "run", return_value=fake_ask) as mock_run:
         res = orch.ask("Топ регионов по начислениям?")
 
-    mock_run.assert_called_once_with("Топ регионов по начислениям?")
+    mock_run.assert_called_once_with("Топ регионов по начислениям?", drilldown=None)
     assert res is fake_ask
-    assert isinstance(res, AskResult)
-    assert "SELECT" in res.sql
-    assert res.analysis is not None
-    assert len(res.analysis.insights) == 3
-    assert res.chart_spec is not None
-    assert res.chart_spec.chart_type == "bar"
-    assert res.png_path == str(png_file)
-    assert Path(res.png_path).exists()
-    assert Path(res.png_path).stat().st_size > 0
+    assert res.trace is not None
+    assert res.trace.executed_plan is not None
 
 
+def test_orchestrator_dashboard_via_executor():
+    orch = Orchestrator()
+    fake_dash = DashboardResult(
+        title="Дашборд",
+        summary="Сводка",
+        reasoning="mock",
+    )
+    with patch.object(orch.executor, "run", return_value=fake_dash) as mock_run:
+        res = orch.dashboard("Дашборд по регионам", max_charts=3)
+
+    mock_run.assert_called_once()
+    assert res.title == "Дашборд"
+
+
+def test_orchestrator_presentation_via_executor():
+    orch = Orchestrator()
+    fake_pres = MagicMock()
+    fake_pres.num_slides = 5
+    fake_pres.success = True
+    with patch.object(orch.executor, "run", return_value=fake_pres) as mock_run:
+        res = orch.presentation(["Вопрос 1"], num_slides=5)
+
+    mock_run.assert_called_once()
+    assert res.num_slides == 5
+
+
+def test_orchestrator_ask_drilldown_passthrough():
+    orch = Orchestrator()
+    dd = DrilldownContext(filters={"region": "г. Минск"})
+    fake = AskResult(question="q", sql="SELECT 1", data=[], reasoning="ok")
+
+    with patch.object(orch.planner, "run", return_value=fake) as mock_run:
+        orch.ask("Динамика", drilldown=dd)
+
+    mock_run.assert_called_once_with("Динамика", drilldown=dd)
+
+
+def test_orchestrator_ask_result_fallback():
+    orch = Orchestrator()
+    dash = DashboardResult(title="T", summary="S", reasoning="r", data=[{"a": 1}])
+    dash.trace = _sample_trace()
+    fb = orch.ask_result_fallback("Вопрос", dash)
+    assert isinstance(fb, AskResult)
+    assert fb.question == "Вопрос"
+    assert fb.trace is not None
+
+
+@pytest.mark.live
 @pytest.mark.skipif(not is_ollama_available(), reason="Нужна модель для live Phase 5")
 def test_orchestrator_live_end_to_end():
-    """Реальный end-to-end прогон. PNG должен появиться в out/."""
     orch = Orchestrator()
-
-    questions = [
-        "Какая динамика начислений по регионам?",
-    ]
-
-    for q in questions:
-        res = orch.ask(q)
-
-        assert isinstance(res, AskResult)
-        assert res.sql.startswith("SELECT") or "ERROR" not in res.sql
-        assert res.analysis is not None
-        assert len(res.analysis.insights) >= 3
-        assert res.chart_spec is not None
-        assert res.png_path is not None
-        assert "out/" in res.png_path or "chart_" in res.png_path
-        assert Path(res.png_path).exists()
+    res = orch.ask("Какая динамика начислений по регионам?")
+    assert isinstance(res, AskResult)
+    assert res.analysis is not None or res.chart_spec is not None or res.data

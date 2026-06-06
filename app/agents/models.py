@@ -37,6 +37,10 @@ class AgentResult(BaseModel):
         description="Обоснование принятых решений, наблюдения по данным, почему выбран такой результат (для отладки и Planner)",
     )
     error: str | None = Field(None, description="Текст ошибки, если success=False")
+    trace: PlannerTrace | None = Field(
+        None,
+        description="Трассировка PlannerAgent (план, шаги, agent_calls)",
+    )
 
 
 # =============================================================================
@@ -94,15 +98,53 @@ class AgentCall(BaseModel):
     output_summary: str = Field("", description="Краткое описание результата")
 
 
+class PlanExecutionStep(BaseModel):
+    """Один шаг выполнения плана PlannerAgent (для UI trace)."""
+
+    num: int
+    agent_name: str
+    description: str
+    status: str
+    brief_result: str = ""
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class PlannerTrace(BaseModel):
+    """Трассировка выполнения PlannerAgent: план, шаги, вызовы агентов."""
+
+    executed_plan: Plan | None = None
+    plan_execution: list[PlanExecutionStep] = Field(default_factory=list)
+    agent_calls: list[AgentCall] = Field(default_factory=list)
+
+
 # =============================================================================
 # Результаты DataAgent
 # =============================================================================
+
+
+class DrilldownContext(BaseModel):
+    """Структурный контекст drill-down из UI (фильтры с графика)."""
+
+    filters: dict[str, str] = Field(
+        default_factory=dict,
+        description="Активные фильтры: region, tax_type, period",
+    )
+    dimension: str = Field(default="_segment", description="Основное измерение drill-down")
+    segment_label: str = Field(default="", description="Человекочитаемая метка сегмента")
+    trail: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Цепочка предыдущих шагов детализации",
+    )
 
 
 class DataAgentInput(BaseModel):
     """Вход для DataAgent (вопрос на русском)."""
 
     question: str = Field(..., min_length=5, description="Вопрос пользователя на русском")
+    drilldown_filters: dict[str, str] | None = Field(
+        None,
+        description="Жёсткие фильтры из drill-down UI (region/tax_type/period)",
+    )
 
 
 class SqlResult(AgentResult):
@@ -130,6 +172,10 @@ class AnalysisResult(AgentResult):
     key_conclusion: str = Field(..., description="Ключевой вывод (одно-два предложения, без воды)")
     anomaly_or_trend: str | None = Field(
         None, description="Замеченная аномалия или тренд (если выявлена)"
+    )
+    follow_up_questions: list[str] = Field(
+        default_factory=list,
+        description="2-3 логичных уточняющих вопроса для дальнейшего анализа",
     )
 
 
@@ -187,6 +233,14 @@ class PresentationResult(AgentResult):
         ..., description="Путь к созданному файлу презентации (out/presentation.pptx)"
     )
     num_slides: int = Field(..., description="Количество слайдов в презентации")
+    slide_png_paths: list[str] = Field(
+        default_factory=list,
+        description="Пути к PNG-превью слайдов с графиками (out/pres_slide_*.png)",
+    )
+    presentation_id: str = Field(
+        default="",
+        description="Уникальный id прогона для изоляции PNG-превью",
+    )
 
 
 class DeckNarrative(AgentResult):
@@ -270,6 +324,10 @@ class DashboardRequest(BaseModel):
     )
     max_charts: int = Field(4, ge=1, le=6, description="Максимальное число графиков в дашборде")
     include_kpi: bool = Field(True, description="Включать ли KPI-карточки")
+    drilldown_filters: dict[str, str] | None = Field(
+        None,
+        description="Жёсткие фильтры drill-down для вложенного DataAgent",
+    )
 
 
 class DashboardResult(AgentResult):
@@ -301,3 +359,6 @@ class DashboardResult(AgentResult):
     )
     generated_at: datetime = Field(default_factory=datetime.now)
     # reasoning унаследован от AgentResult; DashboardAgent всегда заполняет его явно
+
+
+AgentResult.model_rebuild()

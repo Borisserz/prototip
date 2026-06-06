@@ -153,6 +153,7 @@ def test_dashboard_agent_graceful_no_data() -> None:
     )
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(), reason="Ollama недоступен для живого теста DashboardAgent"
 )

@@ -73,6 +73,7 @@ def test_analyst_agent_includes_chart_spec_in_prompt() -> None:
     assert "horizontal_bar" in prompt_arg or "горизонтальной" in prompt_arg
 
 
+@pytest.mark.live
 @pytest.mark.skipif(
     not is_ollama_available(), reason="Ollama + модель недоступна для live теста Phase 3"
 )

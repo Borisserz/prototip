@@ -8,12 +8,15 @@ so agents can safely call get_executor().run(...) from inside their run methods.
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 from app.agents.executor import AgentExecutor, AgentRegistry
 
 _executor_lock = threading.RLock()
 _executor: AgentExecutor | None = None
 _executor_with_planner: bool = False
+_planner_lock = threading.RLock()
+_planner: Any = None
 
 
 def get_executor(*, include_planner: bool = True, fresh: bool = False) -> AgentExecutor:
@@ -69,3 +72,18 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
         executor.register(PlannerAgent(use_shared_executor=False))
 
     return executor
+
+
+def get_planner(*, fresh: bool = False) -> Any:
+    """Singleton PlannerAgent с общим LRU-кэшем (для Orchestrator и UI)."""
+    global _planner
+
+    from app.agents.planner_agent import PlannerAgent
+
+    if fresh:
+        return PlannerAgent(use_shared_executor=True)
+
+    with _planner_lock:
+        if _planner is None:
+            _planner = PlannerAgent(use_shared_executor=True)
+        return _planner

@@ -134,7 +134,7 @@ def test_planner_repair_plan_adds_missing_depends_on_and_question():
     from app.agents.models import Task
     from app.agents.planner_agent import PlannerAgent
 
-    p = PlannerAgent()
+    p = PlannerAgent(use_shared_executor=True)
 
     # План, который LLM мог отдать без depends_on и без "question" в params второй задачи
     bad_tasks = [
@@ -170,7 +170,7 @@ def test_planner_repair_plan_diamond_adds_chart_dep_to_analyst():
     from app.agents.models import Task
     from app.agents.planner_agent import PlannerAgent
 
-    p = PlannerAgent()
+    p = PlannerAgent(use_shared_executor=True)
     tasks = [
         Task(
             id="t1",

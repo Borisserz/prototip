@@ -1,12 +1,17 @@
 """Streamlit UI для BI-аналитики налогов РБ — премиальный чат-интерфейс.
 
-Тонкий клиент: вся логика в Orchestrator.ask() / dashboard().
+Тонкий клиент: вся логика в Orchestrator.ask() / presentation().
 Запуск: streamlit run ui/streamlit_app.py
 """
 
 from __future__ import annotations
 
+import hashlib
+import html
 import sys
+import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +24,22 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
+from app.config import config  # noqa: E402
+from app.drilldown import (  # noqa: E402
+    DRILLDOWN_DIMENSIONS,
+    build_detailed_analysis_question,
+    drilldown_context_fingerprint,
+    drilldown_context_from_selection,
+    session_drilldown_context,
+)
+from app.logging_utils import new_correlation_id, run_logger  # noqa: E402
 from app.orchestrator import Orchestrator  # noqa: E402
-from app.schemas import AskResult, DashboardRequest, DashboardResult  # noqa: E402
+from app.pipeline_progress import pipeline_store  # noqa: E402
+from app.schemas import AskResult, ChartSpec, DashboardResult, DrilldownContext  # noqa: E402
+from ui.components.pipeline import pipeline_status_headline, update_pipeline_live_ui  # noqa: E402
+from ui.components.trace import render_planner_trace  # noqa: E402
 from viz.charts import build_chart  # noqa: E402
+from viz.style import format_number_ru, get_russian_label  # noqa: E402
 
 # Константы для формы презентации (используются в UI и могут тестироваться)
 CHART_DISPLAY_OPTIONS: list[str] = [
@@ -48,6 +66,18 @@ SUGGESTION_PROMPTS: list[str] = [
     "Топ-3 региона по подоходному налогу",
 ]
 
+# Карточки empty state: (иконка, заголовок, описание, запрос агентам)
+PROMPT_CARDS: list[tuple[str, str, str, str]] = [
+    ("🗺️", "Топ регионов по долгу", "Рейтинг задолженности по областям", "Какая задолженность по регионам?"),
+    ("📈", "Динамика в Минске", "Начисления по месяцам за 2024 год", "Динамика начислений в г. Минск за год"),
+    ("📊", "Структура налогов", "Доли видов налогов в разрезе", "Структура налогов по видам (доли)"),
+    ("📋", "Дашборд по долгу", "KPI и графики в одном обзоре", "Покажи дашборд по задолженности по регионам"),
+    ("🏆", "Топ-3 по подоходному", "Лидеры по подоходному налогу", "Топ-3 региона по подоходному налогу"),
+    ("🔍", "Сводка по Минску", "Ключевые метрики г. Минска", "Ключевые метрики и дашборд по начислениям в г. Минск"),
+]
+
+# Обратная совместимость для тестов/импортов
+PROMPT_CHIPS: list[tuple[str, str]] = [(f"{i} {t}", q) for i, t, _, q in PROMPT_CARDS[:3]]
 
 @st.cache_resource(show_spinner=False)
 def get_orchestrator() -> Orchestrator:
@@ -68,47 +98,1220 @@ def _inject_custom_css() -> None:
     st.markdown(
         """
         <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header[data-testid="stHeader"] {background: transparent;}
-        .block-container {padding-top: 2rem; padding-bottom: 4rem; max-width: 52rem;}
-        [data-testid="stChatMessage"] {border-radius: 12px;}
+        /* ── Standalone product chrome ── */
+        #MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden; height: 0;}
+        .stApp {
+            background: linear-gradient(180deg, #F4F7FC 0%, #EEF2F8 100%);
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .block-container {
+            padding-top: 1.5rem;
+            padding-bottom: 5rem;
+            max-width: 56rem;
+        }
+
+        /* ── Typography ── */
+        h1, h2, h3, h4, .analytics-title {
+            color: #0F172A !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em;
+        }
+        p, .stMarkdown, [data-testid="stChatMessage"] { color: #334155; }
+
+        /* ── Chat cards ── */
+        [data-testid="stChatMessage"] {
+            background: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+            padding: 0.35rem 0.5rem 0.75rem;
+            margin-bottom: 0.85rem;
+        }
+        [data-testid="stChatMessage"] [data-testid="stVerticalBlock"] {
+            gap: 0.45rem;
+        }
+
+        /* ── Analytics result card ── */
+        .analytics-card-wrap {
+            background: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            box-shadow: 0 6px 24px rgba(15, 23, 42, 0.07);
+            padding: 1.25rem 1.35rem 1.1rem;
+            margin: 0.25rem 0 0.5rem;
+        }
+        .analytics-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.85rem;
+            flex-wrap: wrap;
+        }
+        .analytics-title {
+            font-size: 1.35rem;
+            line-height: 1.3;
+            margin: 0;
+            color: #0F172A;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: #ECFDF5;
+            color: #047857;
+            border: 1px solid #A7F3D0;
+            border-radius: 999px;
+            padding: 0.3rem 0.75rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .status-badge.warn {
+            background: #FFFBEB;
+            color: #B45309;
+            border-color: #FDE68A;
+        }
+        .chart-panel {
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+            padding: 0.65rem 0.5rem 0.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        /* ── Chart error callout ── */
+        .chart-error-block {
+            display: flex;
+            gap: 0.85rem;
+            align-items: flex-start;
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 12px;
+            padding: 1rem 1.1rem;
+            margin: 0.5rem 0 0.75rem;
+        }
+        .chart-error-icon { font-size: 1.5rem; line-height: 1; }
+        .chart-error-title {
+            font-weight: 700;
+            color: #991B1B;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+        .chart-error-desc { color: #7F1D1D; font-size: 0.88rem; line-height: 1.45; }
+
+        /* ── Analysis blocks ── */
+        .key-conclusion-block {
+            background: linear-gradient(135deg, #EFF6FF 0%, #E0F2FE 100%);
+            border-left: 4px solid #2563EB;
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+            margin-bottom: 0.75rem;
+        }
+        .key-conclusion-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #1D4ED8;
+            margin-bottom: 0.35rem;
+        }
+        .key-conclusion-text {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #0F172A;
+            line-height: 1.45;
+            margin: 0;
+        }
+        .insight-item {
+            display: flex;
+            gap: 0.55rem;
+            align-items: flex-start;
+            padding: 0.55rem 0;
+            border-bottom: 1px solid #F1F5F9;
+        }
+        .insight-item:last-child { border-bottom: none; }
+        .insight-icon { font-size: 1rem; line-height: 1.4; flex-shrink: 0; }
+        .insight-text { font-size: 0.92rem; color: #334155; line-height: 1.45; }
+        .anomaly-block {
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+            margin-top: 0.5rem;
+        }
+        .anomaly-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #B45309;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.3rem;
+        }
+        .anomaly-text { color: #92400E; font-size: 0.9rem; line-height: 1.4; }
+
+        /* ── Empty state cards ── */
+        .empty-hero {
+            text-align: center;
+            padding: 1.5rem 0 0.5rem;
+        }
+        .empty-hero h2 {
+            font-size: 1.75rem !important;
+            margin-bottom: 0.35rem !important;
+        }
+        .empty-hero p { color: #64748B; font-size: 1rem; }
+        .empty-grid [data-testid="column"] .stButton > button {
+            width: 100%;
+            min-height: 7.5rem;
+            padding: 1rem 1.1rem;
+            border-radius: 14px;
+            border: 1px solid #E2E8F0;
+            background: #FFFFFF;
+            color: #0F172A;
+            font-weight: 600;
+            line-height: 1.35;
+            white-space: normal;
+            text-align: left;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+            transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+        }
+        .empty-grid [data-testid="column"] .stButton > button:hover {
+            border-color: #93C5FD;
+            background: #F8FAFC;
+            box-shadow: 0 8px 28px rgba(37, 99, 235, 0.14);
+            transform: translateY(-2px);
+        }
+        .empty-grid [data-testid="column"] .stButton > button p {
+            margin: 0;
+        }
+
+        /* ── Secondary action buttons ── */
+        .export-row [data-testid="stDownloadButton"] button,
+        .export-row .stButton > button {
+            background: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
+            color: #334155 !important;
+            font-weight: 600 !important;
+            border-radius: 10px !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+        }
+        .export-row [data-testid="stDownloadButton"] button:hover,
+        .export-row .stButton > button:hover {
+            border-color: #94A3B8 !important;
+            background: #F8FAFC !important;
+        }
+
+        /* ── Sidebar polish ── */
+        [data-testid="stSidebar"] {
+            background: #FFFFFF;
+            border-right: 1px solid #E2E8F0;
+        }
+
+        /* ── Pinned dashboard mini-cards ── */
+        .pinned-card {
+            background: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 12px;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+            padding: 0.85rem 0.95rem 0.75rem;
+            margin-bottom: 0.75rem;
+            min-height: 100%;
+        }
+        .pinned-card-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #0F172A;
+            margin-bottom: 0.45rem;
+            line-height: 1.3;
+        }
+        .pin-row .stButton > button[kind="secondary"] {
+            border-color: #FCD34D !important;
+            color: #92400E !important;
+            background: #FFFBEB !important;
+        }
+
+        /* ── Drill-down breadcrumbs & CTA ── */
+        .drill-breadcrumbs {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.35rem;
+            margin: 0.35rem 0 0.65rem;
+            font-size: 0.82rem;
+        }
+        .drill-crumb {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            color: #1E40AF;
+            border-radius: 999px;
+            padding: 0.22rem 0.65rem;
+            font-weight: 600;
+        }
+        .drill-crumb.active {
+            background: #DBEAFE;
+            border-color: #60A5FA;
+            color: #1D4ED8;
+        }
+        .drill-sep { color: #94A3B8; font-weight: 700; }
+        .drill-hint {
+            color: #64748B;
+            font-size: 0.8rem;
+            margin-bottom: 0.45rem;
+        }
+        /* ── Presentation carousel preview ── */
+        .pres-carousel-wrap {
+            background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 0.9rem 0.85rem 0.75rem;
+            margin: 0.75rem 0 0.85rem;
+        }
+        .pres-preview-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: #64748B;
+            margin-bottom: 0.45rem;
+        }
+        .pres-slide-counter {
+            text-align: center;
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #334155;
+            letter-spacing: 0.01em;
+            margin: 0.15rem 0 0.55rem;
+            padding: 0.35rem 0.65rem;
+            background: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-radius: 999px;
+            display: inline-block;
+            width: auto;
+            min-width: 9rem;
+        }
+        .pres-counter-row {
+            text-align: center;
+            margin-bottom: 0.35rem;
+        }
+        .pres-carousel-wrap [data-testid="stImage"] {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 6px 22px rgba(15, 23, 42, 0.1);
+            border: 1px solid #E2E8F0;
+        }
+        .pres-nav-hint {
+            text-align: center;
+            font-size: 0.78rem;
+            color: #94A3B8;
+            margin-top: 0.35rem;
+        }
+        .pres-download-cta {
+            margin-top: 0.15rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _is_dashboard_request(text: str) -> bool:
-    lowered = text.lower()
-    return any(kw in lowered for kw in ("дашборд", "dashboard", "обзор", "сводк", "ключевые метрики"))
+def _normalize_result(res: Any) -> Any:
+    """Восстанавливает Pydantic-модель, если результат в session_state оказался dict."""
+    if isinstance(res, dict):
+        if res.get("charts") is not None or res.get("kpi_cards") is not None:
+            return DashboardResult.model_validate(res)
+        if res.get("pptx_path"):
+            from app.schemas import PresentationResult
+
+            return PresentationResult.model_validate(res)
+        if res.get("chart_spec") is not None or res.get("data") is not None:
+            return AskResult.model_validate(res)
+    return res
 
 
-def _friendly_status_steps(is_dashboard: bool) -> list[str]:
-    if is_dashboard:
-        return [
-            "📊 Получаю данные из датасета...",
-            "📈 Подбираю графики и KPI...",
-            "📝 Формирую выводы...",
-        ]
-    return [
-        "📊 Получаю данные...",
-        "📈 Рисую график...",
-        "📝 Готовлю аналитические выводы...",
+def _coerce_chart_spec(spec: Any) -> ChartSpec | None:
+    if spec is None:
+        return None
+    if isinstance(spec, ChartSpec):
+        return spec
+    if isinstance(spec, dict):
+        return ChartSpec.model_validate(spec)
+    return None
+
+
+def _resolve_artifact_path(path: str | None) -> Path | None:
+    """Ищет PNG/артефакт относительно cwd и корня проекта."""
+    if not path or str(path).startswith("ERROR"):
+        return None
+    candidate = Path(path)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    for base in (Path.cwd(), PROJECT_ROOT):
+        resolved = (base / candidate).resolve()
+        if resolved.exists():
+            return resolved
+    return candidate if candidate.exists() else None
+
+
+def _collect_presentation_preview_paths(res: Any) -> list[Path]:
+    """Собирает PNG-превью слайдов из результата или out/pres_slide_*.png."""
+    raw_paths: list[str] = []
+    if isinstance(res, dict):
+        raw_paths = list(res.get("slide_png_paths") or [])
+    elif hasattr(res, "slide_png_paths"):
+        raw_paths = list(getattr(res, "slide_png_paths") or [])
+
+    resolved: list[Path] = []
+    seen: set[str] = set()
+    for item in raw_paths:
+        path = _resolve_artifact_path(item)
+        if path and path.exists():
+            key = str(path.resolve())
+            if key not in seen:
+                seen.add(key)
+                resolved.append(path)
+    return resolved
+
+
+def _presentation_carousel_state_key(paths: list[Path], key_prefix: str) -> str:
+    digest = hashlib.sha256("|".join(str(p) for p in paths).encode()).hexdigest()[:10]
+    return f"pres_carousel_{key_prefix}_{digest}"
+
+
+def _render_presentation_carousel(paths: list[Path], *, key_prefix: str) -> None:
+    """Карусель предпросмотра PNG-слайдов с навигацией Назад / Вперед."""
+    if not paths:
+        st.caption("Превью графиков недоступно — слайды без диаграмм или PNG не сгенерированы.")
+        return
+
+    state_key = _presentation_carousel_state_key(paths, key_prefix)
+    if state_key not in st.session_state:
+        st.session_state[state_key] = 0
+
+    total = len(paths)
+    idx = int(st.session_state[state_key])
+    idx = max(0, min(idx, total - 1))
+    st.session_state[state_key] = idx
+
+    st.markdown('<div class="pres-carousel-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="pres-preview-label">Предпросмотр слайдов</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="pres-counter-row"><span class="pres-slide-counter">Слайд {idx + 1} из {total}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    nav_l, nav_img, nav_r = st.columns([1, 5, 1])
+    with nav_l:
+        if st.button(
+            "← Назад",
+            key=f"{key_prefix}_pres_prev",
+            disabled=idx <= 0,
+            use_container_width=True,
+        ):
+            st.session_state[state_key] = max(0, idx - 1)
+            st.rerun()
+    with nav_img:
+        st.image(str(paths[idx]), use_container_width=True)
+    with nav_r:
+        if st.button(
+            "Вперед →",
+            key=f"{key_prefix}_pres_next",
+            disabled=idx >= total - 1,
+            use_container_width=True,
+        ):
+            st.session_state[state_key] = min(total - 1, idx + 1)
+            st.rerun()
+
+    st.markdown(
+        '<div class="pres-nav-hint">Листайте превью, чтобы оценить качество графиков перед скачиванием</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_presentation_download_button(
+    pptx_path: str | None,
+    *,
+    key: str,
+    label: str = "📥 Скачать презентацию (.pptx)",
+) -> None:
+    """Финальный CTA — скачивание .pptx под каруселью."""
+    resolved = _resolve_artifact_path(pptx_path)
+    if not resolved or not resolved.exists():
+        st.warning("Файл презентации не найден. Попробуйте сгенерировать заново.")
+        return
+    with open(resolved, "rb") as f:
+        st.markdown('<div class="pres-download-cta">', unsafe_allow_html=True)
+        st.download_button(
+            label,
+            data=f.read(),
+            file_name="presentation.pptx",
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            use_container_width=True,
+            key=key,
+            type="primary",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_presentation_block(res: Any, *, key_prefix: str = "pres") -> None:
+    """Карточка презентации: статус, карусель PNG, скачивание .pptx."""
+    res = _normalize_result(res)
+    num_slides = getattr(res, "num_slides", 0) or 0
+    preview_paths = _collect_presentation_preview_paths(res)
+    ppath = getattr(res, "pptx_path", None)
+
+    st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="analytics-card-header">
+            <h3 class="analytics-title">Презентация готова</h3>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Всего слайдов в колоде: **{num_slides}** · превью графиков: **{len(preview_paths)}**")
+
+    _render_presentation_carousel(preview_paths, key_prefix=key_prefix)
+    _render_presentation_download_button(ppath, key=f"dl_pptx_{key_prefix}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _plotly_without_title(fig: Any) -> Any:
+    """Убирает заголовок с фигуры — заголовок выводится отдельно в чате."""
+    try:
+        fig.update_layout(title="")
+    except Exception:
+        try:
+            fig.layout.title.text = ""
+        except Exception:
+            pass
+    return fig
+
+
+def _fig_for_streamlit(fig: Any) -> Any:
+    """Адаптирует фигуру под узкий чат Streamlit (без фиксированной ширины 1000px)."""
+    fig = _plotly_without_title(fig)
+    try:
+        fig.update_layout(
+            width=None,
+            height=440,
+            autosize=True,
+            margin=dict(l=48, r=24, t=24, b=56),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="#FFFFFF",
+        )
+    except Exception:
+        pass
+    return fig
+
+
+def _render_chart_error(message: str) -> None:
+    """Кастомный блок ошибки визуализации (без жёлтого st.warning)."""
+    safe = html.escape(str(message))
+    st.markdown(
+        f"""
+        <div class="chart-error-block">
+            <div class="chart-error-icon">🛑</div>
+            <div>
+                <div class="chart-error-title">Недостаточно данных для графика</div>
+                <div class="chart-error-desc">{safe}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _handle_plotly_selection(
+    event: Any,
+    chart_spec: ChartSpec,
+    *,
+    chart_key: str,
+) -> None:
+    """Сохраняет выбор на графике в session_state (без автозапроса к Orchestrator)."""
+    ctx = drilldown_context_from_selection(event, chart_spec, chart_key=chart_key)
+    prev = st.session_state.get("drilldown_context")
+    prev_fp = drilldown_context_fingerprint(prev)
+    new_fp = drilldown_context_fingerprint(ctx)
+
+    if ctx is None:
+        if isinstance(prev, dict) and prev.get("source_chart_key") == chart_key:
+            st.session_state["drilldown_context"] = None
+        return
+
+    if new_fp != prev_fp:
+        st.session_state["drilldown_context"] = ctx
+
+
+def _render_drilldown_chrome(
+    chart_key: str | None,
+    chart_spec: ChartSpec | None,
+    *,
+    enable_drilldown: bool,
+) -> None:
+    """Контекст детализации и CTA для drill-down над графиком."""
+    if not enable_drilldown or not chart_key or chart_spec is None:
+        return
+
+    trail: list[dict[str, Any]] = st.session_state.get("drilldown_trail", [])
+    ctx: dict[str, Any] | None = st.session_state.get("drilldown_context")
+    is_active_chart = isinstance(ctx, dict) and ctx.get("source_chart_key") == chart_key
+
+    if trail:
+        trail_parts = []
+        for step in trail:
+            dim = step.get("dimension", "")
+            dim_label = DRILLDOWN_DIMENSIONS.get(dim, "Сегмент")
+            val = str(step.get("label", step.get("value", "")))
+            trail_parts.append(f"{dim_label}: {val}")
+        st.caption("Контекст: " + " → ".join(trail_parts))
+
+        reset_col, _ = st.columns([1, 3])
+        with reset_col:
+            if st.button("Сбросить детализацию", key=f"drill_reset_{chart_key}", use_container_width=True):
+                st.session_state["drilldown_trail"] = []
+                st.session_state["drilldown_context"] = None
+                st.rerun()
+    elif enable_drilldown and not is_active_chart:
+        st.caption("Кликните по столбцу или точке на графике, чтобы выбрать сегмент для углубления.")
+
+    if is_active_chart and ctx:
+        segment = str(ctx.get("segment_label", "сегмент"))
+        st.markdown(f"Выбранный сегмент: **{segment}**")
+        if st.button(
+            f"🔎 Детальный анализ: {segment}",
+            type="primary",
+            key=f"drill_go_{chart_key}",
+            use_container_width=True,
+        ):
+            trail = list(st.session_state.get("drilldown_trail", []))
+            dim = ctx.get("dimension", "_segment")
+            trail.append(
+                {
+                    "dimension": dim,
+                    "value": ctx.get("filters", {}).get(dim, segment),
+                    "label": segment,
+                }
+            )
+            st.session_state["drilldown_trail"] = trail[-8:]
+            st.session_state["pending_drilldown"] = DrilldownContext(
+                filters=dict(ctx.get("filters") or {}),
+                dimension=str(ctx.get("dimension") or "_segment"),
+                segment_label=segment,
+                trail=[{k: str(v) for k, v in step.items()} for step in trail],
+            )
+            st.session_state["drilldown_context"] = None
+            question = build_detailed_analysis_question(segment)
+            st.session_state.setdefault("main_messages", []).append(
+                {"role": "user", "content": question}
+            )
+            st.rerun()
+
+
+def _render_chart_block(
+    data: list[dict],
+    chart_spec: ChartSpec,
+    png_path: str | None = None,
+    *,
+    chart_key: str | None = None,
+    enable_drilldown: bool = False,
+) -> tuple[bool, str | None]:
+    """Рисует график: Plotly → PNG fallback. Возвращает (успех, текст ошибки)."""
+    last_error: str | None = None
+
+    if data and chart_spec:
+        try:
+            df = pd.DataFrame(data)
+            fig = _fig_for_streamlit(build_chart(df, chart_spec))
+            plotly_kwargs: dict[str, Any] = {
+                "use_container_width": True,
+                "key": chart_key,
+                "config": {"displayModeBar": True, "responsive": True, "displaylogo": False},
+            }
+            if enable_drilldown and chart_key:
+                plotly_kwargs["on_select"] = "rerun"
+                plotly_kwargs["selection_mode"] = ("points",)
+                event = st.plotly_chart(fig, **plotly_kwargs)
+                _handle_plotly_selection(event, chart_spec, chart_key=chart_key)
+            else:
+                st.plotly_chart(fig, **plotly_kwargs)
+            return True, None
+        except Exception as exc:
+            last_error = str(exc)
+
+    artifact = _resolve_artifact_path(png_path)
+    if artifact is not None:
+        st.image(str(artifact), use_container_width=True)
+        return True, last_error
+
+    if last_error or (chart_spec and not data):
+        st.info(
+            "📊 Графическая визуализация недоступна для данного среза данных. "
+            "Ознакомьтесь с текстовыми выводами ниже."
+        )
+    return False, last_error
+
+
+def _pin_fingerprint(res: AskResult) -> str:
+    """Стабильный id для дедупликации закреплённых графиков."""
+    res = _normalize_result(res)
+    if not isinstance(res, AskResult):
+        return hashlib.sha256(repr(res).encode()).hexdigest()[:16]
+    spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    parts = [
+        getattr(res, "question", "") or "",
+        getattr(res, "sql", "") or "",
+        spec.chart_type if spec else "",
+        spec.title if spec else "",
+        spec.x if spec else "",
+        spec.y if spec else "",
+        str(len(getattr(res, "data", None) or [])),
     ]
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _is_pinned(res: AskResult) -> bool:
+    fp = _pin_fingerprint(res)
+    pinned: list[Any] = st.session_state.get("pinned_items", [])
+    return any(_pin_fingerprint(item) == fp for item in pinned)  # type: ignore[arg-type]
+
+
+def _pin_result(res: AskResult) -> None:
+    if _is_pinned(res):
+        return
+    res = _normalize_result(res)
+    if isinstance(res, AskResult) and hasattr(res, "model_dump"):
+        st.session_state.setdefault("pinned_items", []).append(res.model_dump())
+    else:
+        st.session_state.setdefault("pinned_items", []).append(res)
+
+
+def _style_dataframe(df: pd.DataFrame) -> Any:
+    """Умная таблица: градиент по числам + формат Br (в духе PALETTE Blues)."""
+    if df.empty:
+        return df
+    metric_cols = {"accrued", "paid", "debt", "penalties", "taxpayers"}
+    numeric_cols = [c for c in df.select_dtypes(include="number").columns if c in metric_cols]
+    styler = df.style
+    if numeric_cols:
+        styler = styler.background_gradient(cmap="Blues", subset=numeric_cols, axis=None)
+
+        def _fmt_cell(v: Any) -> str:
+            if pd.isna(v):
+                return "—"
+            if isinstance(v, (int, float)):
+                return format_number_ru(v)
+            return str(v)
+
+        styler = styler.format({col: _fmt_cell for col in numeric_cols})
+    return styler
+
+
+def _render_styled_data_table(data: list[dict], *, table_key: str) -> None:
+    """Рендер сырых данных с Pandas Styler."""
+    if not data:
+        st.caption("Нет строк данных для отображения.")
+        return
+    df = pd.DataFrame(data)
+    df = df.rename(columns={c: get_russian_label(c) for c in df.columns})
+    styled = _style_dataframe(df)
+    st.dataframe(styled, use_container_width=True, hide_index=True, key=f"styled_df_{table_key}")
+
+
+def _render_pin_button(res: AskResult, *, action_key: str) -> None:
+    """Кнопка закрепления графика на «Мой дашборд»."""
+    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    data = getattr(res, "data", None) or []
+    has_visual = chart_spec is not None or _resolve_artifact_path(getattr(res, "png_path", None)) is not None
+    if not has_visual and not data:
+        return
+
+    st.markdown('<div class="pin-row">', unsafe_allow_html=True)
+    if _is_pinned(res):
+        st.button(
+            "✅ Добавлено на Мой Дашборд",
+            disabled=True,
+            use_container_width=True,
+            key=f"pin_done_{action_key}",
+        )
+    elif st.button(
+        "📌 Добавить на Мой Дашборд",
+        use_container_width=True,
+        key=f"pin_add_{action_key}",
+    ):
+        _pin_result(res)
+        st.toast("График добавлен на ⭐️ Мой собранный дашборд", icon="📌")
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_pinned_item_card(res: AskResult, *, item_idx: int) -> None:
+    """Компактная карточка для вкладки «Мой дашборд»."""
+    res = _normalize_result(res)
+    if not isinstance(res, AskResult):
+        return
+
+    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    data = getattr(res, "data", None) or []
+    title = (chart_spec.title if chart_spec and chart_spec.title else None) or getattr(
+        res, "question", f"График {item_idx + 1}"
+    )
+
+    st.markdown(
+        f'<div class="pinned-card"><div class="pinned-card-title">{html.escape(title)}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if chart_spec:
+        _render_chart_block(
+            data,
+            chart_spec,
+            getattr(res, "png_path", None),
+            chart_key=f"pinned_chart_{item_idx}",
+        )
+    elif _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
+        st.image(str(_resolve_artifact_path(res.png_path)), use_container_width=True)
+
+    analysis = getattr(res, "analysis", None)
+    if analysis and getattr(analysis, "key_conclusion", None):
+        st.caption(analysis.key_conclusion)
+    elif chart_spec and chart_spec.insights:
+        st.caption(chart_spec.insights[0])
+
+    if data:
+        with st.expander("📋 Данные", expanded=False):
+            _render_styled_data_table(data, table_key=f"pinned_{item_idx}")
+
+    if st.button("📤 Убрать с дашборда", key=f"unpin_{item_idx}", use_container_width=True):
+        fp = _pin_fingerprint(res)
+        st.session_state["pinned_items"] = [
+            item
+            for item in st.session_state.get("pinned_items", [])
+            if _pin_fingerprint(item) != fp  # type: ignore[arg-type]
+        ]
+        st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_pinned_dashboard() -> None:
+    """Вкладка «Мой собранный дашборд» — сетка 2 колонки."""
+    items: list[Any] = st.session_state.get("pinned_items", [])
+
+    hdr_left, hdr_right = st.columns([3, 1])
+    with hdr_left:
+        st.markdown("### ⭐️ Мой собранный дашборд")
+        st.caption("Графики и выводы, которые вы закрепили из чата — всегда под рукой.")
+    with hdr_right:
+        if items and st.button("🗑️ Очистить дашборд", use_container_width=True, key="clear_pinned"):
+            st.session_state["pinned_items"] = []
+            st.toast("Дашборд очищен", icon="🗑️")
+            st.rerun()
+
+    if not items:
+        st.markdown(
+            """
+            <div class="analytics-card-wrap" style="text-align:center; padding:2rem 1rem;">
+                <div style="font-size:2rem; margin-bottom:0.5rem;">📌</div>
+                <div style="font-weight:700; color:#0F172A; margin-bottom:0.35rem;">Дашборд пока пуст</div>
+                <div style="color:#64748B; font-size:0.92rem;">
+                    Задайте вопрос в чате и нажмите «Добавить на Мой Дашборд» под понравившимся графиком.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.metric("Закреплено виджетов", str(len(items)))
+
+    for row_start in range(0, len(items), 2):
+        cols = st.columns(2, gap="medium")
+        for col_idx, item in enumerate(items[row_start : row_start + 2]):
+            with cols[col_idx]:
+                _render_pinned_item_card(_normalize_result(item), item_idx=row_start + col_idx)
+
+
+def _quick_metrics_from_data(data: list[dict], chart_spec: ChartSpec | None) -> list[tuple[str, str]]:
+    """Короткие KPI из результата запроса для панели аналитики."""
+    if not data:
+        return []
+    df = pd.DataFrame(data)
+    metrics: list[tuple[str, str]] = [("Строк в выборке", str(len(df)))]
+    y_col = chart_spec.y if chart_spec else None
+    if y_col and y_col in df.columns and pd.api.types.is_numeric_dtype(df[y_col]):
+        total = float(df[y_col].sum())
+        label = get_russian_label(y_col)
+        metrics.append((f"Сумма · {label}", format_number_ru(total)))
+        if len(df) > 1:
+            metrics.append((f"Среднее · {label}", format_number_ru(df[y_col].mean(), decimals=1)))
+    else:
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        if numeric_cols:
+            col = numeric_cols[0]
+            metrics.append((get_russian_label(col), format_number_ru(float(df[col].sum()))))
+    return metrics[:3]
+
+
+def _render_export_actions(
+    res: AskResult,
+    *,
+    action_key: str,
+) -> None:
+    """Кнопки экспорта PNG и CSV под графиком."""
+    data = getattr(res, "data", None) or []
+    png_artifact = _resolve_artifact_path(getattr(res, "png_path", None))
+    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    slug = "chart"
+    if chart_spec and chart_spec.title:
+        slug = chart_spec.title[:40].replace(" ", "_")
+
+    st.markdown('<div class="export-row">', unsafe_allow_html=True)
+    cols = st.columns(2)
+    with cols[0]:
+        if png_artifact is not None:
+            with open(png_artifact, "rb") as f:
+                st.download_button(
+                    "📥 Скачать график (PNG)",
+                    data=f.read(),
+                    file_name=f"{slug}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key=f"dl_png_{action_key}",
+                )
+        else:
+            st.button(
+                "📥 Скачать график (PNG)",
+                disabled=True,
+                use_container_width=True,
+                key=f"dl_png_disabled_{action_key}",
+            )
+    with cols[1]:
+        if data:
+            csv_bytes = pd.DataFrame(data).to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "📄 Скачать данные (CSV)",
+                data=csv_bytes,
+                file_name=f"{slug}_data.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key=f"dl_csv_{action_key}",
+            )
+        else:
+            st.button(
+                "📄 Скачать данные (CSV)",
+                disabled=True,
+                use_container_width=True,
+                key=f"dl_csv_disabled_{action_key}",
+            )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_follow_up_suggestions(
+    analysis: Any,
+    *,
+    key_prefix: str = "followup",
+) -> None:
+    """Smart Follow-ups: кнопки с уточняющими вопросами для следующего шага анализа."""
+    questions = list(getattr(analysis, "follow_up_questions", None) or [])
+    if isinstance(analysis, dict):
+        questions = list(analysis.get("follow_up_questions") or [])
+    questions = [q.strip() for q in questions if isinstance(q, str) and q.strip()][:3]
+    if not questions:
+        return
+
+    st.markdown("##### ✨ Продолжить исследование")
+    cols = st.columns(len(questions))
+    for idx, question in enumerate(questions):
+        with cols[idx]:
+            label = question if len(question) <= 72 else f"{question[:69]}..."
+            if st.button(f"✨ {label}", key=f"{key_prefix}_{idx}", use_container_width=True):
+                st.session_state["pending_prompt"] = question
+                st.rerun()
+
+
+def _render_analysis_block(
+    analysis: Any,
+    data: list[dict],
+    chart_spec: ChartSpec | None,
+    *,
+    follow_up_key: str = "followup",
+) -> None:
+    """Стильный блок выводов: главный итог, инсайты, аномалии, KPI."""
+    if analysis is None:
+        return
+
+    key_conclusion = getattr(analysis, "key_conclusion", None)
+    insights = getattr(analysis, "insights", None) or []
+    anomaly = getattr(analysis, "anomaly_or_trend", None)
+    metrics = _quick_metrics_from_data(data, chart_spec)
+
+    if key_conclusion:
+        safe = html.escape(key_conclusion)
+        st.markdown(
+            f"""
+            <div class="key-conclusion-block">
+                <div class="key-conclusion-label">Главный вывод</div>
+                <p class="key-conclusion-text">{safe}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    left, right = st.columns([1.45, 1], gap="medium")
+
+    with left:
+        if insights:
+            st.markdown("##### 💡 Ключевые наблюдения")
+            items_html = "".join(
+                f'<div class="insight-item"><span class="insight-icon">💡</span>'
+                f'<span class="insight-text">{html.escape(ins)}</span></div>'
+                for ins in insights
+            )
+            st.markdown(f'<div>{items_html}</div>', unsafe_allow_html=True)
+
+    with right:
+        if metrics:
+            st.markdown("##### 📌 Цифры")
+            for label, value in metrics:
+                st.metric(label=label, value=value)
+        if anomaly:
+            st.markdown(
+                f"""
+                <div class="anomaly-block">
+                    <div class="anomaly-label">⚠️ Тренд / аномалия</div>
+                    <div class="anomaly-text">{html.escape(anomaly)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    _render_follow_up_suggestions(analysis, key_prefix=follow_up_key)
+
+
+def _render_analytics_card(
+    res: AskResult,
+    *,
+    chart_key: str | None = None,
+    enable_drilldown: bool = False,
+) -> None:
+    """Карточка аналитики: заголовок, график, экспорт, выводы."""
+    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    data = getattr(res, "data", None) or []
+    analysis = getattr(res, "analysis", None)
+
+    title = (chart_spec.title if chart_spec and chart_spec.title else None) or getattr(
+        res, "question", "Результат анализа"
+    )
+    chart_ok = False
+    badge_class = "status-badge"
+    badge_text = "✅ Успешно проанализировано"
+    if chart_spec and not data and not _resolve_artifact_path(getattr(res, "png_path", None)):
+        badge_class = "status-badge warn"
+        badge_text = "⚠️ Только текстовый анализ"
+
+    with st.container(border=False):
+        st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
+
+        st.markdown(
+            f"""
+            <div class="analytics-card-header">
+                <h3 class="analytics-title">{html.escape(title)}</h3>
+                <span class="{badge_class}">{badge_text}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        _render_drilldown_chrome(chart_key, chart_spec, enable_drilldown=enable_drilldown)
+
+        st.markdown('<div class="chart-panel">', unsafe_allow_html=True)
+        if chart_spec:
+            chart_ok, _ = _render_chart_block(
+                data,
+                chart_spec,
+                getattr(res, "png_path", None),
+                chart_key=chart_key,
+                enable_drilldown=enable_drilldown,
+            )
+        elif _resolve_artifact_path(getattr(res, "png_path", None)) is not None:
+            st.image(str(_resolve_artifact_path(res.png_path)), use_container_width=True)
+            chart_ok = True
+        else:
+            _render_chart_error("Спецификация графика не была сформирована для этого запроса.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        if chart_ok or data or _resolve_artifact_path(getattr(res, "png_path", None)):
+            _render_export_actions(res, action_key=chart_key or "default")
+            _render_pin_button(res, action_key=chart_key or "default")
+
+        if data:
+            with st.expander("📋 Данные", expanded=False):
+                _render_styled_data_table(data, table_key=chart_key or "default")
+
+        if analysis or (chart_spec and getattr(chart_spec, "insights", None)):
+            st.markdown("---")
+            if analysis:
+                _render_analysis_block(
+                    analysis,
+                    data,
+                    chart_spec,
+                    follow_up_key=f"card_{chart_key or 'default'}",
+                )
+            elif chart_spec and chart_spec.insights:
+                pseudo = type("A", (), {"insights": chart_spec.insights, "key_conclusion": None, "anomaly_or_trend": None})()
+                _render_analysis_block(
+                    pseudo,
+                    data,
+                    chart_spec,
+                    follow_up_key=f"card_{chart_key or 'default'}",
+                )
+
+        _render_technical_details(res)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_planner_result(
+    res: Any,
+    *,
+    chart_key: str | None = None,
+    enable_drilldown: bool = False,
+) -> None:
+    """Алиас для рендера результата Planner/Ask — карточка + smart follow-ups в analysis block."""
+    render_assistant_response(res, chart_key=chart_key, enable_drilldown=enable_drilldown)
+
+
+def _render_empty_state() -> None:
+    """Приветственный экран с сеткой карточек-примеров."""
+    st.markdown(
+        """
+        <div class="empty-hero">
+            <h2>Добро пожаловать в BI-Аналитику</h2>
+            <p>Задайте вопрос на русском или выберите готовый сценарий ниже</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="empty-grid">', unsafe_allow_html=True)
+    row_size = 3
+    for row_start in range(0, len(PROMPT_CARDS), row_size):
+        cols = st.columns(row_size)
+        for col_idx, card in enumerate(PROMPT_CARDS[row_start : row_start + row_size]):
+            icon, heading, desc, query = card
+            with cols[col_idx]:
+                label = f"{icon}  {heading}\n\n{desc}"
+                if st.button(label, key=f"card_{row_start + col_idx}", use_container_width=True):
+                    st.session_state["pending_prompt"] = query
+                    st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_prompt_chips() -> None:
+    """Обратная совместимость: компактные чипы (3 шт.)."""
+    _render_empty_state()
+
+
+def _session_drilldown_context() -> DrilldownContext | None:
+    return session_drilldown_context(
+        st.session_state.get("pending_drilldown"),
+        st.session_state.get("drilldown_context"),
+        st.session_state.get("drilldown_trail"),
+    )
+
+
+def _run_background_with_pipeline(
+    worker_fn: Any,
+    label: str,
+    live_slot: Any,
+    status: Any,
+    *,
+    poll_interval: float = 0.32,
+    timeout_sec: float | None = None,
+) -> Any:
+    """Общий runner: фоновая задача + live pipeline UI."""
+    if timeout_sec is None:
+        timeout_sec = float(config.pipeline_timeout_sec)
+    run_id = uuid.uuid4().hex[:10]
+    pipeline_store.reset(run_id, label)
+
+    result_holder: dict[str, Any] = {}
+    error_holder: dict[str, BaseException] = {}
+
+    def _worker() -> None:
+        try:
+            result_holder["result"] = worker_fn()
+        except BaseException as exc:
+            error_holder["error"] = exc
+        finally:
+            success = "error" not in error_holder
+            err_msg = str(error_holder["error"]) if not success else None
+            pipeline_store.finish(success=success, error=err_msg)
+
+    thread = threading.Thread(target=_worker, name=f"pipeline-{run_id}", daemon=True)
+    thread.start()
+    deadline = time.time() + timeout_sec
+
+    while thread.is_alive():
+        if time.time() > deadline:
+            pipeline_store.finish(success=False, error=f"Таймаут ({int(timeout_sec)} с)")
+            raise TimeoutError(
+                f"Обработка запроса превысила {int(timeout_sec)} с. Проверьте Ollama и повторите."
+            )
+        snapshot = pipeline_store.snapshot()
+        update_pipeline_live_ui(live_slot, status, snapshot)
+        time.sleep(poll_interval)
+
+    thread.join(timeout=1.0)
+    snapshot = pipeline_store.snapshot()
+    update_pipeline_live_ui(live_slot, status, snapshot)
+
+    if "error" in error_holder:
+        raise error_holder["error"]
+    if "result" not in result_holder:
+        raise RuntimeError("Фоновая задача завершилась без результата")
+    return result_holder["result"]
+
+
+def _run_query_with_live_pipeline(
+    prompt: str,
+    live_slot: Any,
+    status: Any,
+    *,
+    drilldown: DrilldownContext | None = None,
+    poll_interval: float = 0.32,
+) -> Any:
+    """Запускает Orchestrator в фоне и обновляет визуализатор пайплайна в реальном времени."""
+    return _run_background_with_pipeline(
+        lambda: _run_query(prompt, drilldown=drilldown),
+        prompt,
+        live_slot,
+        status,
+        poll_interval=poll_interval,
+    )
 
 
 def _render_technical_details(res: Any) -> None:
     """SQL, reasoning и прочее — только для любопытных."""
-    with st.popover("⚙️ Детали"):
+    with st.popover("⚙️ Технические детали"):
         if hasattr(res, "sql") and getattr(res, "sql", None):
             st.caption("SQL-запрос")
             st.code(res.sql, language="sql")
         if hasattr(res, "source_sql") and getattr(res, "source_sql", None):
             st.caption("SQL-запрос")
             st.code(res.source_sql, language="sql")
-        if hasattr(res, "data") and isinstance(getattr(res, "data", None), list):
-            st.caption(f"Строк данных: {len(res.data)}")
+        if hasattr(res, "data") and isinstance(getattr(res, "data", None), list) and res.data:
+            st.caption(f"Строк данных: {len(res.data)} (превью 5)")
+            preview_df = pd.DataFrame(res.data[:5])
+            if not preview_df.empty:
+                preview_df = preview_df.rename(
+                    columns={c: get_russian_label(c) for c in preview_df.columns}
+                )
+                st.dataframe(preview_df, hide_index=True)
         if hasattr(res, "reasoning") and getattr(res, "reasoning", None):
             st.caption("Служебное пояснение")
             st.write(res.reasoning)
@@ -119,146 +1322,196 @@ def _render_technical_details(res: Any) -> None:
                 st.json(res.model_dump())
 
 
-def render_assistant_response(res: Any) -> None:
+def _find_last_drilldown_message_idx(messages: list[dict[str, Any]]) -> int | None:
+    """Индекс последнего assistant-сообщения с графиком (для интерактивного drill-down)."""
+    for idx in range(len(messages) - 1, -1, -1):
+        msg = messages[idx]
+        if msg.get("role") != "assistant" or msg.get("result") is None:
+            continue
+        res = _normalize_result(msg["result"])
+        if isinstance(res, AskResult) or getattr(res, "chart_spec", None):
+            spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+            data = getattr(res, "data", None) or []
+            if spec and data:
+                return idx
+    return None
+
+
+def render_assistant_response(
+    res: Any,
+    *,
+    chart_key: str | None = None,
+    enable_drilldown: bool = False,
+) -> None:
     """Красивый рендер ответа ассистента для бизнес-пользователя."""
     if res is None:
         st.warning("Не удалось получить ответ.")
         return
 
+    res = _normalize_result(res)
+    render_planner_trace(res, key_prefix=chart_key or "trace")
+
     if hasattr(res, "success") and not getattr(res, "success", True):
-        st.error(getattr(res, "error", None) or "Не удалось выполнить запрос.")
+        st.markdown(
+            f"""
+            <div class="chart-error-block">
+                <div class="chart-error-icon">🛑</div>
+                <div>
+                    <div class="chart-error-title">Запрос не выполнен</div>
+                    <div class="chart-error-desc">{html.escape(getattr(res, "error", None) or "Неизвестная ошибка")}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         _render_technical_details(res)
         return
 
     # Презентация
-    if hasattr(res, "pptx_path"):
-        st.success(f"Презентация готова — {getattr(res, 'num_slides', 0)} слайдов.")
-        ppath = getattr(res, "pptx_path", None)
-        if ppath and Path(ppath).exists():
-            with open(ppath, "rb") as f:
-                st.download_button(
-                    "📥 Скачать презентацию (.pptx)",
-                    data=f.read(),
-                    file_name="presentation.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True,
-                )
+    if hasattr(res, "pptx_path") and getattr(res, "pptx_path", None):
+        _render_presentation_block(res, key_prefix=chart_key or "chat_pres")
+        _render_technical_details(res)
         return
 
     # Дашборд
     if isinstance(res, DashboardResult) or (
         hasattr(res, "charts") and hasattr(res, "kpi_cards")
     ):
-        _render_dashboard(res)
+        _render_dashboard(res, chart_key_prefix=chart_key or "dash")
         _render_technical_details(res)
         return
 
-    # AskResult / одиночный график
+    # AskResult — премиальная карточка
     if isinstance(res, AskResult) or (
         hasattr(res, "chart_spec") or hasattr(res, "analysis")
     ):
-        title = None
-        if getattr(res, "chart_spec", None) and getattr(res.chart_spec, "title", None):
-            title = res.chart_spec.title
-        elif getattr(res, "question", None):
-            title = res.question
-        if title:
-            st.markdown(f"### {title}")
-
-        chart_rendered = False
-        if getattr(res, "data", None) and getattr(res, "chart_spec", None):
-            try:
-                df = pd.DataFrame(res.data)
-                fig = build_chart(df, res.chart_spec)
-                st.plotly_chart(fig, use_container_width=True)
-                chart_rendered = True
-            except Exception as exc:
-                st.warning(f"Не удалось отобразить график: {exc}")
-
-        if not chart_rendered and getattr(res, "png_path", None) and Path(res.png_path).exists():
-            st.image(res.png_path, use_container_width=True)
-
-        analysis = getattr(res, "analysis", None)
-        if analysis:
-            insights = getattr(analysis, "insights", None) or []
-            if insights:
-                st.markdown("**Ключевые выводы**")
-                st.info("\n\n".join(f"• {ins}" for ins in insights))
-            if getattr(analysis, "key_conclusion", None):
-                st.markdown("**Итог**")
-                st.success(analysis.key_conclusion)
-            if getattr(analysis, "anomaly_or_trend", None):
-                st.caption(f"📌 {analysis.anomaly_or_trend}")
-
-        _render_technical_details(res)
+        _render_analytics_card(
+            res,
+            chart_key=chart_key,
+            enable_drilldown=enable_drilldown,
+        )  # type: ignore[arg-type]
         return
 
     # Текстовый fallback
-    if hasattr(res, "insights") and res.insights:
-        st.info("\n\n".join(f"• {ins}" for ins in res.insights))
-    elif hasattr(res, "summary") and res.summary:
-        st.write(res.summary)
-    else:
-        st.write("Готово. Уточните вопрос, если нужны дополнительные детали.")
+    with st.container():
+        if hasattr(res, "insights") and res.insights:
+            pseudo = type(
+                "A",
+                (),
+                {
+                    "insights": res.insights,
+                    "key_conclusion": getattr(res, "key_conclusion", None),
+                    "anomaly_or_trend": getattr(res, "anomaly_or_trend", None),
+                },
+            )()
+            _render_analysis_block(pseudo, [], None)
+        elif hasattr(res, "summary") and res.summary:
+            st.write(res.summary)
+        else:
+            st.write("Готово. Уточните вопрос, если нужны дополнительные детали.")
     _render_technical_details(res)
 
 
-def _render_dashboard(res: DashboardResult) -> None:
+def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -> None:
     """Рендер DashboardResult в чате: KPI + графики + выводы."""
-    st.markdown(f"### {res.title}")
-    if res.summary:
-        st.write(res.summary)
+    with st.container():
+        st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="analytics-card-header">
+                <h3 class="analytics-title">{html.escape(res.title)}</h3>
+                <span class="status-badge">✅ Дашборд сформирован</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if res.summary:
+            st.markdown(res.summary)
 
-    if res.kpi_cards:
-        n = min(len(res.kpi_cards), 4)
-        kcols = st.columns(n)
-        for i, kpi in enumerate(res.kpi_cards[:n]):
-            with kcols[i % n]:
-                delta = f"{kpi.change:+.1f}%" if getattr(kpi, "change", None) is not None else None
-                st.metric(
-                    label=kpi.name,
-                    value=kpi.value,
-                    delta=delta,
-                    help=getattr(kpi, "change_period", None) or "",
+        if res.kpi_cards:
+            n = min(len(res.kpi_cards), 4)
+            kcols = st.columns(n)
+            for i, kpi in enumerate(res.kpi_cards[:n]):
+                with kcols[i % n]:
+                    delta = f"{kpi.change:+.1f}%" if getattr(kpi, "change", None) is not None else None
+                    st.metric(
+                        label=kpi.name,
+                        value=kpi.value,
+                        delta=delta,
+                        help=getattr(kpi, "change_period", None) or "",
+                    )
+
+        if res.charts and getattr(res, "data", None):
+            df = pd.DataFrame(res.data)
+            data_rows = df.to_dict(orient="records")
+            n_cols = max(1, min(getattr(res.layout, "columns", 2), 2))
+            layout_type = getattr(res.layout, "type", "kpi_top_grid")
+
+            st.markdown('<div class="chart-panel">', unsafe_allow_html=True)
+            if "tab" in layout_type:
+                tab_names = [c.title[:36] for c in res.charts]
+                ctabs = st.tabs(tab_names)
+                for i, spec in enumerate(res.charts):
+                    coerced = _coerce_chart_spec(spec)
+                    with ctabs[i]:
+                        if coerced is None:
+                            _render_chart_error("Некорректная спецификация графика.")
+                        else:
+                            _render_chart_block(
+                                data_rows,
+                                coerced,
+                                chart_key=f"{chart_key_prefix}_tab_{i}",
+                            )
+            else:
+                chart_cols = st.columns(n_cols)
+                for i, spec in enumerate(res.charts):
+                    coerced = _coerce_chart_spec(spec)
+                    with chart_cols[i % n_cols]:
+                        if coerced is None:
+                            _render_chart_error("Некорректная спецификация графика.")
+                        else:
+                            if coerced.title:
+                                st.caption(coerced.title)
+                            _render_chart_block(
+                                data_rows,
+                                coerced,
+                                chart_key=f"{chart_key_prefix}_grid_{i}",
+                            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            if data_rows:
+                csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "📄 Скачать данные дашборда (CSV)",
+                    data=csv_bytes,
+                    file_name="dashboard_data.csv",
+                    mime="text/csv",
+                    key=f"dl_dash_csv_{chart_key_prefix}",
                 )
+        elif res.charts:
+            _render_chart_error("Графики подготовлены, но данные для отображения отсутствуют.")
 
-    if res.charts and getattr(res, "data", None):
-        df = pd.DataFrame(res.data)
-        n_cols = max(1, min(getattr(res.layout, "columns", 2), 2))
-        layout_type = getattr(res.layout, "type", "kpi_top_grid")
+        if res.insights:
+            st.markdown("---")
+            pseudo = type(
+                "A",
+                (),
+                {"insights": res.insights, "key_conclusion": None, "anomaly_or_trend": None},
+            )()
+            _render_analysis_block(pseudo, getattr(res, "data", None) or [], None)
 
-        if "tab" in layout_type:
-            tab_names = [c.title[:36] for c in res.charts]
-            ctabs = st.tabs(tab_names)
-            for i, spec in enumerate(res.charts):
-                with ctabs[i]:
-                    try:
-                        st.plotly_chart(build_chart(df, spec), use_container_width=True)
-                    except Exception as exc:
-                        st.warning(f"График недоступен: {exc}")
-        else:
-            chart_cols = st.columns(n_cols)
-            for i, spec in enumerate(res.charts):
-                with chart_cols[i % n_cols]:
-                    try:
-                        st.caption(spec.title)
-                        st.plotly_chart(build_chart(df, spec), use_container_width=True)
-                    except Exception as exc:
-                        st.warning(f"График недоступен: {exc}")
-    elif res.charts:
-        st.info("Графики подготовлены, но данные для отображения отсутствуют.")
-
-    if res.insights:
-        st.markdown("**Выводы по дашборду**")
-        st.info("\n\n".join(f"• {ins}" for ins in res.insights))
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _run_query(prompt: str) -> Any:
-    """Выполняет запрос через Orchestrator (ask или dashboard)."""
+def _run_query(
+    prompt: str,
+    *,
+    drilldown: DrilldownContext | None = None,
+    correlation_id: str | None = None,
+) -> Any:
+    """Выполняет запрос через Orchestrator.ask() — Planner выбирает маршрут."""
     orch = get_orchestrator()
-    if _is_dashboard_request(prompt):
-        return orch.dashboard(prompt, max_charts=4, include_kpi=True)
-    return orch.ask(prompt)
+    return orch.ask(prompt, drilldown=drilldown, correlation_id=correlation_id)
 
 
 def _render_sidebar() -> None:
@@ -296,96 +1549,95 @@ def _render_sidebar() -> None:
                     if st.button(q[:60], key=f"dh_{hash(q)}", use_container_width=True):
                         st.session_state["pending_prompt"] = q
 
-        st.divider()
-        st.markdown("### 📑 Экспорт в презентацию")
-
-        pres_mode = st.radio(
-            "Формат",
-            ["По вопросам", "Одной темой"],
-            horizontal=True,
-            key="pres_mode",
-            label_visibility="collapsed",
-        )
-
-        if pres_mode == "По вопросам":
-            default_q = "Структура налогов по видам (доли)\nТоп-3 региона по задолженности"
-            questions_raw = st.text_area(
-                "Вопросы (по одному на строку)",
-                value=st.session_state.get("pres_questions_text", default_q),
-                height=100,
-                key="pres_questions_area",
+        with st.expander("📑 Экспорт в презентацию", expanded=False):
+            pres_mode = st.radio(
+                "Формат",
+                ["По вопросам", "Одной темой"],
+                horizontal=True,
+                key="pres_mode",
+                label_visibility="collapsed",
             )
-            st.session_state["pres_questions_text"] = questions_raw
-        else:
-            theme = st.text_input(
-                "Тема презентации",
-                value=st.session_state.get(
-                    "pres_theme", "Налоговая аналитика Республики Беларусь за 2024 год"
-                ),
-                key="pres_theme_input",
-            )
-            st.session_state["pres_theme"] = theme
 
-        num_slides = st.slider("Слайдов", 5, 12, 7, key="pres_slides")
-        include_title = st.checkbox("Титульный слайд", value=True, key="pres_title")
-        include_recs = st.checkbox("Рекомендации", value=True, key="pres_recs")
-
-        if st.button("Создать презентацию", type="primary", use_container_width=True):
-            qlist: list[dict[str, Any]] = []
             if pres_mode == "По вопросам":
-                lines = [
-                    ln.strip()
-                    for ln in st.session_state.get("pres_questions_text", "").splitlines()
-                    if ln.strip()
-                ]
-                if not lines:
-                    st.warning("Добавьте хотя бы один вопрос.")
-                else:
-                    qlist = [{"text": ln, "chart_type": None, "note": ""} for ln in lines]
+                default_q = "Структура налогов по видам (доли)\nТоп-3 региона по задолженности"
+                questions_raw = st.text_area(
+                    "Вопросы (по одному на строку)",
+                    value=st.session_state.get("pres_questions_text", default_q),
+                    height=100,
+                    key="pres_questions_area",
+                )
+                st.session_state["pres_questions_text"] = questions_raw
             else:
-                free = st.session_state.get("pres_theme", "").strip()
-                if not free:
-                    st.warning("Укажите тему презентации.")
+                theme = st.text_input(
+                    "Тема презентации",
+                    value=st.session_state.get(
+                        "pres_theme", "Налоговая аналитика Республики Беларусь за 2024 год"
+                    ),
+                    key="pres_theme_input",
+                )
+                st.session_state["pres_theme"] = theme
+
+            num_slides = st.slider("Слайдов", 5, 12, 7, key="pres_slides")
+            chart_pref = st.selectbox(
+                "Тип графика",
+                CHART_DISPLAY_OPTIONS,
+                index=0,
+                key="pres_chart_type",
+            )
+            chart_type_val = CHART_VAL_FOR_DISPLAY.get(chart_pref)
+            include_title = st.checkbox("Титульный слайд", value=True, key="pres_title")
+            include_recs = st.checkbox("Рекомендации", value=True, key="pres_recs")
+
+            if st.button("Создать презентацию", type="primary", use_container_width=True):
+                qlist: list[dict[str, Any]] = []
+                if pres_mode == "По вопросам":
+                    lines = [
+                        ln.strip()
+                        for ln in st.session_state.get("pres_questions_text", "").splitlines()
+                        if ln.strip()
+                    ]
+                    if not lines:
+                        st.warning("Добавьте хотя бы один вопрос.")
+                    else:
+                        qlist = [
+                            {"text": ln, "chart_type": chart_type_val, "note": ""} for ln in lines
+                        ]
                 else:
-                    qlist = [{"text": free, "chart_type": None, "note": ""}]
+                    free = st.session_state.get("pres_theme", "").strip()
+                    if not free:
+                        st.warning("Укажите тему презентации.")
+                    else:
+                        qlist = [{"text": free, "chart_type": chart_type_val, "note": ""}]
 
-            if qlist:
-                with st.spinner("Собираю слайды..."):
-                    try:
-                        from app.agents.presentation_agent import PresentationAgent
+                if qlist:
+                    with st.spinner("Собираю слайды..."):
+                        try:
+                            pres_res = get_orchestrator().presentation(
+                                qlist,
+                                num_slides=num_slides,
+                                include_title=include_title,
+                                include_recommendations=include_recs,
+                            )
+                            st.session_state["last_presentation"] = pres_res
+                            st.session_state["main_messages"].append(
+                                {"role": "assistant", "result": pres_res}
+                            )
+                            st.success(f"Готово: {pres_res.num_slides} слайдов")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Ошибка: {exc}")
 
-                        pres_res = PresentationAgent().run(
-                            qlist,
-                            num_slides=num_slides,
-                            include_title=include_title,
-                            include_recommendations=include_recs,
-                        )
-                        st.session_state["last_presentation"] = pres_res
-                        st.session_state["messages"].append(
-                            {"role": "assistant", "result": pres_res}
-                        )
-                        st.success(f"Готово: {pres_res.num_slides} слайдов")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Ошибка: {exc}")
-
-        if st.session_state.get("last_presentation"):
-            pres = st.session_state["last_presentation"]
-            ppath = getattr(pres, "pptx_path", None)
-            if ppath and Path(ppath).exists():
-                with open(ppath, "rb") as f:
-                    st.download_button(
-                        "📥 Скачать .pptx",
-                        data=f.read(),
-                        file_name="presentation.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        use_container_width=True,
-                    )
+            if st.session_state.get("last_presentation"):
+                pres = st.session_state["last_presentation"]
+                n = getattr(pres, "num_slides", 0) or 0
+                st.caption(f"Последняя презентация: **{n}** слайдов — превью и скачивание в чате ↑")
 
         st.divider()
         if st.button("Очистить чат", use_container_width=True):
-            st.session_state["messages"] = []
+            st.session_state["main_messages"] = []
             st.session_state["dashboard_history"] = []
+            st.session_state["drilldown_context"] = None
+            st.session_state["drilldown_trail"] = []
             st.rerun()
 
 
@@ -399,73 +1651,133 @@ def main() -> None:
 
     _inject_custom_css()
 
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
+    if "main_messages" not in st.session_state:
+        st.session_state["main_messages"] = []
+    if "messages" in st.session_state and not st.session_state["main_messages"]:
+        st.session_state["main_messages"] = st.session_state.pop("messages")
     if "dashboard_history" not in st.session_state:
         st.session_state["dashboard_history"] = []
+    if "pinned_items" not in st.session_state:
+        st.session_state["pinned_items"] = []
+    if "drilldown_context" not in st.session_state:
+        st.session_state["drilldown_context"] = None
+    if "drilldown_trail" not in st.session_state:
+        st.session_state["drilldown_trail"] = []
 
     _render_sidebar()
 
-    # Приветствие при пустом чате
-    if not st.session_state["messages"]:
-        st.markdown("### Чем могу помочь?")
-        st.markdown(
-            "Спросите о налоговых данных Беларуси — получите график, выводы или дашборд. "
-            "Например: *«Динамика начислений в г. Минск»* или *«Дашборд по задолженности»*."
-        )
+    tab_chat, tab_pinned = st.tabs(["💬 Чат", "⭐️ Мой собранный дашборд"])
 
-    # История чата
-    for msg in st.session_state["messages"]:
-        with st.chat_message(msg["role"]):
-            if msg["role"] == "user":
-                st.write(msg.get("content", ""))
-            elif msg.get("result") is not None:
-                render_assistant_response(msg["result"])
-            else:
-                st.write(msg.get("content", ""))
+    with tab_chat:
+        if not st.session_state["main_messages"]:
+            _render_empty_state()
 
-    # Ввод: подсказка из сайдбара или chat_input
+        last_drill_idx = _find_last_drilldown_message_idx(st.session_state["main_messages"])
+
+        for msg_idx, msg in enumerate(st.session_state["main_messages"]):
+            with st.chat_message(msg["role"]):
+                if msg["role"] == "user":
+                    st.write(msg.get("content", ""))
+                elif msg.get("result") is not None:
+                    render_assistant_response(
+                        msg["result"],
+                        chart_key=f"chat_chart_{msg_idx}",
+                        enable_drilldown=msg_idx == last_drill_idx,
+                    )
+                else:
+                    st.write(msg.get("content", ""))
+
+    with tab_pinned:
+        _render_pinned_dashboard()
+
     prompt = st.session_state.pop("pending_prompt", None)
+    drilldown = st.session_state.pop("pending_drilldown", None)
+    if drilldown is None:
+        drilldown = _session_drilldown_context()
     chat_prompt = st.chat_input(
         "Спросите что-нибудь о налогах (например, «Динамика по Минску»)"
     )
     if chat_prompt:
         prompt = chat_prompt
 
+    messages = st.session_state["main_messages"]
+    if not prompt and messages and messages[-1].get("role") == "user":
+        prompt = messages[-1].get("content", "")
+
     if prompt and prompt.strip():
         prompt = prompt.strip()
-        st.session_state["messages"].append({"role": "user", "content": prompt})
+        # Защита от зацикливания: не дублируем user-сообщение при повторном rerun
+        if not (
+            messages
+            and messages[-1].get("role") == "user"
+            and messages[-1].get("content") == prompt
+        ):
+            st.session_state["main_messages"].append({"role": "user", "content": prompt})
 
-        is_dashboard = _is_dashboard_request(prompt)
+        cid = new_correlation_id()
+        run_logger.log_event("ui_query_start", question=prompt[:200], correlation_id=cid)
+        assistant_msg: dict[str, Any] | None = None
         with st.chat_message("assistant"):
             with st.status(
-                "🧠 Агенты работают над вашим запросом...",
+                "AI-конвейер запускается...",
                 expanded=True,
             ) as status:
-                for step in _friendly_status_steps(is_dashboard):
-                    st.write(step)
+                live_pipeline = st.empty()
                 try:
-                    result = _run_query(prompt)
-                    status.update(label="✅ Готово!", state="complete", expanded=False)
-                    render_assistant_response(result)
-                    st.session_state["messages"].append({"role": "assistant", "result": result})
-                    if is_dashboard and isinstance(result, DashboardResult):
+                    result = _run_background_with_pipeline(
+                        lambda: _run_query(prompt, drilldown=drilldown, correlation_id=cid),
+                        prompt,
+                        live_pipeline,
+                        status,
+                    )
+                    final_snap = pipeline_store.snapshot()
+                    has_stage_error = any(
+                        s.get("status") == "error"
+                        for s in (final_snap.get("stages") or {}).values()
+                    )
+                    if has_stage_error and not final_snap.get("fatal_error"):
+                        status.update(
+                            label="⚠️ Готово с предупреждениями",
+                            state="complete",
+                            expanded=True,
+                        )
+                    else:
+                        status.update(label="✅ Готово!", state="complete", expanded=False)
+                    assistant_msg = {"role": "assistant", "result": result}
+                    if isinstance(result, DashboardResult):
                         hist = st.session_state["dashboard_history"]
                         entry = {"question": prompt, "title": result.title}
                         if not hist or hist[-1] != entry:
                             hist.append(entry)
                             st.session_state["dashboard_history"] = hist[-12:]
+                except TimeoutError as exc:
+                    status.update(label="Превышен таймаут обработки", state="error", expanded=True)
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": (
+                            f"{exc}\n\nПроверьте Ollama и модель `{config.ollama_model}`."
+                        ),
+                    }
                 except Exception as exc:
-                    status.update(label="Ошибка", state="error", expanded=False)
+                    err_snap = pipeline_store.snapshot()
+                    status.update(
+                        label=pipeline_status_headline(err_snap)
+                        if err_snap
+                        else f"Ошибка: {exc}",
+                        state="error",
+                        expanded=True,
+                    )
                     err_text = (
                         "Не удалось обработать запрос. Проверьте, что Ollama запущен "
-                        "и модель `qwen2.5-coder:7b-instruct` доступна."
+                        f"и модель `{config.ollama_model}` доступна."
                     )
-                    st.error(err_text)
-                    st.session_state["messages"].append(
-                        {"role": "assistant", "content": f"{err_text}\n\n{exc}"}
-                    )
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": f"{err_text}\n\n{exc}",
+                    }
 
+        if assistant_msg is not None:
+            st.session_state["main_messages"].append(assistant_msg)
         st.rerun()
 
 
