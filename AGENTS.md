@@ -1,128 +1,184 @@
-# AGENTS.md
+# AGENTS.md — правила для разработки и AI-ассистентов
 
 ## О проекте
-bi_multiagent_tax — локальная мультиагентная BI-платформа для налоговой/гос-аналитики.
-Пользователь задаёт вопрос на русском → система формирует SQL-запрос к данным →
-получает таблицу → делает текстовый анализ → строит КРАСИВЫЙ график → может собрать
-презентацию. Всё работает оффлайн через локальную модель в Ollama.
 
-Это прототип, вдохновлённый платформой Epsilon Metrics, но полностью свой, на Python.
+**prototip** — локальная мультиагентная BI-платформа для налоговой/гос-аналитики (Республика Беларусь, синтетические данные, валюта Br).
 
-ВАЖНО по терминологии: это Text-to-SQL (вопрос → SQL по данным), а НЕ RAG.
-Не путай и не предлагай векторный поиск по документам.
+Пользователь задаёт вопрос на русском → система формирует SQL → получает таблицу → строит график и текстовые выводы → может собрать дашборд или презентацию. Всё офлайн через Ollama.
+
+Это **прототип**, не production-система. Вдохновлён идеей executive BI (Epsilon Metrics-подобный сценарий), реализован на Python.
+
+**Важно:** это Text-to-SQL по табличным данным, **не RAG**. Не предлагать векторный поиск по документам.
+
+---
 
 ## Окружение
-- Машина: MacBook Air M4 (Apple Silicon, Metal-ускорение в Ollama).
-- Реальной БД НЕТ. Данные — синтетический CSV-датасет (налоговые поступления по регионам Республики Беларусь, валюта Br).
-- "Шаг с данными" эмулируем через DuckDB: SQL выполняется прямо по CSV/DataFrame,
-  отдельную базу данных поднимать НЕ нужно.
 
-## Локальная модель (Ollama)
-- Основная модель: qwen2.5-coder:7b-instruct (Q4_K_M).
-- Запуск: `ollama pull qwen2.5-coder:7b-instruct`.
-- Всегда temperature=0 для генерации SQL и спецификаций графиков.
-- Всегда использовать structured output (JSON schema по Pydantic-модели).
-  Свободный текст вместо JSON парсить запрещено.
+- **Машина:** MacBook Air M4 (Apple Silicon, Metal в Ollama).
+- **Данные:** синтетический CSV `data/sample.csv`, без реальной БД.
+- **SQL:** DuckDB выполняет `SELECT` по DataFrame/CSV in-memory.
+- **Модель:** `qwen2.5-coder:7b-instruct` (Q4_K_M), `ollama pull qwen2.5-coder:7b-instruct`.
+- **LLM:** всегда `temperature=0`, только structured output (JSON schema из Pydantic). Парсить свободный текст запрещено.
 
-## Технологический стек
-- Backend/API: FastAPI + uvicorn
-- UI (демо): Streamlit — ТОНКИЙ клиент, который ходит в API. Бизнес-логику в UI не класть.
-- Контракты между модулями: Pydantic v2 (ChartSpec, SqlResult и т.д.)
-- Данные: pandas + DuckDB (SQL по датасету)
-- Графики: plotly + kaleido (интерактив + экспорт PNG)
-- Презентации: python-pptx
-- LLM: пакет ollama
-- Тесты/линт: pytest + ruff
+---
 
-## Архитектура (Spec-first)
-Streamlit → FastAPI → Orchestrator (свой явный пайплайн), который вызывает агентов:
-- DataAgent: вопрос → SQL → DataFrame (через DuckDB; только SELECT)
-- AnalystAgent: DataFrame → текстовые выводы (на русском)
-- ChartAgent: DataFrame → ChartSpec (Pydantic) → детерминированный рендер графика
-- PresentationAgent: графики + выводы → .pptx
+## Стек
 
-ГЛАВНЫЙ ПРИНЦИП графиков: LLM возвращает СПЕЦИФИКАЦИЮ (ChartSpec), а рисует график
-наш детерминированный код в едином фирменном стиле. НИКОГДА не выполняй сырой код
-графиков от модели через exec(). Это вопрос и красоты (единый стиль), и безопасности.
+| Слой | Технология |
+|------|------------|
+| API | FastAPI + uvicorn |
+| UI | Streamlit (тонкий клиент → `Orchestrator`) |
+| Контракты | Pydantic v2 |
+| Данные | pandas + DuckDB |
+| Графики | plotly + kaleido |
+| Презентации | python-pptx |
+| LLM | пакет `ollama` |
+| Качество | pytest + ruff |
 
-### Базовые абстракции (подготовка к PlannerAgent)
-- `BaseAgent` (app/agents/base_agent.py): абстрактный базовый класс. Обязательные атрибуты: `name`, `description`. Абстрактный `run(self, request: Any, *args, **kwargs) -> AgentResult`. Метод `get_capabilities() -> dict`. Все агенты (Data/Analyst/Chart/Dashboard/Presentation) наследуются от него.
-- `AgentResult` (app/agents/models.py): базовый Pydantic для всех результатов агентов. Поля: `success: bool`, `reasoning: str` (обязательно заполняется агентом — объяснение решений/выбора), `error: str | None`.
-- `AgentRegistry` + `AgentExecutor` (app/agents/executor.py): реестр по имени + единая точка вызова `executor.run(agent_name, request, **kw) -> AgentResult`. Логирует все вызовы в формате `[AgentExecutor] call: ... / done: ... (Nms) / error: ...`. Простая обработка ошибок (возвращает failed AgentResult). Orchestrator постепенно использует executor вместо прямых вызовов.
-- Модели для Planner (Task, Plan, AgentCall) уже объявлены в models.py — готовы к использованию.
+---
 
-Orchestrator оставлен тонким (только высокоуровневые ask / dashboard). Логика планирования и сложной маршрутизации — для будущего PlannerAgent.
+## Архитектура (актуальная)
 
-## Жёсткие правила разработки
-1. Двигаемся строго по фазам из PROJECT_SPEC.md. Не начинай следующую фазу,
-   пока текущая не покрыта тестом и не запускается.
-2. Все данные между модулями передаются только через Pydantic-модели. Голые dict запрещены.
-3. Любой график строится ТОЛЬКО через модуль viz/charts.py и стиль из viz/style.py.
-   Не хардкодь цвета/шрифты в других местах.
-4. Работа с данными: только SELECT, лимит на число строк. Никаких изменяющих запросов.
-5. Весь пользовательский текст (заголовки, подписи, выводы) — на русском языке.
-6. Полная локальность: ничего не отправляем в интернет.
-7. Перед коммитом: `ruff check . && ruff format .` и `pytest -q` должны быть зелёными.
+```
+UI / API / CLI
+     ↓
+Orchestrator
+  .ask()          → PlannerAgent (основной путь)
+  .dashboard()    → DashboardAgent (fast-path)
+  .presentation() → PresentationAgent (fast-path)
+     ↓
+AgentExecutor + AgentRegistry
+     ↓
+data_agent → chart_agent → analyst_agent
+dashboard_agent, presentation_agent (высокоуровневые)
+     ↓
+viz/charts.py (детерминированный рендер)
+```
 
-## Порядок реализации (кратко; детали в PROJECT_SPEC.md)
-Phase 0 — каркас проекта и зависимости. — Готово
-Phase 1 — КРАСИВЫЕ ГРАФИКИ: датасет, ChartSpec, единый стиль, фабрика графиков, экспорт в PNG. — Готово
-Phase 2 — DataAgent: NL → SQL по датасету через DuckDB, с самокоррекцией по ошибке. — Готово
-Phase 3 — AnalystAgent: текстовые выводы по данным. — Готово
-Phase 4 — ChartAgent: модель выбирает тип графика и заполняет ChartSpec. — Готово
-Phase 5 — Orchestrator: единый пайплайн "вопрос → ответ + график". — Готово
-Phase 6 — PresentationAgent: сборка .pptx. — Готово
-Phase 7 — Streamlit UI + интеграция. — Готово
-Phase 8 — обработка ошибок, логирование шагов агентов, README, e2e-тесты. — Готово
+### Главный принцип графиков (spec-first)
 
-## Следующий спринт
-- **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка «Дашборды» в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
-- **PlannerAgent** (Phase 1 + Phase 2 progress): иерархическая мультиагентная оркестрация. После детального штурма и hardening (Phase 1 завершена):
-  - Сильный `PLAN_GENERATION_PROMPT` + примеры для размытых запросов ("привет дай сводку...").
-  - Усиленный self-correction промпт (явно требует исправления `depends_on` и предпочтения высокоуровневых агентов).
-  - `_repair_plan` (авто-ремонт зависимостей и ключа "question").
-  - `_invoke_agent` с defensive логикой, подробным логированием и предупреждениями.
-  - Улучшенные фоллбэк-сообщения и видимость ошибок в UI.
-  - Лучше работает с "по регионам" (DataAgent + ChartAgent примеры/правила).
-- Phase 2 (no TG, in progress):
-  - Лучшая итерация в Главном агенте: richer history (вопросы + план info + insights), кнопки "Повторить похожий вопрос" и "Изменить план и выполнить заново" на результатах, улучшенный экспандер истории.
-  - Расширение визуализации: поддержка area, scatter, waterfall в viz/charts.py + усиленные правила/примеры в ChartAgent FEW_SHOT и промпте (включая когда использовать area/scatter/waterfall).
-  - Dataset richness: добавлена колонка "penalties" (штрафы), обновлены ALLOWED_COLUMNS, FEW_SHOT с примерами (доля налога, средняя задолженность на налогоплательщика), подсказки в UI, обновлён schema info.
-- Telegram-бот.
-- Дополнительные улучшения по запросу (Phase 3+).
+LLM возвращает **ChartSpec** (Pydantic). Рисует только `viz/charts.py` + `viz/style.py`.  
+**Никогда** не выполнять сырой код графиков от модели (`exec`, `eval`).
+
+### PlannerAgent
+
+- Генерирует план из 1–3 задач (`Task` с `depends_on`).
+- Topological sort, injection `data` / `source_sql` по зависимостям.
+- Graceful degradation: падение одной задачи не роняет весь план.
+- Прикрепляет `PlannerTrace` к результату (`executed_plan`, `plan_execution`).
+- Высокоуровневые агенты (dashboard, presentation) вызывают sub-агентов внутри себя — sub-вызовы не дублируются в trace планировщика.
+
+### Базовые абстракции
+
+- `BaseAgent` (`app/agents/base_agent.py`) — `name`, `description`, `run() → AgentResult`.
+- `AgentExecutor` (`app/agents/executor.py`) — `executor.run(agent_name, request)`.
+- Модели: `app/agents/models.py`, `ChartSpec` в `core/models.py`, re-export в `app/schemas.py`.
+
+---
+
+## Агенты
+
+| Агент | Вход | Выход | Заметки |
+|-------|------|-------|---------|
+| **data_agent** | вопрос (+ drilldown filters) | SQL + records | SELECT only, whitelist колонок, самокоррекция |
+| **chart_agent** | вопрос + data | ChartSpec | FEW_SHOT, `normalize_chart_spec` + `repair_chart_spec` |
+| **analyst_agent** | вопрос + data (+ chart_spec) | AnalysisResult | 3–5 тезисов на русском |
+| **dashboard_agent** | DashboardRequest | DashboardResult | KPI + 3–5 графиков, reuse ChartAgent |
+| **presentation_agent** | вопросы / тема | PresentationResult | `.pptx`, DeckNarrative |
+| **planner_agent** | вопрос | AskResult / Dashboard / Presentation | Оркестрация, trace |
+
+---
+
+## UI (Streamlit)
+
+Файл: `ui/streamlit_app.py`. Логика — только через `Orchestrator.ask()` / `.dashboard()` / `.presentation()`.
+
+### Вкладки
+
+- **Аналитический вопрос** — чат, empty state с категориями сценариев.
+- **Дашборд** — отдельный workspace для `Orchestrator.dashboard()`.
+- **Презентация** — очередь слайдов + сборка `.pptx`.
+- **Мой дашборд** — pinned items, compare mode.
+
+### Режимы
+
+- **Для руководства** — график + выводы; trace/SQL/редактор скрыты; конвейер сворачивается.
+- **Для аналитика** — полная прозрачность: trace «Что было сделано», SQL, таблица, редактор графика.
+
+### Сайдбар
+
+Глобальные фильтры (region, tax_type, period) → `DrilldownContext`. Быстрые вопросы, история, экспорт сессии JSON.
+
+### Ошибки визуализации
+
+Если данных нет или `chart_agent` упал — короткая карточка «Нет данных для отображения», без ложного анализа и зелёного бейджа «Успешно».
+
+---
+
+## Жёсткие правила
+
+1. Контракты — только Pydantic. Голые `dict` между модулями запрещены.
+2. Графики — только через `viz/charts.py` и `viz/style.py`. Не хардкодить цвета вне `viz/`.
+3. SQL — только `SELECT`, лимит строк, whitelist колонок.
+4. Весь пользовательский текст — на русском.
+5. Полная локальность — ничего в интернет (кроме `git push` разработчиком).
+6. Перед коммитом: `ruff check . && python -m pytest -m "not live" -q`.
+7. Не использовать LangChain.
+8. Не поднимать реальную БД.
+
+---
 
 ## Команды
-- Установка: `pip install -r requirements.txt`
-- Генерация датасета: `python data/make_dataset.py`
-- API: `uvicorn app.main:app --reload`
-- UI: `streamlit run ui/streamlit_app.py`
-- Тесты: `pytest -q`
 
-## Стиль кода
-- Python 3.11+, обязательная типизация, docstring на публичных функциях.
-- Маленькие чистые функции; модули viz/ и core/ — без побочных эффектов.
-- Каждый новый модуль сопровождается тестом в tests/.
+```bash
+pip install -r requirements.txt
+python data/make_dataset.py
+streamlit run ui/streamlit_app.py
+uvicorn app.main:app --reload
+python -m pytest -m "not live" -q
+ruff check . && ruff format .
+python scripts/generate_leadership_showcase.py
+```
 
-## Пользовательский интерфейс
-UI (Streamlit) — тонкий клиент. Основная цель — понятность обычному пользователю:
-- Скрыты все технические объяснения работы LLM (reasoning, "Почему этот тип?", "композиция LLM" и т.п.).
-- Добавлена вкладка/секция **Данные** — просмотр выборки, статистика, кликабельные подсказки вопросов + явная пометка «демо-данные».
-- Простая история запросов (в памяти) + быстрый повтор/итерация.
-- Улучшен онбординг: «Как быстро начать», дружелюбные пустые состояния, смягчённые статусы.
-- Презентация: после генерации показывается краткий outline тем.
-- Подготовка к Planner: в UI импортированы Plan/Task/AgentCall; добавлены аккуратные свёрнутые поверхности «Как был построен...» (высокоуровневые шаги). Полноценный render_plan появится вместе с PlannerAgent.
-- **PlannerAgent v2**: первая версия настоящего иерархического планировщика. Генерирует `Plan` с 1–3 `Task` (с `agent_name`, `params`, `depends_on`, `description`) через structured LLM. Выполняет план с топологической сортировкой, передачей контекста между зависимыми задачами и поддержкой "параллельного" выполнения независимых задач (через AgentExecutor). Прикрепляет выполненный план к результату. В UI — свёрнутый экспандер **"Что было сделано"** со списком шагов плана (по умолчанию закрыт). Graceful error handling (продолжает другие задачи). Сохраняет принцип скрытия внутренних деталей. Обновлены модели использования `Plan`/`Task`/`AgentCall`. Вкладка "Главный агент" поддерживает отображение плана.
+---
 
-- Вкладка «Презентация»: режимы «По вопросам» и «Одним предложением» чётко разделены; блок вопросов сворачиваемый; для свободного ввода — большое поле «О чём должна быть презентация?».
-- Вкладка «Дашборды»: «Инсайты» переименованы в «Выводы», удалены объяснения выбора типов и reasoning; редактор графиков называется «Настройка графиков».
-- Технические детали (SQL, reasoning, отладка) вынесены в сворачиваемые блоки или полностью убраны из основного вида.
+## Структура ключевых путей
 
-## Definition of Done (для любой задачи)
-- Код типизирован, есть тест, ruff чистый, функция/эндпоинт работает на sample-данных,
-  результат соответствует фазе из PROJECT_SPEC.md.
+| Путь | Назначение |
+|------|------------|
+| `app/orchestrator.py` | Фасад ask/dashboard/presentation |
+| `app/agents/planner_agent.py` | Планировщик (~900 строк) |
+| `app/chart_repair.py` | `normalize_chart_spec`, `repair_chart_spec` |
+| `viz/charts.py` | `build_chart`, 12 типов |
+| `ui/streamlit_app.py` | Основной UI |
+| `showcase/` | Офлайн-демо для руководства |
+| `out/` | Runtime-артефакты (gitignored) |
+
+---
+
+## Definition of Done
+
+- Код типизирован, есть тест.
+- `ruff` и `pytest -m "not live"` зелёные.
+- Работает на `data/sample.csv`.
+- Документация синхронизирована при изменении архитектуры/UI.
+
+---
+
+## Бэклог (не реализовано)
+
+- Telegram-бот
+- Evaluator качества планов
+- Полный `go.Waterfall` с cumulative prep
+- Auth, реальная БД, ETL
+- Prompt lab / A-B моделей
+
+---
 
 ## Чего НЕ делать
-- Не тащить LangGraph на ранних фазах (оркестрацию пишем сами, явным пайплайном).
-- Не поднимать реальную БД (работаем с CSV + DuckDB).
-- Не выполнять сырой код графиков от LLM.
-- Не использовать модели больше 7B без явной просьбы (ноутбук) локально стоит олама там qwen2.5-coder:7b-instruct.
+
+- Не тащить LangGraph на ранних этапах.
+- Не выполнять код графиков от LLM.
+- Не использовать модели >7B без явной просьбы (ноутбук).
+- Не коммитить `out/`, `.venv/`, `.skills/`, локальные патчи.
+- Не писать абсолютные пути пользователя в `showcase/manifest.json` — только относительные.

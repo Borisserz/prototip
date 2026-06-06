@@ -177,7 +177,7 @@ def _render_app_header() -> None:
     with mid:
         mode = st.radio(
             "Режим интерфейса",
-            ["1", "2"],
+            ["Для руководства", "Для аналитика"],
             horizontal=True,
             index=0 if _is_leadership_mode() else 1,
             key="ui_mode_radio",
@@ -187,7 +187,7 @@ def _render_app_header() -> None:
                 "Аналитик — полный доступ: SQL, данные, трассировка агентов и редактор графиков."
             ),
         )
-        st.session_state["ui_mode"] = "leadership" if mode == "1" else "analyst"
+        st.session_state["ui_mode"] = "leadership" if mode == "Для руководства" else "analyst"
         if _is_leadership_mode():
             st.caption("Краткий вид: результат и выводы без технических деталей.")
         else:
