@@ -87,7 +87,7 @@ class _PlanSpec(BaseModel):
     """Схема плана, которую возвращает LLM."""
 
     goal: str = Field(..., description="Итоговая цель пользователя")
-    tasks: list[_TaskSpec] = Field(..., max_items=3, description="Список задач (максимум 3)")
+    tasks: list[_TaskSpec] = Field(..., max_length=3, description="Список задач (максимум 3)")
     strategy: str = Field(default="", description="Краткое описание стратегии плана")
 
 
@@ -282,6 +282,32 @@ class PlannerAgent(BaseAgent):
                         task_params[f"result_from_{dep_id}"] = dep_res
 
             call_arg = task_params if task_params else original_question
+
+            # Нормализуем вход для агентов, которые ожидают Pydantic-модели, а не сырой dict
+            if task.agent_name == "dashboard_agent" and isinstance(call_arg, dict):
+                from app.schemas import DashboardRequest
+
+                try:
+                    call_arg = DashboardRequest(**call_arg)
+                except Exception as norm_e:
+                    logger.warning(f"Could not construct DashboardRequest from params: {norm_e}")
+
+            # Для presentation_agent тоже можно нормализовать, если пришёл dict с вопросами
+            if task.agent_name == "presentation_agent" and isinstance(call_arg, dict):
+                from app.schemas import PresentationInput, QuestionBlock
+
+                try:
+                    if "questions" in call_arg:
+                        qblocks = [
+                            QuestionBlock(**q) if isinstance(q, dict) else q
+                            for q in call_arg["questions"]
+                        ]
+                        call_arg = PresentationInput(
+                            questions=qblocks,
+                            **{k: v for k, v in call_arg.items() if k != "questions"},
+                        )
+                except Exception as norm_e:
+                    logger.warning(f"Could not construct PresentationInput: {norm_e}")
 
             try:
                 start_ts = time.time()

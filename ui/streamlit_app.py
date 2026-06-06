@@ -188,19 +188,25 @@ def main() -> None:
             except Exception:
                 st.write(res)
 
-        # 5. Fallback (в т.ч. уточнения и общие сообщения)
+        # 5. Fallback + красивый показ ошибок
+        if hasattr(res, "success") and not getattr(res, "success", True):
+            st.error(f"Не удалось выполнить: {getattr(res, 'error', 'неизвестная ошибка')}")
+            if getattr(res, "reasoning", ""):
+                with st.expander("Детали ошибки (для разработчика)", expanded=False):
+                    st.code(res.reasoning)
+            return
+
+        if hasattr(res, "insights") and res.insights:
+            for ins in res.insights:
+                st.write(ins)
+        elif hasattr(res, "key_conclusion") and res.key_conclusion:
+            st.write(res.key_conclusion)
         else:
-            if hasattr(res, "insights") and res.insights:
-                for ins in res.insights:
-                    st.write(ins)
-            elif hasattr(res, "key_conclusion") and res.key_conclusion:
-                st.write(res.key_conclusion)
+            st.write("Результат:")
+            if hasattr(res, "model_dump"):
+                st.json(res.model_dump())
             else:
-                st.write("Результат:")
-                if hasattr(res, "model_dump"):
-                    st.json(res.model_dump())
-                else:
-                    st.write(res)
+                st.write(res)
 
     def _render_plan_preview(plan):
         """Красивое отображение предложенного плана (до подтверждения выполнения)."""
