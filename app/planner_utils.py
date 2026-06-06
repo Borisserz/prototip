@@ -7,9 +7,15 @@ import json
 from collections import OrderedDict
 from typing import Any
 
-from app.agents.models import AgentCall, AgentResult, Plan, PlanExecutionStep, PlannerTrace
+from app.agents.models import (
+    AgentCall,
+    AgentResult,
+    DrilldownContext,
+    Plan,
+    PlanExecutionStep,
+    PlannerTrace,
+)
 from app.config import config
-from app.schemas import DrilldownContext
 
 
 def make_planner_trace(

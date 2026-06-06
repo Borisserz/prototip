@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from app.schemas import ChartSpec, DrilldownContext
+from app.agents.models import DrilldownContext
+from core.models import ChartSpec
 
 DRILLDOWN_DIMENSIONS: dict[str, str] = {
     "region": "Регион",
