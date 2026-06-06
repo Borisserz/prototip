@@ -153,6 +153,7 @@ pres_slide_*.png
 *.patch
 run.log
 
-# Grok / AI session
+# Grok / AI session / local dev helpers
 .skills/
 *.log
+copy_project_to_clipboard.sh

@@ -29,6 +29,16 @@ from core.models import ChartSpec
 from viz.charts import build_chart, export_html, export_png
 
 CHART_SCALE = 2.5
+
+
+def _manifest_rel(path: Path, base: Path) -> str:
+    """Путь для manifest.json — относительно base (портативно для git)."""
+    try:
+        return path.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 SPEC_OVERRIDE_KEYS = frozenset(
     {
         "title",
@@ -143,6 +153,7 @@ def export_chart_assets(
     out_dir: Path,
     *,
     scale: float = CHART_SCALE,
+    manifest_base: Path | None = None,
 ) -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     fig = build_chart(df, entry.spec)
@@ -155,10 +166,11 @@ def export_chart_assets(
         entry.spec.model_dump_json(indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    base = manifest_base or out_dir.parent.parent
     return {
-        "png": str(png_path.resolve()),
-        "html": str(html_path.resolve()),
-        "spec": str(spec_path.resolve()),
+        "png": _manifest_rel(png_path, base),
+        "html": _manifest_rel(html_path, base),
+        "spec": _manifest_rel(spec_path, base),
     }
 
 
@@ -291,6 +303,22 @@ def build_offline_presentation(
     }
 
 
+def _presentation_manifest_entry(
+    meta: dict[str, Any],
+    *,
+    showcase_root: Path,
+) -> dict[str, Any]:
+    """Запись презентации для manifest.json (без временных slide_pngs)."""
+    pptx = Path(str(meta["pptx"]))
+    return {
+        "filename": meta["filename"],
+        "title": meta["title"],
+        "pptx": _manifest_rel(pptx, showcase_root),
+        "num_slides": meta["num_slides"],
+        "questions": meta["questions"],
+    }
+
+
 def generate_showcase(
     root: Path | str = "showcase",
     *,
@@ -309,7 +337,9 @@ def generate_showcase(
     for entry in chart_showcase_entries():
         folder = charts_root / f"{entry.index:02d}_{entry.slug}"
         df = prepare_entry_df(entry, base_df)
-        assets = export_chart_assets(entry, df, folder, scale=chart_scale)
+        assets = export_chart_assets(
+            entry, df, folder, scale=chart_scale, manifest_base=root_path
+        )
         chart_manifest.append(
             {
                 "index": entry.index,
@@ -326,12 +356,19 @@ def generate_showcase(
     for bundle in presentation_bundles():
         out_pptx = pres_root / bundle.filename
         meta = build_offline_presentation(bundle, base_df, out_pptx)
-        presentation_manifest.append(meta)
+        presentation_manifest.append(_presentation_manifest_entry(meta, showcase_root=root_path))
+
+    dataset_path = csv_path or Path("data/sample.csv")
+    repo_root = root_path.resolve().parent
+    try:
+        dataset_ref = dataset_path.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        dataset_ref = dataset_path.as_posix()
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "scripts/generate_leadership_showcase.py",
-        "dataset": str((csv_path or Path("data/sample.csv")).resolve()),
+        "dataset": dataset_ref,
         "chart_scale": chart_scale,
         "charts": chart_manifest,
         "presentations": presentation_manifest,
@@ -341,5 +378,5 @@ def generate_showcase(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    manifest["manifest"] = str(manifest_path.resolve())
+    manifest["manifest"] = _manifest_rel(manifest_path, root_path)
     return manifest

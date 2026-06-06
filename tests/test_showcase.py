@@ -61,10 +61,11 @@ def test_export_single_chart_asset(tmp_path: Path):
     entry = chart_showcase_entries()[0]
     df = prepare_entry_df(entry, base_df)
     out_dir = tmp_path / "01_bar"
-    assets = export_chart_assets(entry, df, out_dir, scale=1.0)
-    assert Path(assets["png"]).exists() and Path(assets["png"]).stat().st_size > 5000
-    assert Path(assets["html"]).exists()
-    assert Path(assets["spec"]).exists()
+    assets = export_chart_assets(entry, df, out_dir, scale=1.0, manifest_base=tmp_path)
+    assert (tmp_path / assets["png"]).exists()
+    assert (tmp_path / assets["png"]).stat().st_size > 5000
+    assert (tmp_path / assets["html"]).exists()
+    assert (tmp_path / assets["spec"]).exists()
 
 
 @pytest.mark.skipif(
@@ -91,7 +92,9 @@ def test_generate_showcase_integration(tmp_path: Path):
     assert len(manifest["charts"]) == 12
     assert len(manifest["presentations"]) == 4
     for ch in manifest["charts"]:
-        assert Path(ch["png"]).exists()
-        assert Path(ch["html"]).exists()
+        assert (tmp_path / ch["png"]).exists()
+        assert (tmp_path / ch["html"]).exists()
+        assert "/" not in ch["png"] or not ch["png"].startswith("/")
     for pres in manifest["presentations"]:
-        assert Path(pres["pptx"]).exists()
+        assert (tmp_path / pres["pptx"]).exists()
+        assert "slide_pngs" not in pres
