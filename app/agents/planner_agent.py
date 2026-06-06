@@ -24,45 +24,55 @@ from core.llm import call_structured, setup_logging
 setup_logging()
 logger = logging.getLogger("PlannerAgent")
 
-PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик для локальной мультиагентной BI-платформы налоговой аналитики Республики Беларусь (синтетические данные).
+PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик для локальной мультиагентной BI-платформы налоговой аналитики Республики Беларусь (синтетические данные 2024 года, валюта Br).
 
 Пользователь задал вопрос: {question}
 
 Твоя задача — создать **минимально необходимый** план из **1, 2 или максимум 3 задач**, используя только эти агенты:
 
-- **data_agent**: получить сырые данные по вопросу (возвращает SQL + список записей). Нужен почти всегда как первый шаг для графиков.
-- **chart_agent**: построить **один** красивый график (bar, line, donut и т.д.). Требует данные из data_agent.
-- **analyst_agent**: сгенерировать 3-4 текстовых инсайта/выводов на русском. Требует данные.
-- **dashboard_agent**: построить **комплексный дашборд** (KPI-карточки + 3-5 взаимосвязанных графиков + layout). Может работать самостоятельно, внутри сам вызывает data/chart/analyst.
-- **presentation_agent**: собрать готовую .pptx-презентацию (титульный + слайды с графиками + выводы). Принимает список вопросов или один свободный текст.
+Доступные агенты и их сильные стороны (используй это при выборе):
+- **data_agent**: только получение сырых данных (SQL + записи). Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
+- **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
+- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. Используй, когда нужен именно текстовый анализ без визуализации.
+- **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу".
+- **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад".
 
-**Правила создания хорошего плана (очень важно!):**
-- Делай **как можно меньше задач**. Если вопрос можно решить одним dashboard_agent или presentation_agent — делай 1 задачу.
-- Используй data_agent + chart_agent только когда нужен именно "один конкретный график" (а не обзор).
-- Если нужен обзор/дашборд — предпочитай dashboard_agent (1 задача).
-- Если нужна презентация — используй presentation_agent (1 задача), она сама разберёт вопрос.
-- dependencies (depends_on) указывай только когда задача реально нуждается в результате предыдущей (например chart_agent зависит от data_agent).
-- params для каждой задачи: обычно {{"question": "..."}}. Для chart_agent после data_agent можно передать данные через контекст (не нужно явно в params).
-- Все описания на русском, короткие и понятные.
-- Стратегия — 1-2 предложения, почему именно такой набор задач.
+**Жёсткие правила минимизации (соблюдай в порядке приоритета):**
 
-**Примеры хороших планов:**
+1. Если запрос можно полностью закрыть одной задачей — делай ровно 1 задачу.
+   - Широкий обзор / несколько показателей / "дашборд" / "что происходит" → dashboard_agent.
+   - Презентация / отчёт / "сделай слайды" → presentation_agent.
+2. Используй цепочку data_agent → chart_agent только когда пользователь явно хочет **один конкретный график** (динамика одной серии, топ-N, один donut и т.д.).
+3. Никогда не делай 3 задачи, если можно обойтись 1 или 2.
+4. dashboard_agent и presentation_agent уже содержат внутри умную логику (они сами вызывают data/chart/analyst при необходимости). Не дублируй их работу.
+5. depends_on указывай только когда следующая задача реально использует результат предыдущей (например chart_agent зависит от data_agent). Для dashboard_agent и presentation_agent зависимости почти никогда не нужны.
+
+**Примеры хороших планов (минимальных и правильных):**
 
 Вопрос: "Какая задолженность по регионам?"
-→ 1 задача: dashboard_agent (даст топ + структуру + динамику сразу)
+→ План: 1 задача → dashboard_agent
+  (даст топ, структуру, динамику, KPI — всё в одном месте)
 
-Вопрос: "Построй график динамики начислений в г. Минск"
-→ 2 задачи: data_agent → chart_agent
+Вопрос: "Построй график динамики начислений в г. Минск за год"
+→ План: 2 задачи → data_agent → chart_agent
+  (нужен именно один график линии)
 
-Вопрос: "Сделай презентацию по налогам за 2024"
-→ 1 задача: presentation_agent
+Вопрос: "Сделай презентацию по денежному состоянию граждан"
+→ План: 1 задача → presentation_agent
+  (она сама разберёт вопрос на несколько слайдов)
 
 **Примеры плохих планов (избегай):**
-- 3 задачи, когда достаточно 1 дашборда.
-- Забывать data_agent перед chart_agent.
-- Слишком много зависимостей без необходимости.
 
-Верни **строго** валидный JSON по схеме _PlanSpec. Не добавляй текст вне JSON.
+- 3 задачи (data → chart → analyst), когда достаточно одного dashboard_agent.
+- Использовать chart_agent для широкого обзора (chart_agent делает только один график).
+- Делать dashboard_agent + presentation_agent вместе без необходимости.
+- Добавлять лишние зависимости.
+
+После генерации плана всегда проверяй:
+- Можно ли было решить вопрос меньшим количеством задач?
+- Использован ли самый подходящий высокоуровневый агент?
+
+Верни **строго** валидный JSON по схеме _PlanSpec. Не добавляй никакого текста вне JSON.
 """
 
 
@@ -92,18 +102,16 @@ class _PlanSpec(BaseModel):
 
 
 class PlannerAgent(BaseAgent):
-    """PlannerAgent v2.5 — улучшенный иерархический планировщик.
+    """PlannerAgent v2.5 — иерархический планировщик с акцентом на качество планов.
 
-    Основные улучшения по сравнению с v2:
-    - Значительно более качественный промпт генерации плана (правила минимизации,
-      примеры хороших/плохих планов, чёткое понимание возможностей агентов).
-    - Валидация плана + self-correction (LLM исправляет ошибки и неоптимальные планы).
-    - Богатое отображение выполнения (_plan_execution): статус + краткий результат каждого шага.
-    - Усиленная обработка ошибок при выполнении (продолжение независимых задач).
-    - Лучшее логирование и документирование.
+    Ключевые улучшения генерации планов:
+    - Сильный промпт с приоритетами (предпочитать dashboard/presentation для широких запросов).
+    - Много хороших/плохих примеров + жёсткие правила минимизации.
+    - Автоматическая валидация + оценка качества плана.
+    - Self-correction (LLM получает список проблем и предлагает исправленный минимальный план).
 
     Пользователь видит только финальный результат + свёрнутый экспандер
-    "Что было сделано" с подробной информацией по каждому шагу плана.
+    "Что было сделано" с подробной информацией по каждому шагу.
     """
 
     name = "planner_agent"
@@ -162,8 +170,72 @@ class PlannerAgent(BaseAgent):
 
         return errors
 
+    def _assess_plan_quality(self, plan: Plan, question: str, errors: list[str]) -> float:
+        """Простая эвристическая оценка качества плана (0.0 — 1.0).
+        Используется для принятия решения о self-correction.
+        """
+        if not plan.tasks:
+            return 0.0
+
+        score = 1.0
+
+        # Штраф за ошибки валидации
+        if errors:
+            score -= min(0.5, 0.15 * len(errors))
+
+        # Штраф за слишком большое количество задач (для большинства вопросов 1-2 достаточно)
+        if len(plan.tasks) >= 3:
+            score -= 0.25
+        elif len(plan.tasks) == 2:
+            score -= 0.05
+
+        # Бонус за использование высокоуровневых агентов для широких запросов
+        high_level = {"dashboard_agent", "presentation_agent"}
+        if any(t.agent_name in high_level for t in plan.tasks):
+            # Если вопрос выглядит "обзорным" — это хорошо
+            broad_keywords = [
+                "дашборд",
+                "обзор",
+                "презентация",
+                "отчёт",
+                "состояние",
+                "общее",
+                "ключевые",
+            ]
+            if any(kw in question.lower() for kw in broad_keywords):
+                score += 0.15
+
+        # Штраф, если для обзорного вопроса использовали низкоуровневую цепочку
+        low_level_chain = {"data_agent", "chart_agent", "analyst_agent"}
+        if (
+            len(plan.tasks) >= 2
+            and all(t.agent_name in low_level_chain for t in plan.tasks)
+            and any(
+                kw in question.lower()
+                for kw in ["дашборд", "презентация", "обзор", "состояние граждан"]
+            )
+        ):
+            score -= 0.20
+
+        # Бонус за наличие стратегии
+        if plan.strategy and len(plan.strategy) > 15:
+            score += 0.05
+
+        return max(0.0, min(1.0, score))
+
     def _generate_plan(self, question: str) -> Plan:
-        """Генерирует качественный минимальный план (1-3 задачи) с помощью LLM + валидация + self-correction."""
+        """
+        Генерирует качественный и максимально минимальный план (1-3 задачи).
+
+        Улучшения v2.5:
+        - Очень сильный промпт с приоритетами (предпочитать dashboard/presentation).
+        - Много примеров хороших vs плохих планов.
+        - Жёсткие правила минимизации.
+        - Автоматическая валидация + оценка качества.
+        - Self-correction при ошибках или низком качестве.
+
+        Возвращает уже провалидированный (и при необходимости исправленный) Plan.
+        """
         prompt = PLAN_GENERATION_PROMPT.format(question=question)
 
         try:
@@ -191,27 +263,39 @@ class PlannerAgent(BaseAgent):
                 strategy=plan_spec.strategy or "Пошаговый анализ запроса",
             )
 
-            # Валидация
+            # Валидация + оценка качества
             errors = self._validate_plan(plan)
-            if errors:
+            quality_score = self._assess_plan_quality(plan, question, errors)
+
+            if errors or quality_score < 0.65:
                 logger.info(
-                    f"[PlannerAgent] plan validation errors: {errors}. Trying self-correction..."
+                    f"[PlannerAgent] plan needs correction (errors={len(errors)}, quality={quality_score:.2f}). Running self-correction..."
                 )
 
-                # Self-correction: просим LLM исправить план
-                correction_prompt = f"""План содержит ошибки:
-{chr(10).join("- " + e for e in errors)}
+                # Улучшенный self-correction промпт
+                correction_prompt = f"""Оригинальный вопрос пользователя: {question}
 
-Оригинальный вопрос пользователя: {question}
+Сгенерированный план:
+{plan.model_dump_json(indent=2)}
 
-Исправь план так, чтобы он стал валидным и минимальным. Верни исправленный _PlanSpec.
+Проблемы, которые нужно исправить:
+{chr(10).join("- " + e for e in errors) if errors else "- План можно сделать существенно короче и лучше"}
+
+Правила, которые ты должен был соблюсти:
+- Минимум задач (предпочитать dashboard_agent или presentation_agent для широких запросов)
+- Не дублировать работу высокоуровневых агентов
+- Использовать правильные зависимости
+
+Создай **исправленную и максимально минимальную** версию этого плана. Верни только _PlanSpec.
 """
                 try:
                     corrected_spec: _PlanSpec = call_structured(
                         correction_prompt,
                         schema=_PlanSpec,
-                        system="Исправь план. Только валидный JSON по схеме.",
+                        system="Ты — строгий рецензент планов. Исправляй на минимальные и правильные планы. Только валидный JSON.",
                     )
+
+                    # Пересобираем план
                     tasks = []
                     for t in corrected_spec.tasks[:3]:
                         tasks.append(
@@ -226,16 +310,23 @@ class PlannerAgent(BaseAgent):
                     plan = Plan(
                         goal=corrected_spec.goal or question,
                         tasks=tasks,
-                        strategy=corrected_spec.strategy or "Исправленный план",
+                        strategy=corrected_spec.strategy or "Исправленный минимальный план",
                     )
-                    logger.info("[PlannerAgent] plan self-corrected successfully")
+
+                    # Повторная валидация после коррекции
+                    errors = self._validate_plan(plan)
+                    quality_score = self._assess_plan_quality(plan, question, errors)
+                    logger.info(
+                        f"[PlannerAgent] self-correction done. New quality score: {quality_score:.2f}"
+                    )
+
                 except Exception as corr_e:
                     logger.warning(
-                        f"[PlannerAgent] self-correction also failed: {corr_e}. Using original (may be invalid)."
+                        f"[PlannerAgent] self-correction failed: {corr_e}. Keeping current plan."
                     )
 
             logger.info(
-                f"[PlannerAgent] generated plan with {len(plan.tasks)} task(s): {plan.strategy}"
+                f"[PlannerAgent] final plan: {len(plan.tasks)} tasks, quality≈{quality_score:.2f}, strategy: {plan.strategy}"
             )
             return plan
 
@@ -473,16 +564,17 @@ class PlannerAgent(BaseAgent):
             )
 
     def get_capabilities(self) -> dict:
-        """Возвращает возможности агента (для introspection / будущего использования)."""
+        """Возвращает возможности агента (для introspection и будущего использования Planner'ом более высокого уровня)."""
         return {
             "name": self.name,
             "description": self.description,
             "max_tasks_per_plan": 3,
             "features": [
-                "high-quality plan generation with LLM + validation + self-correction",
-                "dependency-aware execution with reliable context passing",
-                "per-task error handling (continues independent tasks)",
-                "rich execution summary (_plan_execution) for UI",
-                "simple in-memory caching",
+                "high-quality minimal plan generation (strong prompt + examples + minimization rules)",
+                "automatic plan validation + LLM self-correction",
+                "simple plan quality scoring",
+                "dependency-aware execution with context passing",
+                "per-task graceful error handling",
+                "rich structured execution summary for UI",
             ],
         }
