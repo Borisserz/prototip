@@ -18,7 +18,13 @@ from pydantic import BaseModel, Field
 
 from app.agents.base_agent import BaseAgent
 from app.agents.executor import AgentExecutor, AgentRegistry
-from app.agents.models import AgentCall, AgentResult, Plan, Task
+from app.agents.models import (
+    AgentCall,
+    AgentResult,
+    DashboardRequest,
+    Plan,
+    Task,
+)
 from core.llm import call_structured, setup_logging
 
 setup_logging()
@@ -31,11 +37,11 @@ PLAN_GENERATION_PROMPT = """Ты — эксперт-планировщик дл�
 Твоя задача — создать **минимально необходимый** план из **1, 2 или максимум 3 задач**, используя только эти агенты:
 
 Доступные агенты и их сильные стороны (используй это при выборе):
-- **data_agent**: только получение сырых данных (SQL + записи). Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
-- **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
-- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. Используй, когда нужен именно текстовый анализ без визуализации.
-- **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу".
-- **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад".
+- **data_agent**: только получение сырых данных (SQL + записи). params: {"question": "<вопрос для генерации SQL>"}. Нужен почти всегда как подготовительный шаг, если дальше будет chart_agent или analyst_agent.
+- **chart_agent**: построение **ровно одного** графика (line, horizontal_bar, donut и т.д.). Требует данные (они придут автоматически по depends_on от data_agent). params: {"question": "<конкретный под-вопрос для этого одного графика>"}. Используй только когда пользователь явно хочет "один график", "динамику", "топ", "сравнение двух категорий".
+- **analyst_agent**: генерация 3-4 текстовых инсайтов/выводов на русском. Требует данные. params: {"question": "<вопрос>"}. Используй, когда нужен именно текстовый анализ без визуализации.
+- **dashboard_agent**: построение **комплексного дашборда** (KPI-карточки + 3-5 взаимосвязанных графиков + layout + summary). Сам внутри вызывает data/chart/analyst. **Предпочитай его**, когда пользователю нужен "обзор", "дашборд", "ключевые метрики", "сравнение нескольких показателей сразу". params: {"question": "<оригинальный вопрос>"} (опционально data, max_charts).
+- **presentation_agent**: сборка готовой .pptx-презентации (титульный слайд + слайды с графиками + выводы + рекомендации). Принимает один вопрос или список. **Предпочитай его**, когда пользователь просит "презентацию", "отчёт", "слайды", "доклад". params: {"question": "<тема>"} или {"questions": ["q1", "q2", ...]}.
 
 **Жёсткие правила минимизации (соблюдай в порядке приоритета):**
 
@@ -345,12 +351,74 @@ class PlannerAgent(BaseAgent):
                 strategy="Fallback: прямой вызов dashboard_agent (самый надёжный для большинства вопросов)",
             )
 
+    def _invoke_agent(
+        self, agent_name: str, params: dict[str, Any], original_question: str
+    ) -> AgentResult:
+        """Подготавливает правильные аргументы и вызывает агент через executor.
+
+        Это центральное место, которое знает сигнатуры run() всех агентов:
+        - data_agent: run(question: str)
+        - chart_agent / analyst_agent: run(question: str, data: list[dict])  (используем **call_kwargs)
+        - dashboard_agent: run(request: DashboardRequest)
+        - presentation_agent: run(questions: list[str] | PresentationInput | ...)
+
+        Всегда очищаем "result_from_*" junk из контекста. Используем executor.run
+        так же, как это делает Orchestrator (str + data=kw для низкоуровневых).
+        """
+        p = {k: v for k, v in (params or {}).items() if not str(k).startswith("result_from_")}
+        q = str(p.get("question") or p.get("q") or original_question or "").strip()
+
+        if agent_name == "data_agent":
+            # DataAgent.run принимает bare str (внутри делает DataAgentInput)
+            arg = q or original_question
+            return self.executor.run(agent_name, arg)
+
+        if agent_name in ("chart_agent", "analyst_agent"):
+            # Эти два требуют (question, data). Orchestrator уже делает так:
+            # executor.run("chart_agent", question, data=...)
+            # executor пробросит data= как kwarg → agent.run(q, data=the_list)
+            data = p.get("data") or []
+            return self.executor.run(agent_name, q or original_question, data=data)
+
+        if agent_name == "dashboard_agent":
+            payload: dict[str, Any] = {}
+            if q:
+                payload["question"] = q
+            if "data" in p and p["data"]:
+                payload["data"] = p["data"]
+            if "max_charts" in p:
+                payload["max_charts"] = p["max_charts"]
+            if "include_kpi" in p:
+                payload["include_kpi"] = bool(p["include_kpi"])
+            if not payload.get("question"):
+                payload["question"] = original_question
+            req = DashboardRequest(**payload)
+            return self.executor.run(agent_name, req)
+
+        if agent_name == "presentation_agent":
+            # PresentationAgent.run очень толерантный, но мы даём ему безопасный shape.
+            # Поддерживаем как {"questions": [...]}, так и {"question": "..."} от LLM.
+            if "questions" in p and p["questions"]:
+                qs: Any = p["questions"]
+            elif q:
+                qs = [q]
+            else:
+                qs = [original_question] if original_question else []
+            # Можно передать list[str] — PresentationAgent сам превратит в внутренний список.
+            # Если в будущем понадобятся per-question prefs (chart_type), здесь можно собрать
+            # list[dict] или PresentationInput, но для планов от Главного агента list[str] достаточно.
+            return self.executor.run(agent_name, qs)
+
+        # Неизвестный агент или fallback — пусть executor обернёт ошибку
+        return self.executor.run(agent_name, p if p else original_question)
+
     def _execute_plan(self, plan: Plan, original_question: str) -> AgentResult:
         """Выполняет план с надёжной передачей контекста.
 
         - Уважает зависимости (топологический порядок).
         - При ошибке в одной задаче пытается продолжить независимые задачи.
         - Собирает краткие саммари для красивого отображения в UI.
+        - Использует _invoke_agent для корректных форм аргументов под каждый тип run().
         """
         context: dict[str, Any] = {}
         executed_calls: list[AgentCall] = []
@@ -361,7 +429,9 @@ class PlannerAgent(BaseAgent):
         for task in ordered:
             task_params = dict(task.params or {})
 
-            # Передаём контекст из зависимостей (даже если предыдущая задача частично упала)
+            # Передаём контекст из зависимостей (даже если предыдущая задача частично упала).
+            # Инжектим ТОЛЬКО полезные примитивы (data, source_sql). Полные объекты result_from_*
+            # больше не кладём в params — они мешали нормализации и не нужны leaf-агентам.
             for dep_id in task.depends_on:
                 if dep_id in context:
                     dep_res = context[dep_id]
@@ -370,39 +440,11 @@ class PlannerAgent(BaseAgent):
                             task_params.setdefault("data", dep_res.data)
                         if hasattr(dep_res, "sql"):
                             task_params.setdefault("source_sql", dep_res.sql)
-                        task_params[f"result_from_{dep_id}"] = dep_res
-
-            call_arg = task_params if task_params else original_question
-
-            # Нормализуем вход для агентов, которые ожидают Pydantic-модели, а не сырой dict
-            if task.agent_name == "dashboard_agent" and isinstance(call_arg, dict):
-                from app.schemas import DashboardRequest
-
-                try:
-                    call_arg = DashboardRequest(**call_arg)
-                except Exception as norm_e:
-                    logger.warning(f"Could not construct DashboardRequest from params: {norm_e}")
-
-            # Для presentation_agent тоже можно нормализовать, если пришёл dict с вопросами
-            if task.agent_name == "presentation_agent" and isinstance(call_arg, dict):
-                from app.schemas import PresentationInput, QuestionBlock
-
-                try:
-                    if "questions" in call_arg:
-                        qblocks = [
-                            QuestionBlock(**q) if isinstance(q, dict) else q
-                            for q in call_arg["questions"]
-                        ]
-                        call_arg = PresentationInput(
-                            questions=qblocks,
-                            **{k: v for k, v in call_arg.items() if k != "questions"},
-                        )
-                except Exception as norm_e:
-                    logger.warning(f"Could not construct PresentationInput: {norm_e}")
+                        # Больше не делаем: task_params[f"result_from_{dep_id}"] = dep_res
 
             try:
                 start_ts = time.time()
-                res = self.executor.run(task.agent_name, call_arg)
+                res = self._invoke_agent(task.agent_name, task_params, original_question)
                 duration = int((time.time() - start_ts) * 1000)
 
                 success = getattr(res, "success", True)
@@ -422,10 +464,15 @@ class PlannerAgent(BaseAgent):
                     }
                 )
 
+                # Для логов/трассировки показываем, что именно передали (без огромных объектов)
+                input_summary = str(
+                    {k: v for k, v in task_params.items() if not str(k).startswith("result_from_")}
+                )[:250]
+
                 executed_calls.append(
                     AgentCall(
                         agent_name=task.agent_name,
-                        input_summary=str(call_arg)[:250],
+                        input_summary=input_summary,
                         success=success,
                         duration_ms=duration,
                         reasoning=getattr(res, "reasoning", ""),
@@ -455,7 +502,7 @@ class PlannerAgent(BaseAgent):
                 executed_calls.append(
                     AgentCall(
                         agent_name=task.agent_name,
-                        input_summary=str(call_arg)[:250],
+                        input_summary=str(task_params)[:250],
                         success=False,
                         error=str(ex),
                     )
@@ -468,11 +515,11 @@ class PlannerAgent(BaseAgent):
             else AgentResult(success=False, error="План не содержал задач")
         )
 
-        # Прикрепляем данные для UI
+        # Прикрепляем данные для UI (экспандер "Что было сделано" + история)
         try:
             if final_result is not None:
                 final_result._executed_plan = plan
-                final_result._plan_execution = plan_execution  # богатая информация для экспандера
+                final_result._plan_execution = plan_execution
                 final_result._agent_calls = executed_calls
         except Exception:
             pass
