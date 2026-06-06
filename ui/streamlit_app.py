@@ -226,6 +226,20 @@ def main() -> None:
                     else:
                         _render_planner_result(res)
 
+                    # Показываем план в свёрнутом экспандере (требование v2)
+                    plan = getattr(res, "_executed_plan", None)
+                    if plan and getattr(plan, "tasks", None):
+                        with st.expander("Что было сделано", expanded=False):
+                            for i, task in enumerate(plan.tasks, 1):
+                                deps = (
+                                    f" (зависит от: {', '.join(task.depends_on)})"
+                                    if task.depends_on
+                                    else ""
+                                )
+                                st.markdown(
+                                    f"**{i}. {task.agent_name}** — {task.description}{deps}"
+                                )
+
         # Простая форма ввода
         with st.form("main_form", clear_on_submit=True):
             main_q = st.text_input(
