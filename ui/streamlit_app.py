@@ -62,6 +62,14 @@ def _load_demo_df() -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+@st.cache_resource(show_spinner=False)
+def get_planner():
+    """Кэшируем PlannerAgent (чтобы не пересоздавать агенты при каждом rerun)."""
+    from app.agents.planner_agent import PlannerAgent
+
+    return PlannerAgent()
+
+
 def main() -> None:
     st.set_page_config(
         page_title="BI-аналитика налогов РБ",
@@ -91,9 +99,171 @@ def main() -> None:
                 """
             )
 
-    tab_data, tab_charts, tab_dash, tab_pres = st.tabs(
-        ["📋 Данные", "📊 Графики", "📈 Дашборды", "📑 Презентация"]
+    tab_main, tab_data, tab_charts, tab_dash, tab_pres = st.tabs(
+        ["🤖 Главный агент", "📋 Данные", "📊 Графики", "📈 Дашборды", "📑 Презентация"]
     )
+
+    # Вспомогательный рендерер результатов Planner'а (локальная функция внутри main)
+    def _render_planner_result(res):
+        """Красивое, стабильное и информативное отображение результата PlannerAgent в чате."""
+        # Обработка случая уточняющего вопроса
+        if (
+            hasattr(res, "insights")
+            and res.insights
+            and any(
+                "уточн" in str(ins).lower() or "что нужно" in str(ins).lower()
+                for ins in res.insights
+            )
+        ):
+            st.info(res.insights[0] if res.insights else "Уточните, пожалуйста, формат ответа.")
+            st.caption("Вы можете ответить в чате — Главный агент учтёт предыдущий контекст.")
+            return
+
+        # 1. График / AskResult-подобный результат
+        if (
+            hasattr(res, "chart_spec")
+            and getattr(res, "chart_spec", None)
+            and getattr(res, "data", None)
+        ):
+            try:
+                import pandas as pd
+
+                df = pd.DataFrame(res.data)
+                from viz.charts import build_chart
+
+                fig = build_chart(df, res.chart_spec)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Не удалось отобразить график: {e}")
+
+            if hasattr(res, "analysis") and res.analysis:
+                if getattr(res.analysis, "key_conclusion", None):
+                    st.subheader("Ключевой вывод")
+                    st.write(res.analysis.key_conclusion)
+                if getattr(res.analysis, "insights", None):
+                    st.subheader("Выводы")
+                    for ins in res.analysis.insights:
+                        st.markdown(f"- {ins}")
+
+        # 2. Дашборд
+        elif hasattr(res, "charts") and getattr(res, "charts", None):
+            try:
+                from app.schemas import DashboardResult
+
+                if isinstance(res, DashboardResult):
+                    _render_dashboard(res)
+                else:
+                    st.write(res)
+            except Exception:
+                st.write(res)
+            st.caption(
+                "Можно продолжить: «сделай презентацию по этому дашборду» или уточнить нужные графики."
+            )
+
+        # 3. Презентация
+        elif hasattr(res, "pptx_path"):
+            st.success(f"Презентация готова: {getattr(res, 'num_slides', 0)} слайдов.")
+            ppath = getattr(res, "pptx_path", None)
+            if ppath and Path(ppath).exists():
+                with open(ppath, "rb") as f:
+                    b = f.read()
+                st.download_button(
+                    "📥 Скачать .pptx",
+                    data=b,
+                    file_name="presentation.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                )
+
+        # 4. Данные
+        elif hasattr(res, "data") and isinstance(getattr(res, "data", None), list):
+            try:
+                import pandas as pd
+
+                df = pd.DataFrame(res.data)
+                st.dataframe(df, use_container_width=True)
+                if hasattr(res, "sql"):
+                    with st.expander("SQL запрос (для справки)"):
+                        st.code(getattr(res, "sql", ""), language="sql")
+            except Exception:
+                st.write(res)
+
+        # 5. Fallback (в т.ч. уточнения и общие сообщения)
+        else:
+            if hasattr(res, "insights") and res.insights:
+                for ins in res.insights:
+                    st.write(ins)
+            elif hasattr(res, "key_conclusion") and res.key_conclusion:
+                st.write(res.key_conclusion)
+            else:
+                st.write("Результат:")
+                if hasattr(res, "model_dump"):
+                    st.json(res.model_dump())
+                else:
+                    st.write(res)
+
+    with tab_main:
+        st.markdown("**Главный агент**")
+        st.caption(
+            "Просто опишите, что вам нужно. Система сама решит, подготовить ли график, дашборд, презентацию или данные. "
+            "Вся внутренняя работа скрыта."
+        )
+
+        # История чата (используем session_state)
+        if "main_messages" not in st.session_state:
+            st.session_state["main_messages"] = []
+
+        # Отображаем историю сообщений в стиле чата
+        for msg in st.session_state["main_messages"]:
+            if msg["role"] == "user":
+                with st.chat_message("user"):
+                    st.write(msg["content"])
+            else:
+                with st.chat_message("assistant"):
+                    res = msg.get("result")
+                    if res is None:
+                        st.write(msg.get("content", "Готово."))
+                    else:
+                        _render_planner_result(res)
+
+        # Простая форма ввода
+        with st.form("main_form", clear_on_submit=True):
+            main_q = st.text_input(
+                "Ваш вопрос на русском",
+                placeholder="Например: Покажи дашборд по задолженности по регионам или динамику начислений",
+                key="main_question_input",
+            )
+            submitted_main = st.form_submit_button(
+                "Отправить", type="primary", use_container_width=True
+            )
+
+        if submitted_main and main_q.strip():
+            # Добавляем сообщение пользователя в историю
+            st.session_state["main_messages"].append({"role": "user", "content": main_q.strip()})
+
+            with st.spinner("Думаю... Главный агент выбирает лучший инструмент и собирает ответ"):
+                try:
+                    planner = get_planner()
+                    result = planner.run(main_q.strip())
+
+                    # Добавляем ответ ассистента (храним объект результата для рендера)
+                    st.session_state["main_messages"].append(
+                        {"role": "assistant", "result": result}
+                    )
+                except Exception as e:
+                    error_msg = f"Не удалось обработать запрос: {e}"
+                    st.session_state["main_messages"].append(
+                        {"role": "assistant", "content": error_msg}
+                    )
+
+            st.rerun()
+
+        # Кнопка очистки чата
+        if st.session_state.get("main_messages") and st.button(
+            "Очистить чат", key="clear_main_chat"
+        ):
+            st.session_state["main_messages"] = []
+            st.rerun()
 
     with tab_data:
         st.markdown("**Набор данных (демо)**")
