@@ -1,0 +1,189 @@
+{
+  "generated_at": "2026-06-06T19:25:21.198747+00:00",
+  "source": "scripts/generate_leadership_showcase.py",
+  "dataset": "/Users/borisserzhanovich/projects/prototip/data/sample.csv",
+  "chart_scale": 2.5,
+  "charts": [
+    {
+      "index": 1,
+      "slug": "bar",
+      "chart_type": "bar",
+      "title": "Начисленные налоги по регионам",
+      "action_title": "г. Минск — лидер по объёму начислений",
+      "folder": "charts/01_bar",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/01_bar/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/01_bar/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/01_bar/spec.json"
+    },
+    {
+      "index": 2,
+      "slug": "grouped_bar",
+      "chart_type": "grouped_bar",
+      "title": "Начисления по видам налогов и регионам",
+      "action_title": "НДС и подоходный налог доминируют в г. Минске",
+      "folder": "charts/02_grouped_bar",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/02_grouped_bar/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/02_grouped_bar/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/02_grouped_bar/spec.json"
+    },
+    {
+      "index": 3,
+      "slug": "stacked_bar",
+      "chart_type": "stacked_bar",
+      "title": "Структура начислений по месяцам",
+      "action_title": "Доля НДС в структуре растёт к концу года",
+      "folder": "charts/03_stacked_bar",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/03_stacked_bar/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/03_stacked_bar/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/03_stacked_bar/spec.json"
+    },
+    {
+      "index": 4,
+      "slug": "line",
+      "chart_type": "line",
+      "title": "Динамика задолженности по регионам",
+      "action_title": "Задолженность растёт к концу 2024 года",
+      "folder": "charts/04_line",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/04_line/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/04_line/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/04_line/spec.json"
+    },
+    {
+      "index": 5,
+      "slug": "area",
+      "chart_type": "area",
+      "title": "Накопительная динамика штрафов и пеней",
+      "action_title": "Накопление штрафов ускоряется во II полугодии",
+      "folder": "charts/05_area",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/05_area/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/05_area/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/05_area/spec.json"
+    },
+    {
+      "index": 6,
+      "slug": "scatter",
+      "chart_type": "scatter",
+      "title": "Корреляция начислений и задолженности",
+      "action_title": "Высокие начисления не всегда означают высокий долг",
+      "folder": "charts/06_scatter",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/06_scatter/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/06_scatter/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/06_scatter/spec.json"
+    },
+    {
+      "index": 7,
+      "slug": "waterfall",
+      "chart_type": "waterfall",
+      "title": "Водопад формирования задолженности",
+      "action_title": "Начисления → уплата → штрафы → остаток долга",
+      "folder": "charts/07_waterfall",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/07_waterfall/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/07_waterfall/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/07_waterfall/spec.json"
+    },
+    {
+      "index": 8,
+      "slug": "horizontal_bar",
+      "chart_type": "horizontal_bar",
+      "title": "Рейтинг регионов по задолженности",
+      "action_title": "Гомельская область — лидер по задолженности",
+      "folder": "charts/08_horizontal_bar",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/08_horizontal_bar/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/08_horizontal_bar/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/08_horizontal_bar/spec.json"
+    },
+    {
+      "index": 9,
+      "slug": "donut",
+      "chart_type": "donut",
+      "title": "Структура начислений по видам налогов",
+      "action_title": "НДС — крупнейшая доля в структуре начислений",
+      "folder": "charts/09_donut",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/09_donut/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/09_donut/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/09_donut/spec.json"
+    },
+    {
+      "index": 10,
+      "slug": "kpi",
+      "chart_type": "kpi",
+      "title": "Совокупная задолженность",
+      "action_title": "Совокупная задолженность превышает 15 млрд Br",
+      "folder": "charts/10_kpi",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/10_kpi/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/10_kpi/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/10_kpi/spec.json"
+    },
+    {
+      "index": 11,
+      "slug": "heatmap",
+      "chart_type": "heatmap",
+      "title": "Тепловая карта начислений: регион × месяц (НДС)",
+      "action_title": "Пик начислений НДС — в конце года в г. Минске",
+      "folder": "charts/11_heatmap",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/11_heatmap/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/11_heatmap/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/11_heatmap/spec.json"
+    },
+    {
+      "index": 12,
+      "slug": "treemap",
+      "chart_type": "treemap",
+      "title": "Иерархия начислений: регион → вид налога",
+      "action_title": "г. Минск доминирует в общем объёме начислений",
+      "folder": "charts/12_treemap",
+      "png": "/Users/borisserzhanovich/projects/prototip/showcase/charts/12_treemap/chart.png",
+      "html": "/Users/borisserzhanovich/projects/prototip/showcase/charts/12_treemap/chart.html",
+      "spec": "/Users/borisserzhanovich/projects/prototip/showcase/charts/12_treemap/spec.json"
+    }
+  ],
+  "presentations": [
+    {
+      "filename": "01_obzor_nalogov_RB.pptx",
+      "title": "Обзор налоговой аналитики РБ",
+      "pptx": "/Users/borisserzhanovich/projects/prototip/showcase/presentations/01_obzor_nalogov_RB.pptx",
+      "num_slides": 7,
+      "questions": 2,
+      "slide_pngs": [
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_fkrbz986/pres_slide_9a260dfbc6_0_г_минск_лидер_по_объ_му_начислений.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_fkrbz986/pres_slide_9a260dfbc6_1_гомельская_область_лидер_по_задолженност.png"
+      ]
+    },
+    {
+      "filename": "02_reiting_zadolzhennosti.pptx",
+      "title": "Рейтинг задолженности по регионам",
+      "pptx": "/Users/borisserzhanovich/projects/prototip/showcase/presentations/02_reiting_zadolzhennosti.pptx",
+      "num_slides": 7,
+      "questions": 2,
+      "slide_pngs": [
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_ol_npvy4/pres_slide_2343b2b6dd_0_гомельская_область_лидер_по_задолженност.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_ol_npvy4/pres_slide_2343b2b6dd_1_г_минск_лидер_по_объ_му_начислений.png"
+      ]
+    },
+    {
+      "filename": "03_dinamika_i_struktura.pptx",
+      "title": "Динамика и сезонность 2024",
+      "pptx": "/Users/borisserzhanovich/projects/prototip/showcase/presentations/03_dinamika_i_struktura.pptx",
+      "num_slides": 8,
+      "questions": 3,
+      "slide_pngs": [
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_5y556knt/pres_slide_ee92a8fd83_0_задолженность_раст_т_к_концу_2024_года.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_5y556knt/pres_slide_ee92a8fd83_1_накопление_штрафов_ускоряется_во_ii_полу.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_5y556knt/pres_slide_ee92a8fd83_2_начисления_уплата_штрафы_остаток_долга.png"
+      ]
+    },
+    {
+      "filename": "04_kompleksny_analiticheskiy.pptx",
+      "title": "Комплексный аналитический отчёт",
+      "pptx": "/Users/borisserzhanovich/projects/prototip/showcase/presentations/04_kompleksny_analiticheskiy.pptx",
+      "num_slides": 10,
+      "questions": 4,
+      "slide_pngs": [
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_19ni1v_h/pres_slide_65e4ae0c21_0_г_минск_доминирует_в_общем_объ_ме_начисл.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_19ni1v_h/pres_slide_65e4ae0c21_1_пик_начислений_ндс_в_конце_года_в_г_минс.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_19ni1v_h/pres_slide_65e4ae0c21_2_высокие_начисления_не_всегда_означают_вы.png",
+        "/private/var/folders/50/r0nr5kbs02lc1k5z6zz7v83r0000gn/T/showcase_slides_19ni1v_h/pres_slide_65e4ae0c21_3_ндс_и_подоходный_налог_доминируют_в_г_ми.png"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "chart_type": "grouped_bar",
+  "title": "Начисления по видам налогов и регионам",
+  "subtitle": null,
+  "x": "tax_type",
+  "y": "accrued",
+  "color": "region",
+  "agg": "sum",
+  "source": "Синтетические данные (демо), Республика Беларусь",
+  "insights": [
+    "НДС — крупнейший вид налога в большинстве регионов",
+    "г. Минск опережает области по всем основным видам",
+    "Акцизы — наименьшая доля в структуре"
+  ],
+  "rationale": "Сравнение с группировкой — grouped_bar",
+  "action_title": "НДС и подоходный налог доминируют в г. Минске",
+  "show_average": false,
+  "highlight_category": null,
+  "top_n": null,
+  "sort_order": null
+}

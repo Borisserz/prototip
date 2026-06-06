@@ -1,0 +1,21 @@
+{
+  "chart_type": "stacked_bar",
+  "title": "Структура начислений по месяцам",
+  "subtitle": null,
+  "x": "period",
+  "y": "accrued",
+  "color": "tax_type",
+  "agg": "sum",
+  "source": "Синтетические данные (демо), Республика Беларусь",
+  "insights": [
+    "Сезонный рост начислений в Q4",
+    "НДС формирует основу стека",
+    "Имущественные налоги стабильны по месяцам"
+  ],
+  "rationale": "Структура во времени — stacked_bar",
+  "action_title": "Доля НДС в структуре растёт к концу года",
+  "show_average": false,
+  "highlight_category": null,
+  "top_n": null,
+  "sort_order": "asc"
+}
