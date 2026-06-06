@@ -256,7 +256,10 @@ def test_presentation_slide_header_uses_action_title() -> None:
             return_value=_mock_planner_executor(ask),
         ),
         patch("app.agents.presentation_agent.call_structured") as mock_narr,
-        patch.object(agent, "_add_question_slide_header", side_effect=capture_header),
+        patch(
+            "app.presentation_renderer.PresentationRenderer.render_slide_header",
+            side_effect=capture_header,
+        ),
         patch("app.agents.presentation_agent.build_chart") as mock_build,
         patch("app.agents.presentation_agent.export_png"),
         patch("app.agents.presentation_agent.Presentation") as mock_prs,
