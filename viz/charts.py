@@ -156,7 +156,8 @@ def _category_col_for_highlight(spec: ChartSpec, ctype: str) -> str:
 
 def _apply_highlight(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: str) -> bool:
     """Подсветка одной категории. Возвращает True, если цвета применены."""
-    if not spec.highlight_category or spec.color is not None:
+    highlight = getattr(spec, "highlight_category", None)
+    if not highlight or spec.color is not None:
         return False
     if ctype not in _BAR_TYPES:
         return False
@@ -165,7 +166,7 @@ def _apply_highlight(fig: go.Figure, dff: pd.DataFrame, spec: ChartSpec, ctype: 
     if cat_col not in dff.columns:
         return False
 
-    target = str(spec.highlight_category).strip().lower()
+    target = str(highlight).strip().lower()
     colors: list[str] = []
     matched = False
     for val in dff[cat_col]:

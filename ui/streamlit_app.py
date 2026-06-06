@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from app.chart_repair import repair_chart_spec  # noqa: E402
+from app.chart_repair import normalize_chart_spec, repair_chart_spec  # noqa: E402
 from app.config import config  # noqa: E402
 from app.drilldown import (  # noqa: E402
     DRILLDOWN_DIMENSIONS,
@@ -177,7 +177,7 @@ def _render_app_header() -> None:
     with mid:
         mode = st.radio(
             "Режим интерфейса",
-            ["Для руководства", "Для аналитика"],
+            ["1", "2"],
             horizontal=True,
             index=0 if _is_leadership_mode() else 1,
             key="ui_mode_radio",
@@ -187,7 +187,7 @@ def _render_app_header() -> None:
                 "Аналитик — полный доступ: SQL, данные, трассировка агентов и редактор графиков."
             ),
         )
-        st.session_state["ui_mode"] = "leadership" if mode == "Для руководства" else "analyst"
+        st.session_state["ui_mode"] = "leadership" if mode == "1" else "analyst"
         if _is_leadership_mode():
             st.caption("Краткий вид: результат и выводы без технических деталей.")
         else:
@@ -741,9 +741,9 @@ def _coerce_chart_spec(spec: Any) -> ChartSpec | None:
     if spec is None:
         return None
     if isinstance(spec, ChartSpec):
-        return spec
+        return normalize_chart_spec(spec)
     if isinstance(spec, dict):
-        return ChartSpec.model_validate(spec)
+        return normalize_chart_spec(spec)
     return None
 
 
@@ -860,7 +860,8 @@ def _read_dashboard_chart_override(
         updates["highlight_category"] = hc or None
 
     spec = base_spec.model_copy(update=updates) if updates else base_spec
-    if spec.highlight_category and spec.color:
+    highlight = getattr(spec, "highlight_category", None)
+    if highlight and spec.color:
         spec = spec.model_copy(update={"highlight_category": None})
     return spec
 
@@ -910,7 +911,7 @@ def _render_dashboard_chart_editor(
             "regions": [],
             "action_title": spec.action_title or "",
             "show_average": spec.show_average,
-            "highlight_category": spec.highlight_category or "",
+            "highlight_category": getattr(spec, "highlight_category", None) or "",
         }
 
     with st.expander("Настроить график", expanded=False):
@@ -2139,7 +2140,7 @@ def _build_presentation_qlist() -> list[dict[str, Any]]:
 
 
 def _render_presentation_workspace() -> None:
-    st.markdown("### Презентация для руководства")
+    st.markdown("### Презентация ")
     st.caption("Соберите executive-колоду из вопросов или очереди из чата.")
 
     queue = st.session_state.get("pres_queue") or []

@@ -13,6 +13,13 @@ from viz.style import format_number_ru
 
 logger = logging.getLogger("ChartRepair")
 
+
+def normalize_chart_spec(spec: ChartSpec | dict[str, Any]) -> ChartSpec:
+    """Приводит ChartSpec к актуальной схеме (все storytelling-поля с дефолтами)."""
+    if isinstance(spec, ChartSpec):
+        return ChartSpec.model_validate(spec.model_dump())
+    return ChartSpec.model_validate(spec)
+
 DIMENSION_COLS = frozenset({"region", "tax_type", "period"})
 METRIC_ALIASES: dict[str, str] = {
     "total_debt": "debt",
@@ -106,6 +113,7 @@ def _fallback_action_title(spec: ChartSpec, data: list[dict], question: str) -> 
 
 def repair_chart_spec(spec: ChartSpec, data: list[dict], question: str = "") -> ChartSpec:
     """Чинит и обогащает ChartSpec перед build_chart."""
+    spec = normalize_chart_spec(spec)
     if not data:
         return spec
 

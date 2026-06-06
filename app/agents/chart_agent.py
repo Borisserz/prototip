@@ -13,7 +13,7 @@ import time
 from app.agents.base_agent import BaseAgent
 from app.agents.models import ChartAgentInput, ChartAgentResult
 from app.chart_data_profile import format_profile_for_prompt, profile_data
-from app.chart_repair import repair_chart_spec
+from app.chart_repair import normalize_chart_spec, repair_chart_spec
 from core.llm import call_structured, setup_logging
 from core.models import ChartSpec
 
@@ -136,10 +136,12 @@ class ChartAgent(BaseAgent):
 """
         # Прямо просим модель вернуть ChartSpec (она знает схему из structured)
         try:
-            spec = call_structured(
-                prompt,
-                schema=ChartSpec,
-                system="Отвечай только валидным JSON по схеме. Все тексты на русском.",
+            spec = normalize_chart_spec(
+                call_structured(
+                    prompt,
+                    schema=ChartSpec,
+                    system="Отвечай только валидным JSON по схеме. Все тексты на русском.",
+                )
             )
         except Exception as e:
             logger.info(f"[ChartAgent] error: {e}")

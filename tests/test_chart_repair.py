@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from app.chart_data_profile import format_profile_for_prompt, profile_data
-from app.chart_repair import repair_chart_spec
+from app.chart_repair import normalize_chart_spec, repair_chart_spec
 from app.storytelling import enrich_data_explanation
 from core.models import ChartSpec
 
@@ -14,6 +14,22 @@ from core.models import ChartSpec
 @pytest.fixture(scope="module")
 def sample_df() -> pd.DataFrame:
     return pd.read_csv("data/sample.csv")
+
+
+def test_normalize_chart_spec_adds_storytelling_defaults() -> None:
+    """Старые/урезанные spec из LLM получают highlight_category и прочие поля."""
+    partial = {
+        "chart_type": "donut",
+        "title": "Структура",
+        "x": "tax_type",
+        "y": "accrued",
+        "rationale": "доли",
+    }
+    spec = normalize_chart_spec(partial)
+    assert spec.highlight_category is None
+    assert spec.show_average is False
+    assert spec.action_title is None
+    assert hasattr(spec, "highlight_category")
 
 
 def test_repair_resolves_metric_aliases(sample_df: pd.DataFrame) -> None:
