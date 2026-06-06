@@ -404,16 +404,23 @@ class PlannerAgent(BaseAgent):
                 break
         return ordered
 
+    def generate_plan(self, question: str) -> Plan:
+        """Только генерирует план (без выполнения). Используется для показа пользователю перед подтверждением."""
+        return self._generate_plan(question)
+
+    def execute_plan(self, plan: Plan) -> AgentResult:
+        """Выполняет уже готовый план и возвращает результат.
+        Прикрепляет _executed_plan и _plan_execution для отображения в UI.
+        """
+        return self._execute_plan(plan, getattr(plan, "goal", ""))
+
     def run(self, question: str) -> AgentResult:
-        """Главная точка входа Planner v2.5.
+        """Главная точка входа (автоматический режим: генерирует план и сразу выполняет).
 
-        1. Генерирует качественный минимальный Plan (1-3 задачи) с валидацией и self-correction.
-        2. Выполняет план с надёжной передачей контекста и обработкой ошибок.
-        3. Возвращает результат последней задачи, к которому прикреплён
-           _plan_execution — богатая информация для красивого отображения в UI.
-
-        Пользователь видит только финальный результат + свёрнутый экспандер
-        "Что было сделано" с номером, агентом, описанием, статусом и кратким результатом шага.
+        Для интерактивного сценария с подтверждением используйте:
+            plan = planner.generate_plan(question)
+            # показать пользователю + кнопки подтверждения
+            result = planner.execute_plan(plan)
         """
         logger.info(f"[PlannerAgent] start (v2.5): question={question[:70]}...")
 

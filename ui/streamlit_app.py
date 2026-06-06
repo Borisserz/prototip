@@ -202,11 +202,26 @@ def main() -> None:
                 else:
                     st.write(res)
 
+    def _render_plan_preview(plan):
+        """Красивое отображение предложенного плана (до подтверждения выполнения)."""
+        if not plan or not getattr(plan, "tasks", None):
+            st.write("План пуст.")
+            return
+
+        st.markdown("**План действий:**")
+        for i, task in enumerate(plan.tasks, 1):
+            deps = (
+                f" (зависит от: {', '.join(getattr(task, 'depends_on', []))})"
+                if getattr(task, "depends_on", None)
+                else ""
+            )
+            st.markdown(f"**{i}. {task.agent_name}**{deps}")
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{task.description}")
+
     with tab_main:
         st.markdown("**Главный агент**")
         st.caption(
-            "Просто опишите, что вам нужно. Система сама решит, подготовить ли график, дашборд, презентацию или данные. "
-            "Вся внутренняя работа скрыта."
+            "Опишите задачу. Я сначала покажу план действий и выполню его только после вашего подтверждения."
         )
 
         # История чата (используем session_state)
@@ -214,59 +229,86 @@ def main() -> None:
             st.session_state["main_messages"] = []
 
         # Отображаем историю сообщений в стиле чата
-        for msg in st.session_state["main_messages"]:
+        for i, msg in enumerate(st.session_state["main_messages"]):
             if msg["role"] == "user":
                 with st.chat_message("user"):
                     st.write(msg["content"])
             else:
                 with st.chat_message("assistant"):
-                    res = msg.get("result")
-                    if res is None:
-                        st.write(msg.get("content", "Готово."))
-                    else:
+                    # Случай 1: сообщение с результатом выполнения
+                    if msg.get("result") is not None:
+                        res = msg["result"]
                         _render_planner_result(res)
 
-                    # Улучшенное отображение плана (Planner v2.5)
-                    execution = getattr(res, "_plan_execution", None)
-                    plan = getattr(res, "_executed_plan", None)
+                        # Показываем выполненный план (уже после подтверждения)
+                        execution = getattr(res, "_plan_execution", None)
+                        plan = getattr(res, "_executed_plan", None)
 
-                    if execution and isinstance(execution, list):
-                        with st.expander("Что было сделано", expanded=False):
-                            for step in execution:
-                                status = step.get("status", "")
-                                icon = (
-                                    "✅"
-                                    if status == "успешно"
-                                    else "❌"
-                                    if status == "ошибка"
-                                    else "⚠️"
-                                )
-                                deps = (
-                                    f" (зависит от: {', '.join(step.get('depends_on', []))})"
-                                    if step.get("depends_on")
-                                    else ""
-                                )
-                                st.markdown(
-                                    f"**{step.get('num', '?')}. {step.get('agent_name', '?')}** {icon}{deps}"
-                                )
-                                st.markdown(
-                                    f"&nbsp;&nbsp;&nbsp;&nbsp;{step.get('description', '')}"
-                                )
-                                brief = step.get("brief_result")
-                                if brief:
-                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;→ {brief}")
-                    elif plan and getattr(plan, "tasks", None):
-                        # Fallback на старый формат (если _plan_execution почему-то нет)
-                        with st.expander("Что было сделано", expanded=False):
-                            for i, task in enumerate(plan.tasks, 1):
-                                deps = (
-                                    f" (зависит от: {', '.join(task.depends_on)})"
-                                    if task.depends_on
-                                    else ""
-                                )
-                                st.markdown(
-                                    f"**{i}. {task.agent_name}** — {task.description}{deps}"
-                                )
+                        if execution and isinstance(execution, list):
+                            with st.expander("Что было сделано", expanded=False):
+                                for step in execution:
+                                    status = step.get("status", "")
+                                    icon = (
+                                        "✅"
+                                        if status == "успешно"
+                                        else "❌"
+                                        if status == "ошибка"
+                                        else "⚠️"
+                                    )
+                                    deps = (
+                                        f" (зависит от: {', '.join(step.get('depends_on', []))})"
+                                        if step.get("depends_on")
+                                        else ""
+                                    )
+                                    st.markdown(
+                                        f"**{step.get('num', '?')}. {step.get('agent_name', '?')}** {icon}{deps}"
+                                    )
+                                    st.markdown(
+                                        f"&nbsp;&nbsp;&nbsp;&nbsp;{step.get('description', '')}"
+                                    )
+                                    brief = step.get("brief_result")
+                                    if brief:
+                                        st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;→ {brief}")
+                        elif plan and getattr(plan, "tasks", None):
+                            with st.expander("Что было сделано", expanded=False):
+                                for j, task in enumerate(plan.tasks, 1):
+                                    deps = (
+                                        f" (зависит от: {', '.join(task.depends_on)})"
+                                        if task.depends_on
+                                        else ""
+                                    )
+                                    st.markdown(
+                                        f"**{j}. {task.agent_name}** — {task.description}{deps}"
+                                    )
+
+                    # Случай 2: сообщение с планом, ожидающим подтверждения
+                    elif msg.get("plan") is not None:
+                        plan = msg["plan"]
+                        st.markdown("Я сформировал следующий план действий:")
+
+                        _render_plan_preview(plan)
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✅ Выполнить план", key=f"exec_{i}", type="primary"):
+                                planner = get_planner()
+                                result = planner.execute_plan(plan)
+                                # Заменяем текущее сообщение на результат выполнения
+                                st.session_state["main_messages"][i] = {
+                                    "role": "assistant",
+                                    "result": result,
+                                }
+                                st.rerun()
+                        with col2:
+                            if st.button("🔄 Перегенерировать план", key=f"regen_{i}"):
+                                planner = get_planner()
+                                new_plan = planner.generate_plan(msg.get("question", ""))
+                                st.session_state["main_messages"][i] = {
+                                    "role": "assistant",
+                                    "plan": new_plan,
+                                    "question": msg.get("question", ""),
+                                }
+                                st.rerun()
 
         # Простая форма ввода
         with st.form("main_form", clear_on_submit=True):
@@ -280,20 +322,25 @@ def main() -> None:
             )
 
         if submitted_main and main_q.strip():
-            # Добавляем сообщение пользователя в историю
+            # Добавляем сообщение пользователя
             st.session_state["main_messages"].append({"role": "user", "content": main_q.strip()})
 
-            with st.spinner("Думаю... Главный агент выбирает лучший инструмент и собирает ответ"):
+            with st.spinner("Генерирую план..."):
                 try:
                     planner = get_planner()
-                    result = planner.run(main_q.strip())
+                    # Только генерируем план (не выполняем!)
+                    plan = planner.generate_plan(main_q.strip())
 
-                    # Добавляем ответ ассистента (храним объект результата для рендера)
+                    # Добавляем специальное сообщение с планом для подтверждения
                     st.session_state["main_messages"].append(
-                        {"role": "assistant", "result": result}
+                        {
+                            "role": "assistant",
+                            "plan": plan,
+                            "question": main_q.strip(),
+                        }
                     )
                 except Exception as e:
-                    error_msg = f"Не удалось обработать запрос: {e}"
+                    error_msg = f"Не удалось сгенерировать план: {e}"
                     st.session_state["main_messages"].append(
                         {"role": "assistant", "content": error_msg}
                     )
