@@ -34,12 +34,15 @@ def test_ui_streamlit_app_imports_without_error():
 
     assert hasattr(ui.streamlit_app, "_render_dashboard")
     assert hasattr(ui.streamlit_app, "_render_presentation_carousel")
-    assert "Мой собранный дашборд" in src
+    assert "Мой дашборд" in src
+    assert "PROMPT_CARD_CATEGORIES" in src
     assert "main_messages" in src
-    assert "orch.ask" in src or "ask(prompt" in src
+    assert "orch.ask" in src or "ask(prompt" in src or "_run_query" in src
     assert "get_orchestrator().presentation" in src
-    assert "Что было сделано" in src or "render_planner_trace" in src
+    assert "render_planner_trace" in src
     assert "pinned_items" in src
     assert "pipeline_store" in src
     assert "Сбросить детализацию" in src
+    assert "_render_unified_action_bar" in src
+    assert "GOV_DISCLAIMER" in src
     assert None in CHART_VAL_FOR_DISPLAY.values()

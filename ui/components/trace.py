@@ -25,8 +25,10 @@ def _trace_from_result(res: Any) -> PlannerTrace | None:
     return None
 
 
-def render_planner_trace(res: Any, *, key_prefix: str = "trace") -> None:
+def render_planner_trace(res: Any, *, key_prefix: str = "trace", show: bool = True) -> None:
     """Expander «Что было сделано» + скачивание JSON trace."""
+    if not show:
+        return
     trace = _trace_from_result(res)
     if trace is None:
         return

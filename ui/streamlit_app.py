@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import sys
 import threading
 import time
@@ -37,6 +38,7 @@ from app.logging_utils import new_correlation_id, run_logger  # noqa: E402
 from app.orchestrator import Orchestrator  # noqa: E402
 from app.pipeline_progress import pipeline_store  # noqa: E402
 from app.schemas import AskResult, ChartSpec, DashboardResult, DrilldownContext  # noqa: E402
+from core.llm import is_ollama_available  # noqa: E402
 from ui.components.pipeline import pipeline_status_headline, update_pipeline_live_ui  # noqa: E402
 from ui.components.trace import render_planner_trace  # noqa: E402
 from viz.charts import build_chart  # noqa: E402
@@ -96,18 +98,210 @@ SUGGESTION_PROMPTS: list[str] = [
     "Топ-3 региона по подоходному налогу",
 ]
 
-# Карточки empty state: (заголовок, описание, запрос агентам)
+# Карточки empty state по категориям: (заголовок, описание, запрос)
+PROMPT_CARD_CATEGORIES: list[tuple[str, list[tuple[str, str, str]]]] = [
+    (
+        "Рейтинги",
+        [
+            ("Топ регионов по долгу", "Рейтинг задолженности по областям", "Какая задолженность по регионам?"),
+            ("Топ-3 по подоходному", "Лидеры по подоходному налогу", "Топ-3 региона по подоходному налогу"),
+        ],
+    ),
+    (
+        "Динамика",
+        [
+            ("Динамика в Минске", "Начисления по месяцам за 2024 год", "Динамика начислений в г. Минск за год"),
+        ],
+    ),
+    (
+        "Структура",
+        [
+            ("Структура налогов", "Доли видов налогов в разрезе", "Структура налогов по видам (доли)"),
+        ],
+    ),
+    (
+        "Комплексный обзор",
+        [
+            ("Дашборд по долгу", "KPI и графики в одном обзоре", "Покажи дашборд по задолженности по регионам"),
+            ("Сводка по Минску", "Ключевые метрики г. Минска", "Ключевые метрики и дашборд по начислениям в г. Минск"),
+        ],
+    ),
+]
 PROMPT_CARDS: list[tuple[str, str, str]] = [
-    ("Топ регионов по долгу", "Рейтинг задолженности по областям", "Какая задолженность по регионам?"),
-    ("Динамика в Минске", "Начисления по месяцам за 2024 год", "Динамика начислений в г. Минск за год"),
-    ("Структура налогов", "Доли видов налогов в разрезе", "Структура налогов по видам (доли)"),
-    ("Дашборд по долгу", "KPI и графики в одном обзоре", "Покажи дашборд по задолженности по регионам"),
-    ("Топ-3 по подоходному", "Лидеры по подоходному налогу", "Топ-3 региона по подоходному налогу"),
-    ("Сводка по Минску", "Ключевые метрики г. Минска", "Ключевые метрики и дашборд по начислениям в г. Минск"),
+    card for _category, cards in PROMPT_CARD_CATEGORIES for card in cards
 ]
 
 # Обратная совместимость для тестов/импортов
 PROMPT_CHIPS: list[tuple[str, str]] = [(t, q) for t, _, q in PROMPT_CARDS[:3]]
+
+GOV_DISCLAIMER = (
+    "Синтетические данные (демо), Республика Беларусь · AI draft · не для официальной отчётности"
+)
+ESTIMATED_RESPONSE_SEC = "30–90"
+
+
+def _init_ux_session_state() -> None:
+    defaults: dict[str, Any] = {
+        "ui_mode": "leadership",
+        "global_filters": {"region": None, "tax_type": None, "period": None},
+        "pres_queue": [],
+        "workspace_dashboard_result": None,
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
+def _is_leadership_mode() -> bool:
+    return st.session_state.get("ui_mode", "leadership") == "leadership"
+
+
+def _is_analyst_mode() -> bool:
+    return not _is_leadership_mode()
+
+
+def _render_gov_disclaimer() -> None:
+    st.markdown(
+        f'<div class="gov-disclaimer-bar">{html.escape(GOV_DISCLAIMER)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_app_header() -> None:
+    left, mid, right = st.columns([2.2, 2.6, 1.2])
+    with left:
+        st.markdown(
+            '<div class="gov-app-title">BI-аналитика налогов РБ</div>',
+            unsafe_allow_html=True,
+        )
+    with mid:
+        mode = st.radio(
+            "Режим интерфейса",
+            ["Для руководства", "Для аналитика"],
+            horizontal=True,
+            index=0 if _is_leadership_mode() else 1,
+            key="ui_mode_radio",
+            label_visibility="collapsed",
+        )
+        st.session_state["ui_mode"] = "leadership" if mode == "Для руководства" else "analyst"
+    with right:
+        ok = is_ollama_available(config.ollama_model)
+        if ok:
+            st.markdown(
+                f'<div class="ollama-status ok">Ollama: {html.escape(config.ollama_model)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="ollama-status err">Ollama: недоступна</div>',
+                unsafe_allow_html=True,
+            )
+
+
+def _effective_drilldown() -> DrilldownContext | None:
+    gf = st.session_state.get("global_filters") or {}
+    filters: dict[str, str] = {}
+    for key in ("region", "tax_type", "period"):
+        val = gf.get(key)
+        if val:
+            filters[key] = str(val)
+    session_ctx = _session_drilldown_context()
+    if session_ctx and session_ctx.filters:
+        filters = {**filters, **session_ctx.filters}
+    if not filters:
+        return session_ctx
+    trail = session_ctx.trail if session_ctx else []
+    return DrilldownContext(filters=filters, trail=trail or [])
+
+
+def _selectbox_index(options: list[Any], current: Any) -> int:
+    if current is None or current not in options:
+        return 0
+    return options.index(current)
+
+
+def _render_global_filters() -> None:
+    df = _load_demo_df()
+    if df.empty:
+        return
+    st.markdown("**Глобальные фильтры**")
+    gf = dict(st.session_state.get("global_filters") or {})
+    regions = sorted(df["region"].dropna().unique().tolist()) if "region" in df.columns else []
+    taxes = sorted(df["tax_type"].dropna().unique().tolist()) if "tax_type" in df.columns else []
+    periods = sorted(df["period"].dropna().unique().tolist()) if "period" in df.columns else []
+    region_opts = [None] + regions
+    tax_opts = [None] + taxes
+    period_opts = [None] + periods
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        gf["region"] = st.selectbox(
+            "Регион",
+            region_opts,
+            index=_selectbox_index(region_opts, gf.get("region")),
+            format_func=lambda x: "Все" if x is None else x,
+            key="gf_region",
+        )
+    with c2:
+        gf["tax_type"] = st.selectbox(
+            "Вид налога",
+            tax_opts,
+            index=_selectbox_index(tax_opts, gf.get("tax_type")),
+            format_func=lambda x: "Все" if x is None else x,
+            key="gf_tax",
+        )
+    with c3:
+        gf["period"] = st.selectbox(
+            "Период",
+            period_opts,
+            index=_selectbox_index(period_opts, gf.get("period")),
+            format_func=lambda x: "Все" if x is None else x,
+            key="gf_period",
+        )
+    st.session_state["global_filters"] = gf
+
+
+def _recent_user_questions(limit: int = 5) -> list[str]:
+    out: list[str] = []
+    for msg in reversed(st.session_state.get("main_messages", [])):
+        if msg.get("role") == "user":
+            text = str(msg.get("content", "")).strip()
+            if text and text not in out:
+                out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _session_export_payload() -> dict[str, Any]:
+    return {
+        "ui_mode": st.session_state.get("ui_mode"),
+        "messages": st.session_state.get("main_messages", []),
+        "pinned_items": st.session_state.get("pinned_items", []),
+        "pres_queue": st.session_state.get("pres_queue", []),
+        "global_filters": st.session_state.get("global_filters", {}),
+    }
+
+
+def _add_to_pres_queue(question: str, chart_type: str | None = None) -> None:
+    q = question.strip()
+    if not q:
+        return
+    queue: list[dict[str, Any]] = st.session_state.setdefault("pres_queue", [])
+    if any(item.get("text") == q for item in queue):
+        return
+    queue.append({"text": q, "chart_type": chart_type})
+    st.session_state["pres_queue"] = queue
+
+
+def _chart_subtitle(chart_spec: ChartSpec | None, question: str) -> str | None:
+    if not chart_spec:
+        return question or None
+    if chart_spec.action_title and chart_spec.title and chart_spec.title != chart_spec.action_title:
+        return chart_spec.title
+    if chart_spec.action_title and question and question != chart_spec.action_title:
+        return f"Вопрос: {question}"
+    return None
+
 
 @st.cache_resource(show_spinner=False)
 def get_orchestrator() -> Orchestrator:
@@ -131,13 +325,53 @@ def _inject_custom_css() -> None:
         /* ── Standalone product chrome ── */
         #MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden; height: 0;}
         .stApp {
-            background: linear-gradient(180deg, #F4F7FC 0%, #EEF2F8 100%);
-            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(180deg, #F5F7FA 0%, #EEF2F6 100%);
+            font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
         }
         .block-container {
-            padding-top: 1.5rem;
+            padding-top: 0.75rem;
             padding-bottom: 5rem;
-            max-width: 56rem;
+            max-width: 72rem;
+        }
+        .gov-disclaimer-bar {
+            background: #E8EDF2;
+            border: 1px solid #C5D0DC;
+            border-left: 4px solid #003366;
+            color: #334155;
+            font-size: 0.82rem;
+            font-weight: 600;
+            padding: 0.55rem 0.85rem;
+            border-radius: 6px;
+            margin-bottom: 0.65rem;
+        }
+        .gov-app-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: #003366;
+            letter-spacing: -0.01em;
+            padding-top: 0.35rem;
+        }
+        .ollama-status {
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-align: right;
+            padding-top: 0.55rem;
+        }
+        .ollama-status.ok { color: #1B5E20; }
+        .ollama-status.err { color: #B71C1C; }
+        .card-subtitle {
+            color: #64748B;
+            font-size: 0.9rem;
+            margin: -0.35rem 0 0.75rem;
+            line-height: 1.4;
+        }
+        .category-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #006699;
+            margin: 0.85rem 0 0.45rem;
         }
 
         /* ── Typography ── */
@@ -188,9 +422,9 @@ def _inject_custom_css() -> None:
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
-            background: #ECFDF5;
-            color: #047857;
-            border: 1px solid #A7F3D0;
+            background: #E8F4EC;
+            color: #1B5E20;
+            border: 1px solid #A5D6A7;
             border-radius: 999px;
             padding: 0.3rem 0.75rem;
             font-size: 0.78rem;
@@ -232,8 +466,8 @@ def _inject_custom_css() -> None:
 
         /* ── Analysis blocks ── */
         .key-conclusion-block {
-            background: linear-gradient(135deg, #EFF6FF 0%, #E0F2FE 100%);
-            border-left: 4px solid #2563EB;
+            background: linear-gradient(135deg, #EEF4F8 0%, #E2EBF2 100%);
+            border-left: 4px solid #003366;
             border-radius: 10px;
             padding: 1rem 1.1rem;
             margin-bottom: 0.75rem;
@@ -243,7 +477,7 @@ def _inject_custom_css() -> None:
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #1D4ED8;
+            color: #003366;
             margin-bottom: 0.35rem;
         }
         .key-conclusion-text {
@@ -306,9 +540,9 @@ def _inject_custom_css() -> None:
             transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
         }
         .empty-grid [data-testid="column"] .stButton > button:hover {
-            border-color: #93C5FD;
+            border-color: #006699;
             background: #F8FAFC;
-            box-shadow: 0 8px 28px rgba(37, 99, 235, 0.14);
+            box-shadow: 0 8px 28px rgba(0, 51, 102, 0.12);
             transform: translateY(-2px);
         }
         .empty-grid [data-testid="column"] .stButton > button p {
@@ -383,7 +617,7 @@ def _inject_custom_css() -> None:
         .drill-crumb.active {
             background: #DBEAFE;
             border-color: #60A5FA;
-            color: #1D4ED8;
+            color: #003366;
         }
         .drill-sep { color: #94A3B8; font-weight: 700; }
         .drill-hint {
@@ -526,6 +760,36 @@ def _read_dashboard_chart_override(
     if spec.highlight_category and spec.color:
         spec = spec.model_copy(update={"highlight_category": None})
     return spec
+
+
+def _prepare_ask_chart_render(
+    res: AskResult,
+    chart_spec: ChartSpec,
+    data: list[dict],
+    *,
+    chart_key: str,
+) -> tuple[ChartSpec, list[dict]]:
+    """Post-gen редактор + фильтр регионов для карточки чата."""
+    available_regions = sorted({str(r.get("region")) for r in data if r.get("region")})
+    if _is_analyst_mode():
+        _render_dashboard_chart_editor(
+            chart_spec,
+            chart_key_prefix=chart_key,
+            chart_idx=0,
+            available_regions=available_regions,
+        )
+    spec = _read_dashboard_chart_override(
+        chart_spec,
+        chart_key_prefix=chart_key,
+        chart_idx=0,
+        available_regions=available_regions,
+    )
+    ek = _dashboard_editor_key(chart_key, 0)
+    regions = (st.session_state.get(ek) or {}).get("regions") or []
+    filtered = _filter_data_by_regions(data, regions)
+    question = getattr(res, "question", "") or ""
+    spec = repair_chart_spec(spec, filtered, question=question)
+    return spec, filtered
 
 
 def _render_dashboard_chart_editor(
@@ -980,33 +1244,6 @@ def _render_styled_data_table(data: list[dict], *, table_key: str) -> None:
     st.dataframe(styled, use_container_width=True, hide_index=True, key=f"styled_df_{table_key}")
 
 
-def _render_pin_button(res: AskResult, *, action_key: str) -> None:
-    """Кнопка закрепления графика на «Мой дашборд»."""
-    chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
-    data = getattr(res, "data", None) or []
-    has_visual = chart_spec is not None or _resolve_artifact_path(getattr(res, "png_path", None)) is not None
-    if not has_visual and not data:
-        return
-
-    st.markdown('<div class="pin-row">', unsafe_allow_html=True)
-    if _is_pinned(res):
-        st.button(
-            "Добавлено на Мой Дашборд",
-            disabled=True,
-            use_container_width=True,
-            key=f"pin_done_{action_key}",
-        )
-    elif st.button(
-        "Добавить на Мой Дашборд",
-        use_container_width=True,
-        key=f"pin_add_{action_key}",
-    ):
-        _pin_result(res)
-        st.toast("График добавлен на Мой собранный дашборд")
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
 def _render_pinned_item_card(res: AskResult, *, item_idx: int) -> None:
     """Компактная карточка для вкладки «Мой дашборд»."""
     res = _normalize_result(res)
@@ -1090,6 +1327,31 @@ def _render_pinned_dashboard() -> None:
 
     st.metric("Закреплено виджетов", str(len(items)))
 
+    compare_mode = False
+    if len(items) >= 2:
+        compare_mode = st.checkbox("Режим сравнения (2 карточки)", key="pinned_compare_mode")
+
+    if compare_mode and len(items) >= 2:
+        labels: list[str] = []
+        for i, it in enumerate(items):
+            norm = _normalize_result(it)
+            spec = _coerce_chart_spec(getattr(norm, "chart_spec", None))
+            title = _chart_display_title(spec, getattr(norm, "question", f"График {i + 1}"))
+            labels.append(f"{i + 1}. {title[:50]}")
+        picked = st.multiselect(
+            "Выберите две карточки для сравнения",
+            options=list(range(len(items))),
+            format_func=lambda i: labels[i],
+            max_selections=2,
+            key="pinned_compare_pick",
+        )
+        if len(picked) == 2:
+            cols = st.columns(2, gap="medium")
+            for col_i, item_idx in enumerate(picked):
+                with cols[col_i]:
+                    _render_pinned_item_card(_normalize_result(items[item_idx]), item_idx=item_idx)
+            return
+
     for row_start in range(0, len(items), 2):
         cols = st.columns(2, gap="medium")
         for col_idx, item in enumerate(items[row_start : row_start + 2]):
@@ -1118,26 +1380,28 @@ def _quick_metrics_from_data(data: list[dict], chart_spec: ChartSpec | None) -> 
     return metrics[:3]
 
 
-def _render_export_actions(
+def _render_unified_action_bar(
     res: AskResult,
     *,
     action_key: str,
 ) -> None:
-    """Кнопки экспорта PNG и CSV под графиком."""
+    """Единая панель: PNG, CSV, дашборд, очередь презентации."""
     data = getattr(res, "data", None) or []
     png_artifact = _resolve_artifact_path(getattr(res, "png_path", None))
     chart_spec = _coerce_chart_spec(getattr(res, "chart_spec", None))
+    question = getattr(res, "question", "") or ""
     slug = "chart"
     if chart_spec and chart_spec.title:
         slug = chart_spec.title[:40].replace(" ", "_")
+    chart_type = chart_spec.chart_type if chart_spec else None
 
-    st.markdown('<div class="export-row">', unsafe_allow_html=True)
-    cols = st.columns(2)
+    st.markdown('<div class="export-row unified-action-bar">', unsafe_allow_html=True)
+    cols = st.columns(4)
     with cols[0]:
         if png_artifact is not None:
             with open(png_artifact, "rb") as f:
                 st.download_button(
-                    "Скачать график (PNG)",
+                    "PNG",
                     data=f.read(),
                     file_name=f"{slug}.png",
                     mime="image/png",
@@ -1145,17 +1409,12 @@ def _render_export_actions(
                     key=f"dl_png_{action_key}",
                 )
         else:
-            st.button(
-                "Скачать график (PNG)",
-                disabled=True,
-                use_container_width=True,
-                key=f"dl_png_disabled_{action_key}",
-            )
+            st.button("PNG", disabled=True, use_container_width=True, key=f"dl_png_dis_{action_key}")
     with cols[1]:
         if data:
             csv_bytes = pd.DataFrame(data).to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                "Скачать данные (CSV)",
+                "CSV",
                 data=csv_bytes,
                 file_name=f"{slug}_data.csv",
                 mime="text/csv",
@@ -1163,12 +1422,19 @@ def _render_export_actions(
                 key=f"dl_csv_{action_key}",
             )
         else:
-            st.button(
-                "Скачать данные (CSV)",
-                disabled=True,
-                use_container_width=True,
-                key=f"dl_csv_disabled_{action_key}",
-            )
+            st.button("CSV", disabled=True, use_container_width=True, key=f"dl_csv_dis_{action_key}")
+    with cols[2]:
+        if _is_pinned(res):
+            st.button("На дашборде", disabled=True, use_container_width=True, key=f"pin_done_{action_key}")
+        elif st.button("На дашборд", use_container_width=True, key=f"pin_add_{action_key}"):
+            _pin_result(res)
+            st.toast("График добавлен на «Мой дашборд»")
+            st.rerun()
+    with cols[3]:
+        if st.button("В презентацию", use_container_width=True, key=f"pres_q_{action_key}"):
+            _add_to_pres_queue(question, chart_type)
+            st.toast("Вопрос добавлен в очередь презентации")
+            st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1265,13 +1531,22 @@ def _render_analytics_card(
     data = getattr(res, "data", None) or []
     analysis = getattr(res, "analysis", None)
 
-    title = _chart_display_title(chart_spec, getattr(res, "question", "Результат анализа"))
+    question = getattr(res, "question", "Результат анализа")
+    title = _chart_display_title(chart_spec, question)
+    subtitle = _chart_subtitle(chart_spec, question)
     chart_ok = False
     badge_class = "status-badge"
     badge_text = "Успешно проанализировано"
     if chart_spec and not data and not _resolve_artifact_path(getattr(res, "png_path", None)):
         badge_class = "status-badge warn"
         badge_text = "Только текстовый анализ"
+
+    render_spec = chart_spec
+    render_data = data
+    if chart_spec and chart_key and data:
+        render_spec, render_data = _prepare_ask_chart_render(
+            res, chart_spec, data, chart_key=chart_key
+        )
 
     with st.container(border=False):
         st.markdown('<div class="analytics-card-wrap">', unsafe_allow_html=True)
@@ -1285,17 +1560,22 @@ def _render_analytics_card(
             """,
             unsafe_allow_html=True,
         )
+        if subtitle:
+            st.markdown(
+                f'<div class="card-subtitle">{html.escape(subtitle)}</div>',
+                unsafe_allow_html=True,
+            )
 
-        _render_drilldown_chrome(chart_key, chart_spec, enable_drilldown=enable_drilldown)
+        _render_drilldown_chrome(chart_key, render_spec, enable_drilldown=enable_drilldown)
 
         st.markdown('<div class="chart-panel">', unsafe_allow_html=True)
-        if chart_spec:
+        if render_spec:
             data_expl = (
                 getattr(analysis, "data_explanation", None) if analysis else None
             )
             chart_ok, _ = _render_chart_block(
-                data,
-                chart_spec,
+                render_data,
+                render_spec,
                 getattr(res, "png_path", None),
                 chart_key=chart_key,
                 enable_drilldown=enable_drilldown,
@@ -1308,33 +1588,33 @@ def _render_analytics_card(
             _render_chart_error("Спецификация графика не была сформирована для этого запроса.")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        if chart_ok or data or _resolve_artifact_path(getattr(res, "png_path", None)):
-            _render_export_actions(res, action_key=chart_key or "default")
-            _render_pin_button(res, action_key=chart_key or "default")
+        if chart_ok or render_data or _resolve_artifact_path(getattr(res, "png_path", None)):
+            _render_unified_action_bar(res, action_key=chart_key or "default")
 
-        if data:
+        if render_data and _is_analyst_mode():
             with st.expander("Данные", expanded=False):
-                _render_styled_data_table(data, table_key=chart_key or "default")
+                _render_styled_data_table(render_data, table_key=chart_key or "default")
 
-        if analysis or (chart_spec and getattr(chart_spec, "insights", None)):
+        if analysis or (render_spec and getattr(render_spec, "insights", None)):
             st.markdown("---")
             if analysis:
                 _render_analysis_block(
                     analysis,
-                    data,
-                    chart_spec,
+                    render_data,
+                    render_spec,
                     follow_up_key=f"card_{chart_key or 'default'}",
                 )
-            elif chart_spec and chart_spec.insights:
-                pseudo = type("A", (), {"insights": chart_spec.insights, "key_conclusion": None, "anomaly_or_trend": None})()
+            elif render_spec and render_spec.insights:
+                pseudo = type("A", (), {"insights": render_spec.insights, "key_conclusion": None, "anomaly_or_trend": None})()
                 _render_analysis_block(
                     pseudo,
-                    data,
-                    chart_spec,
+                    render_data,
+                    render_spec,
                     follow_up_key=f"card_{chart_key or 'default'}",
                 )
 
-        _render_technical_details(res)
+        if _is_analyst_mode():
+            _render_technical_details(res)
         st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1349,28 +1629,31 @@ def _render_planner_result(
 
 
 def _render_empty_state() -> None:
-    """Приветственный экран с сеткой карточек-примеров."""
+    """Приветственный экран с категориями сценариев."""
     st.markdown(
-        """
+        f"""
         <div class="empty-hero">
             <h2>Добро пожаловать в BI-Аналитику</h2>
             <p>Задайте вопрос на русском или выберите готовый сценарий ниже</p>
+            <p style="font-size:0.88rem; color:#64748B;">Ожидаемое время ответа: {ESTIMATED_RESPONSE_SEC} с</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="empty-grid">', unsafe_allow_html=True)
-    row_size = 3
-    for row_start in range(0, len(PROMPT_CARDS), row_size):
+    card_idx = 0
+    for category, cards in PROMPT_CARD_CATEGORIES:
+        st.markdown(f'<div class="category-label">{html.escape(category)}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="empty-grid">', unsafe_allow_html=True)
+        row_size = min(3, len(cards))
         cols = st.columns(row_size)
-        for col_idx, card in enumerate(PROMPT_CARDS[row_start : row_start + row_size]):
-            heading, desc, query = card
+        for col_idx, (heading, desc, query) in enumerate(cards):
             with cols[col_idx]:
                 label = f"{heading}\n\n{desc}"
-                if st.button(label, key=f"card_{row_start + col_idx}", use_container_width=True):
+                if st.button(label, key=f"card_{card_idx}", use_container_width=True):
                     st.session_state["pending_prompt"] = query
                     st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+                card_idx += 1
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _render_prompt_chips() -> None:
@@ -1511,7 +1794,8 @@ def render_assistant_response(
         return
 
     res = _normalize_result(res)
-    render_planner_trace(res, key_prefix=chart_key or "trace")
+    show_analyst = _is_analyst_mode()
+    render_planner_trace(res, key_prefix=chart_key or "trace", show=show_analyst)
 
     if hasattr(res, "success") and not getattr(res, "success", True):
         st.markdown(
@@ -1526,13 +1810,15 @@ def render_assistant_response(
             """,
             unsafe_allow_html=True,
         )
-        _render_technical_details(res)
+        if show_analyst:
+            _render_technical_details(res)
         return
 
     # Презентация
     if hasattr(res, "pptx_path") and getattr(res, "pptx_path", None):
         _render_presentation_block(res, key_prefix=chart_key or "chat_pres")
-        _render_technical_details(res)
+        if show_analyst:
+            _render_technical_details(res)
         return
 
     # Дашборд
@@ -1540,7 +1826,8 @@ def render_assistant_response(
         hasattr(res, "charts") and hasattr(res, "kpi_cards")
     ):
         _render_dashboard(res, chart_key_prefix=chart_key or "dash")
-        _render_technical_details(res)
+        if show_analyst:
+            _render_technical_details(res)
         return
 
     # AskResult — премиальная карточка
@@ -1571,7 +1858,8 @@ def render_assistant_response(
             st.write(res.summary)
         else:
             st.write("Готово. Уточните вопрос, если нужны дополнительные детали.")
-    _render_technical_details(res)
+    if show_analyst:
+        _render_technical_details(res)
 
 
 def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -> None:
@@ -1620,16 +1908,17 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
                         if coerced is None:
                             _render_chart_error("Некорректная спецификация графика.")
                         else:
-                            _render_dashboard_chart_editor(
-                                coerced,
-                                chart_key_prefix=chart_key_prefix,
-                                chart_idx=i,
-                                available_regions=available_regions,
-                            )
+                            if _is_analyst_mode():
+                                _render_dashboard_chart_editor(
+                                    coerced,
+                                    chart_key_prefix=chart_key_prefix,
+                                    chart_idx=i,
+                                    available_regions=available_regions,
+                                )
                             ek = _dashboard_editor_key(chart_key_prefix, i)
                             filtered = _filter_data_by_regions(
                                 data_rows,
-                                st.session_state.get(ek, {}).get("regions"),
+                                (st.session_state.get(ek, {}) or {}).get("regions"),
                             )
                             edited = _read_dashboard_chart_override(
                                 coerced,
@@ -1652,16 +1941,17 @@ def _render_dashboard(res: DashboardResult, *, chart_key_prefix: str = "dash") -
                         else:
                             if coerced.title:
                                 st.caption(coerced.title)
-                            _render_dashboard_chart_editor(
-                                coerced,
-                                chart_key_prefix=chart_key_prefix,
-                                chart_idx=i,
-                                available_regions=available_regions,
-                            )
+                            if _is_analyst_mode():
+                                _render_dashboard_chart_editor(
+                                    coerced,
+                                    chart_key_prefix=chart_key_prefix,
+                                    chart_idx=i,
+                                    available_regions=available_regions,
+                                )
                             ek = _dashboard_editor_key(chart_key_prefix, i)
                             filtered = _filter_data_by_regions(
                                 data_rows,
-                                st.session_state.get(ek, {}).get("regions"),
+                                (st.session_state.get(ek, {}) or {}).get("regions"),
                             )
                             edited = _read_dashboard_chart_override(
                                 coerced,
@@ -1711,10 +2001,140 @@ def _run_query(
     return orch.ask(prompt, drilldown=drilldown, correlation_id=correlation_id)
 
 
+def _build_presentation_qlist() -> list[dict[str, Any]]:
+    pres_mode = st.session_state.get("pres_mode", "По вопросам")
+    chart_type_val = CHART_VAL_FOR_DISPLAY.get(st.session_state.get("pres_chart_type", "авто"))
+    if pres_mode == "По вопросам":
+        queue = list(st.session_state.get("pres_queue") or [])
+        if queue:
+            return queue
+        lines = [
+            ln.strip()
+            for ln in st.session_state.get("pres_questions_area", "").splitlines()
+            if ln.strip()
+        ]
+        return [{"text": ln, "chart_type": chart_type_val, "note": ""} for ln in lines]
+    theme = st.session_state.get("pres_theme", "").strip()
+    return [{"text": theme, "chart_type": chart_type_val, "note": ""}] if theme else []
+
+
+def _render_presentation_workspace() -> None:
+    st.markdown("### Презентация для руководства")
+    st.caption("Соберите executive-колоду из вопросов или очереди из чата.")
+
+    queue = st.session_state.get("pres_queue") or []
+    if queue:
+        st.markdown("**Очередь из чата**")
+        for i, item in enumerate(queue, 1):
+            st.caption(f"{i}. {item.get('text', '')}")
+        if st.button("Очистить очередь", key="clear_pres_queue"):
+            st.session_state["pres_queue"] = []
+            st.rerun()
+
+    pres_mode = st.radio(
+        "Формат",
+        ["По вопросам", "Одной темой"],
+        horizontal=True,
+        key="pres_mode",
+    )
+    if pres_mode == "По вопросам" and not queue:
+        default_q = "Структура налогов по видам (доли)\nТоп-3 региона по задолженности"
+        if "pres_questions_area" not in st.session_state:
+            st.session_state["pres_questions_area"] = default_q
+        st.text_area(
+            "Вопросы (по одному на строку)",
+            height=120,
+            key="pres_questions_area",
+        )
+    elif pres_mode == "Одной темой":
+        st.text_input(
+            "Тема презентации",
+            value=st.session_state.get(
+                "pres_theme", "Налоговая аналитика Республики Беларусь за 2024 год"
+            ),
+            key="pres_theme_input",
+        )
+        st.session_state["pres_theme"] = st.session_state.get("pres_theme_input", "")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.slider("Слайдов", 5, 12, 7, key="pres_slides")
+    with c2:
+        st.selectbox("Тип графика", CHART_DISPLAY_OPTIONS, index=0, key="pres_chart_type")
+    with c3:
+        st.checkbox("Титульный слайд", value=True, key="pres_title")
+        st.checkbox("Рекомендации", value=True, key="pres_recs")
+
+    if st.button("Создать презентацию", type="primary", use_container_width=True, key="pres_build"):
+        qlist = _build_presentation_qlist()
+        if not qlist:
+            st.warning("Добавьте вопросы или заполните тему.")
+        else:
+            try:
+                pres_res = get_orchestrator().presentation(
+                    qlist,
+                    num_slides=st.session_state.get("pres_slides", 7),
+                    include_title=st.session_state.get("pres_title", True),
+                    include_recommendations=st.session_state.get("pres_recs", True),
+                )
+                st.session_state["last_presentation"] = pres_res
+                st.session_state["main_messages"].append({"role": "assistant", "result": pres_res})
+                st.session_state["pres_queue"] = []
+                st.success(f"Готово: {pres_res.num_slides} слайдов")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Ошибка: {exc}")
+
+    if st.session_state.get("last_presentation"):
+        st.markdown("---")
+        _render_presentation_block(st.session_state["last_presentation"], key_prefix="workspace_pres")
+
+
+def _render_dashboard_workspace() -> None:
+    st.markdown("### Комплексный дашборд")
+    st.caption(f"Ожидаемое время ответа: {ESTIMATED_RESPONSE_SEC} с")
+    default_q = "Покажи дашборд по задолженности по регионам"
+    question = st.text_area(
+        "Тема дашборда",
+        value=st.session_state.get("dashboard_workspace_q", default_q),
+        height=90,
+        key="dashboard_workspace_input",
+    )
+    st.session_state["dashboard_workspace_q"] = question
+    if st.button("Построить дашборд", type="primary", key="build_dashboard_ws"):
+        q = question.strip()
+        if not q:
+            st.warning("Введите тему дашборда.")
+        else:
+            try:
+                dd = _effective_drilldown()
+                result = get_orchestrator().dashboard(
+                    q,
+                    drilldown=dd,
+                )
+                st.session_state["workspace_dashboard_result"] = result
+                st.session_state["main_messages"].append({"role": "user", "content": q})
+                st.session_state["main_messages"].append({"role": "assistant", "result": result})
+                hist = st.session_state.get("dashboard_history", [])
+                entry = {"question": q, "title": getattr(result, "title", q)}
+                if not hist or hist[-1] != entry:
+                    hist.append(entry)
+                    st.session_state["dashboard_history"] = hist[-12:]
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Ошибка: {exc}")
+
+    if st.session_state.get("workspace_dashboard_result"):
+        st.markdown("---")
+        _render_dashboard(st.session_state["workspace_dashboard_result"], chart_key_prefix="ws_dash")
+
+
 def _render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("## BI-Аналитика")
-        st.caption("Налоговая аналитика РБ · локально · синтетические данные 2024")
+        st.markdown("### Навигация")
+        st.caption("Налоговая аналитика РБ · локально · 2024")
+
+        _render_global_filters()
 
         with st.expander("Источник данных", expanded=False):
             df = _load_demo_df()
@@ -1728,12 +2148,20 @@ def _render_sidebar() -> None:
                 c3.metric("Налогов", df["tax_type"].nunique())
                 c4.metric("Месяцев", df["period"].nunique())
                 st.caption(f"Период: {df['period'].min()} — {df['period'].max()} · валюта Br")
-                st.dataframe(df.head(5), use_container_width=True, hide_index=True)
+                if _is_analyst_mode():
+                    st.dataframe(df.head(5), use_container_width=True, hide_index=True)
 
-            st.markdown("**Быстрые вопросы**")
-            for idx, sug in enumerate(SUGGESTION_PROMPTS):
-                if st.button(sug, key=f"sug_{idx}", use_container_width=True):
-                    st.session_state["pending_prompt"] = sug
+        st.markdown("**Быстрые вопросы**")
+        for idx, sug in enumerate(SUGGESTION_PROMPTS):
+            if st.button(sug, key=f"sug_{idx}", use_container_width=True):
+                st.session_state["pending_prompt"] = sug
+
+        recent = _recent_user_questions()
+        if recent:
+            with st.expander("История запросов", expanded=False):
+                for idx, q in enumerate(recent):
+                    if st.button(q[:72], key=f"hist_{idx}", use_container_width=True):
+                        st.session_state["pending_prompt"] = q
 
         if st.session_state.get("dashboard_history"):
             with st.expander("История дашбордов", expanded=False):
@@ -1746,106 +2174,35 @@ def _render_sidebar() -> None:
                     if st.button(q[:60], key=f"dh_{hash(q)}", use_container_width=True):
                         st.session_state["pending_prompt"] = q
 
-        with st.expander("Экспорт в презентацию", expanded=False):
-            pres_mode = st.radio(
-                "Формат",
-                ["По вопросам", "Одной темой"],
-                horizontal=True,
-                key="pres_mode",
-                label_visibility="collapsed",
-            )
-
-            if pres_mode == "По вопросам":
-                default_q = "Структура налогов по видам (доли)\nТоп-3 региона по задолженности"
-                questions_raw = st.text_area(
-                    "Вопросы (по одному на строку)",
-                    value=st.session_state.get("pres_questions_text", default_q),
-                    height=100,
-                    key="pres_questions_area",
-                )
-                st.session_state["pres_questions_text"] = questions_raw
-            else:
-                theme = st.text_input(
-                    "Тема презентации",
-                    value=st.session_state.get(
-                        "pres_theme", "Налоговая аналитика Республики Беларусь за 2024 год"
-                    ),
-                    key="pres_theme_input",
-                )
-                st.session_state["pres_theme"] = theme
-
-            num_slides = st.slider("Слайдов", 5, 12, 7, key="pres_slides")
-            chart_pref = st.selectbox(
-                "Тип графика",
-                CHART_DISPLAY_OPTIONS,
-                index=0,
-                key="pres_chart_type",
-            )
-            chart_type_val = CHART_VAL_FOR_DISPLAY.get(chart_pref)
-            include_title = st.checkbox("Титульный слайд", value=True, key="pres_title")
-            include_recs = st.checkbox("Рекомендации", value=True, key="pres_recs")
-
-            if st.button("Создать презентацию", type="primary", use_container_width=True):
-                qlist: list[dict[str, Any]] = []
-                if pres_mode == "По вопросам":
-                    lines = [
-                        ln.strip()
-                        for ln in st.session_state.get("pres_questions_text", "").splitlines()
-                        if ln.strip()
-                    ]
-                    if not lines:
-                        st.warning("Добавьте хотя бы один вопрос.")
-                    else:
-                        qlist = [
-                            {"text": ln, "chart_type": chart_type_val, "note": ""} for ln in lines
-                        ]
-                else:
-                    free = st.session_state.get("pres_theme", "").strip()
-                    if not free:
-                        st.warning("Укажите тему презентации.")
-                    else:
-                        qlist = [{"text": free, "chart_type": chart_type_val, "note": ""}]
-
-                if qlist:
-                    with st.spinner("Собираю слайды..."):
-                        try:
-                            pres_res = get_orchestrator().presentation(
-                                qlist,
-                                num_slides=num_slides,
-                                include_title=include_title,
-                                include_recommendations=include_recs,
-                            )
-                            st.session_state["last_presentation"] = pres_res
-                            st.session_state["main_messages"].append(
-                                {"role": "assistant", "result": pres_res}
-                            )
-                            st.success(f"Готово: {pres_res.num_slides} слайдов")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Ошибка: {exc}")
-
-            if st.session_state.get("last_presentation"):
-                pres = st.session_state["last_presentation"]
-                n = getattr(pres, "num_slides", 0) or 0
-                st.caption(f"Последняя презентация: **{n}** слайдов — превью и скачивание в чате выше")
-
         st.divider()
+        export_payload = json.dumps(_session_export_payload(), ensure_ascii=False, indent=2, default=str)
+        st.download_button(
+            "Сохранить сессию (JSON)",
+            data=export_payload.encode("utf-8"),
+            file_name="bi_session.json",
+            mime="application/json",
+            use_container_width=True,
+            key="dl_session_json",
+        )
         if st.button("Очистить чат", use_container_width=True):
             st.session_state["main_messages"] = []
             st.session_state["dashboard_history"] = []
             st.session_state["drilldown_context"] = None
             st.session_state["drilldown_trail"] = []
+            st.session_state["pres_queue"] = []
+            st.session_state["workspace_dashboard_result"] = None
             st.rerun()
 
 
 def main() -> None:
     st.set_page_config(
         page_title="BI-Аналитика",
-        layout="centered",
+        layout="wide",
         initial_sidebar_state="expanded",
     )
 
     _inject_custom_css()
+    _init_ux_session_state()
 
     if "main_messages" not in st.session_state:
         st.session_state["main_messages"] = []
@@ -1860,9 +2217,13 @@ def main() -> None:
     if "drilldown_trail" not in st.session_state:
         st.session_state["drilldown_trail"] = []
 
+    _render_gov_disclaimer()
+    _render_app_header()
     _render_sidebar()
 
-    tab_chat, tab_pinned = st.tabs(["Чат", "Мой собранный дашборд"])
+    tab_chat, tab_dashboard, tab_pres, tab_pinned = st.tabs(
+        ["Аналитический вопрос", "Дашборд", "Презентация", "Мой дашборд"]
+    )
 
     with tab_chat:
         if not st.session_state["main_messages"]:
@@ -1891,13 +2252,19 @@ def main() -> None:
                 else:
                     st.write(msg.get("content", ""))
 
+    with tab_dashboard:
+        _render_dashboard_workspace()
+
+    with tab_pres:
+        _render_presentation_workspace()
+
     with tab_pinned:
         _render_pinned_dashboard()
 
     prompt = st.session_state.pop("pending_prompt", None)
     drilldown = st.session_state.pop("pending_drilldown", None)
     if drilldown is None:
-        drilldown = _session_drilldown_context()
+        drilldown = _effective_drilldown()
     chat_prompt = st.chat_input(
         "Спросите что-нибудь о налогах (например, «Динамика по Минску»)"
     )
@@ -1924,7 +2291,7 @@ def main() -> None:
         with st.chat_message("assistant"):
             with st.status(
                 "AI-конвейер запускается...",
-                expanded=True,
+                expanded=_is_analyst_mode(),
             ) as status:
                 live_pipeline = st.empty()
                 try:
@@ -1943,10 +2310,14 @@ def main() -> None:
                         status.update(
                             label="Готово с предупреждениями",
                             state="complete",
-                            expanded=True,
+                            expanded=_is_analyst_mode(),
                         )
                     else:
-                        status.update(label="Готово", state="complete", expanded=False)
+                        status.update(
+                            label="Готово",
+                            state="complete",
+                            expanded=False,
+                        )
                     assistant_msg = {"role": "assistant", "result": result}
                     if isinstance(result, DashboardResult):
                         hist = st.session_state["dashboard_history"]

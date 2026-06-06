@@ -9,7 +9,10 @@ from ui.components.pipeline import pipeline_status_headline, pipeline_step_markd
 from ui.components.trace import result_has_trace
 from ui.streamlit_app import (
     DASHBOARD_CHART_TYPES,
+    PROMPT_CARD_CATEGORIES,
+    PROMPT_CARDS,
     _chart_display_title,
+    _chart_subtitle,
     _drilldown_supported,
     _filter_data_by_regions,
     _normalize_result,
@@ -116,3 +119,21 @@ def test_filter_data_by_regions():
 def test_dashboard_chart_types_complete():
     assert "treemap" in DASHBOARD_CHART_TYPES
     assert "waterfall" in DASHBOARD_CHART_TYPES
+
+
+def test_prompt_card_categories_cover_flat_list():
+    flat = [card for _cat, cards in PROMPT_CARD_CATEGORIES for card in cards]
+    assert len(flat) == len(PROMPT_CARDS) == 6
+
+
+def test_chart_subtitle_with_action_title():
+    spec = ChartSpec(
+        chart_type="bar",
+        title="Начисления по регионам",
+        x="region",
+        y="accrued",
+        action_title="г. Минск лидирует",
+        rationale="t",
+    )
+    sub = _chart_subtitle(spec, "Какая динамика?")
+    assert sub == "Начисления по регионам"
