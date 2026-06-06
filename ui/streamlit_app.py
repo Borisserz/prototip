@@ -182,8 +182,16 @@ def _render_app_header() -> None:
             index=0 if _is_leadership_mode() else 1,
             key="ui_mode_radio",
             label_visibility="collapsed",
+            help=(
+                "Руководство — краткий отчёт: график, KPI и выводы. "
+                "Аналитик — полный доступ: SQL, данные, трассировка агентов и редактор графиков."
+            ),
         )
         st.session_state["ui_mode"] = "leadership" if mode == "Для руководства" else "analyst"
+        if _is_leadership_mode():
+            st.caption("Краткий вид: результат и выводы без технических деталей.")
+        else:
+            st.caption("Полный вид: SQL, таблица данных, трассировка и настройка графиков.")
     with right:
         ok = is_ollama_available(config.ollama_model)
         if ok:
@@ -232,31 +240,27 @@ def _render_global_filters() -> None:
     region_opts = [None] + regions
     tax_opts = [None] + taxes
     period_opts = [None] + periods
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        gf["region"] = st.selectbox(
-            "Регион",
-            region_opts,
-            index=_selectbox_index(region_opts, gf.get("region")),
-            format_func=lambda x: "Все" if x is None else x,
-            key="gf_region",
-        )
-    with c2:
-        gf["tax_type"] = st.selectbox(
-            "Вид налога",
-            tax_opts,
-            index=_selectbox_index(tax_opts, gf.get("tax_type")),
-            format_func=lambda x: "Все" if x is None else x,
-            key="gf_tax",
-        )
-    with c3:
-        gf["period"] = st.selectbox(
-            "Период",
-            period_opts,
-            index=_selectbox_index(period_opts, gf.get("period")),
-            format_func=lambda x: "Все" if x is None else x,
-            key="gf_period",
-        )
+    gf["region"] = st.selectbox(
+        "Регион",
+        region_opts,
+        index=_selectbox_index(region_opts, gf.get("region")),
+        format_func=lambda x: "Все регионы" if x is None else x,
+        key="gf_region",
+    )
+    gf["tax_type"] = st.selectbox(
+        "Вид налога",
+        tax_opts,
+        index=_selectbox_index(tax_opts, gf.get("tax_type")),
+        format_func=lambda x: "Все виды" if x is None else x,
+        key="gf_tax",
+    )
+    gf["period"] = st.selectbox(
+        "Период",
+        period_opts,
+        index=_selectbox_index(period_opts, gf.get("period")),
+        format_func=lambda x: "Весь период" if x is None else x,
+        key="gf_period",
+    )
     st.session_state["global_filters"] = gf
 
 
@@ -322,8 +326,18 @@ def _inject_custom_css() -> None:
     st.markdown(
         """
         <style>
-        /* ── Standalone product chrome ── */
-        #MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden; height: 0;}
+        /* ── Standalone product chrome (оставляем шапку для кнопки «раскрыть панель») ── */
+        #MainMenu, footer {visibility: hidden; height: 0;}
+        header[data-testid="stHeader"] {
+            visibility: visible !important;
+            height: 3.25rem !important;
+            background: transparent !important;
+            border: none !important;
+        }
+        .stDeployButton {display: none !important;}
+        [data-testid="stExpandSidebarButton"] {
+            visibility: visible !important;
+        }
         .stApp {
             background: linear-gradient(180deg, #F5F7FA 0%, #EEF2F6 100%);
             font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
@@ -569,6 +583,14 @@ def _inject_custom_css() -> None:
         [data-testid="stSidebar"] {
             background: #FFFFFF;
             border-right: 1px solid #E2E8F0;
+            min-width: 17rem;
+        }
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] label {
+            white-space: normal;
+            line-height: 1.25;
+        }
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+            white-space: normal;
         }
 
         /* ── Pinned dashboard mini-cards ── */
