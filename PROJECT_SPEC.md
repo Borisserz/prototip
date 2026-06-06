@@ -86,3 +86,15 @@ SQL по этим данным выполняется через DuckDB прям
 - Это Text-to-SQL, данные — только на чтение.
 - Structured output во всех вызовах LLM.
 - Русский везде, полная локальность.
+
+## Подготовка к иерархической архитектуре (PlannerAgent) — Phase 2.x
+Перед реализацией PlannerAgent проведён рефакторинг (без радикальных изменений в viz/ и Presentation/Chart):
+
+- Созданы `app/agents/models.py` (централизация: AgentResult, Task, Plan, AgentCall + перенос основных result-моделей), `base_agent.py`, `executor.py`.
+- Все агенты наследуют BaseAgent; их run возвращает AgentResult (или наследника) с заполненным `reasoning`.
+- AgentRegistry + AgentExecutor — единая точка вызова с логированием.
+- Orchestrator упрощён: только ask()/dashboard(), вызовы идут через executor.
+- AGENTS.md и PROJECT_SPEC обновлены. Существующие тесты, UI, генерация графиков и .pptx — без изменений в поведении.
+- RAG не вводился. Контракты DataAgent (Text-to-SQL) сохранены.
+
+Это делает проект готовым к PlannerAgent (который будет генерировать Plan из Task'ов и делегировать через Executor).

@@ -22,8 +22,8 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-from app.agents.base import BaseAgent
-from app.schemas import AskResult, DeckNarrative, PresentationInput, PresentationResult
+from app.agents.base_agent import BaseAgent
+from app.agents.models import AskResult, DeckNarrative, PresentationInput, PresentationResult
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
 from viz.style import format_number_ru
@@ -52,6 +52,7 @@ class PresentationAgent(BaseAgent):
     """Агент сборки презентаций .pptx из результатов Orchestrator."""
 
     name = "presentation_agent"
+    description = "По списку вопросов собирает .pptx: для каждого вызывает Orchestrator.ask(), рендерит PNG через viz, добавляет нарратив (DeckNarrative via LLM), титульные/темы/выводы/рекомендации. Уважает prefs по chart_type."
 
     def _slug(self, text: str, max_len: int = 40) -> str:
         import re
@@ -559,7 +560,11 @@ class PresentationAgent(BaseAgent):
         logger.info(
             f"[PresentationAgent] end: pptx={pptx_path} slides={len(prs.slides)} ({elapsed}ms)"
         )
-        return PresentationResult(pptx_path=str(pptx_path), num_slides=len(prs.slides))
+        # Минимальное заполнение reasoning (презентация — композитный агент)
+        pres_reasoning = f"Собрано {len(prs.slides)} слайдов из {len(questions)} вопросов. Нарратив + графики (PNG via viz) + DeckNarrative."
+        return PresentationResult(
+            pptx_path=str(pptx_path), num_slides=len(prs.slides), reasoning=pres_reasoning
+        )
 
     def _add_centered_text(
         self,

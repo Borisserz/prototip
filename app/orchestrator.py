@@ -20,6 +20,8 @@ from app.agents.analyst_agent import AnalystAgent
 from app.agents.chart_agent import ChartAgent
 from app.agents.dashboard_agent import DashboardAgent
 from app.agents.data_agent import DataAgent
+from app.agents.executor import AgentExecutor, AgentRegistry
+from app.agents.models import AgentResult
 from app.schemas import AskResult, DashboardResult, SqlResult
 from core.llm import setup_logging
 from viz.charts import build_chart, export_png
@@ -30,13 +32,32 @@ logger = logging.getLogger("Orchestrator")
 
 
 class Orchestrator:
-    """Оркестратор полного цикла анализа + визуализации."""
+    """Высокоуровневый оркестратор (Phase 5+).
+
+    Публичные методы (оставляем только их):
+      - ask(question) -> AskResult          (вопрос → данные + анализ + один график)
+      - dashboard(...) -> DashboardResult   (вопрос → KPI + несколько ChartSpec + layout + insights)
+
+    Генерация презентаций — через PresentationAgent (он внутри создаёт Orchestrator.ask по необходимости).
+
+    Сложная логика "что/когда/в каком порядке вызывать" и планирование
+    постепенно переносится в PlannerAgent. Сейчас — простой линейный пайплайн,
+    вызовы под-агентов — через AgentExecutor.
+    """
 
     def __init__(self) -> None:
+        # Прямые экземпляры (для обратной совместимости и случаев, когда нужен сам агент)
         self.data_agent = DataAgent()
         self.analyst_agent = AnalystAgent()
         self.chart_agent = ChartAgent()
         self.dashboard_agent = DashboardAgent()
+
+        # Реестр + исполнитель (Phase 3+). Постепенная миграция вызовов на executor.
+        self.registry = AgentRegistry()
+        self.executor = AgentExecutor(self.registry)
+        for ag in (self.data_agent, self.analyst_agent, self.chart_agent, self.dashboard_agent):
+            self.executor.register(ag)
+
         self.out_dir = Path("out")
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -45,33 +66,47 @@ class Orchestrator:
         return slug[:max_len] or "result"
 
     def ask(self, question: str) -> AskResult:
-        """Главная точка входа."""
+        """Главная точка входа.
+
+        Использует AgentExecutor для вызовов Data/Analyst/Chart (логирование + единообразие).
+        Ошибки на шагах обрабатываются gracefully (как и раньше), чтобы вернуть частичный результат.
+        """
         start = time.time()
         logger.info(f"[Orchestrator] start: question={question[:60]}...")
         result = AskResult(question=question, sql="", data=[])
 
-        # 1. DataAgent
+        # 1. DataAgent (через executor — начало миграции)
         try:
-            sql_res: SqlResult = self.data_agent.run(question)
+            sql_res = self.executor.run("data_agent", question)
+            if not sql_res.success or not isinstance(sql_res, SqlResult):
+                # ошибка или неожиданный тип — graceful как раньше
+                err = getattr(sql_res, "error", "unknown")
+                result.sql = f"-- ERROR in DataAgent: {err}"
+                result.data = []
+                logger.info(f"[Orchestrator] data_error: {err}")
+                return result
             result.sql = sql_res.sql
             result.data = sql_res.data
             logger.info(f"[Orchestrator] data: rows={len(result.data)}")
-        except Exception as e:
+        except Exception as e:  # defensive (executor сам не должен бросать, но на всякий)
             result.sql = f"-- ERROR in DataAgent: {e}"
             result.data = []
             logger.info(f"[Orchestrator] data_error: {e}")
-            # продолжаем с пустыми данными, чтобы вернуть частичный результат
             return result
 
-        # 2. AnalystAgent (инсайты)
+        # 2. AnalystAgent (через executor)
         try:
-            analysis = self.analyst_agent.run(question, result.data)
-            result.analysis = analysis
-            logger.info(
-                f"[Orchestrator] analyst: insights={len(analysis.insights) if analysis else 0}"
-            )
+            analysis_res = self.executor.run("analyst_agent", question, data=result.data)
+            if isinstance(analysis_res, AgentResult) and not analysis_res.success:
+                raise RuntimeError(getattr(analysis_res, "error", "analyst failed"))
+            # При успехе это AnalysisResult (наследник)
+            result.analysis = analysis_res if hasattr(analysis_res, "insights") else None  # type: ignore
+            if result.analysis:
+                logger.info(
+                    f"[Orchestrator] analyst: insights={len(result.analysis.insights) if result.analysis else 0}"
+                )
         except Exception as e:
-            # fallback анализ
+            # fallback анализ (сохраняем старое поведение)
             from app.schemas import AnalysisResult
 
             result.analysis = AnalysisResult(
@@ -85,10 +120,12 @@ class Orchestrator:
             )
             logger.info(f"[Orchestrator] analyst_error: {e}")
 
-        # 3. ChartAgent
+        # 3. ChartAgent (через executor)
         try:
-            chart_res = self.chart_agent.run(question, result.data)
-            result.chart_spec = chart_res.spec
+            chart_res = self.executor.run("chart_agent", question, data=result.data)
+            if isinstance(chart_res, AgentResult) and not chart_res.success:
+                raise RuntimeError(getattr(chart_res, "error", "chart failed"))
+            result.chart_spec = getattr(chart_res, "spec", None)
             logger.info(
                 f"[Orchestrator] chart: type={getattr(result.chart_spec, 'chart_type', None)}"
             )
@@ -114,6 +151,13 @@ class Orchestrator:
         result.png_path = png_path
         elapsed = int((time.time() - start) * 1000)
         logger.info(f"[Orchestrator] end: png={bool(png_path)} ({elapsed}ms)")
+        # Высокоуровневое reasoning для AskResult (пайплайн через executor)
+        if not getattr(result, "reasoning", ""):
+            result.reasoning = (
+                f"Пайплайн: DataAgent → AnalystAgent → ChartAgent (+ viz render). "
+                f"SQL rows={len(result.data)}. График: {getattr(result.chart_spec, 'chart_type', 'none')}. "
+                "Все sub-вызовы через AgentExecutor."
+            )
         return result
 
     def dashboard(
@@ -134,9 +178,11 @@ class Orchestrator:
         req = DashboardRequest(
             question=question, max_charts=max_charts, include_kpi=include_kpi, data=data
         )
-        res = self.dashboard_agent.run(req)
+        # Через executor (логирование + унификация). DashboardResult — наследник AgentResult.
+        res = self.executor.run("dashboard_agent", req)
+        # Если по какой-то причине не DashboardResult — возвращаем как есть (executor вернёт failed AgentResult)
         elapsed = int((time.time() - start) * 1000)
         logger.info(
-            f"[Orchestrator] dashboard end: charts={len(res.charts)} kpis={len(res.kpi_cards)} ({elapsed}ms)"
+            f"[Orchestrator] dashboard end: charts={len(getattr(res, 'charts', []))} kpis={len(getattr(res, 'kpi_cards', []))} ({elapsed}ms)"
         )
-        return res
+        return res  # type: ignore[return-value]  # на практике DashboardResult или AgentResult(failed)

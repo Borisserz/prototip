@@ -23,8 +23,8 @@ import time
 
 from pydantic import BaseModel
 
-from app.agents.base import BaseAgent
-from app.schemas import (
+from app.agents.base_agent import BaseAgent
+from app.agents.models import (
     DashboardLayout,
     DashboardRequest,
     DashboardResult,
@@ -127,6 +127,7 @@ class DashboardAgent(BaseAgent):
     """Агент построения комплексных дашбордов (несколько графиков + KPI + аналитика)."""
 
     name = "dashboard_agent"
+    description = "По вопросу строит дашборд: вызывает Data/Analyst/Chart (reuse), получает 3-5 ChartSpec + KPI + layout + insights + reasoning. Spec-first, graceful degradation."
 
     def run(self, request: DashboardRequest) -> DashboardResult:
         """Основной вход: вопрос → полный DashboardResult.

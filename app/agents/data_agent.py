@@ -15,8 +15,8 @@ import duckdb
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent
-from app.schemas import DataAgentInput, SqlResult
+from app.agents.base_agent import BaseAgent
+from app.agents.models import DataAgentInput, SqlResult
 from core.llm import call_structured, setup_logging
 
 # Ensure central logging (idempotent)
@@ -72,6 +72,7 @@ class DataAgent(BaseAgent):
     """Агент Text-to-SQL по sample.csv (DuckDB)."""
 
     name = "data_agent"
+    description = "Генерирует безопасный SELECT SQL по вопросу на русском (DuckDB над CSV, whitelist, self-correction до 3 попыток)."
     max_retries = 3
 
     def __init__(self, model: str | None = None) -> None:
@@ -147,7 +148,12 @@ class DataAgent(BaseAgent):
                 data = self._execute_sql(sql)
                 elapsed = int((time.time() - start) * 1000)
                 logger.info(f"[DataAgent] end: rows={len(data)} sql_len={len(sql)} ({elapsed}ms)")
-                return SqlResult(sql=sql, data=data, row_count=len(data))
+                return SqlResult(
+                    sql=sql,
+                    data=data,
+                    row_count=len(data),
+                    reasoning=f"Сгенерирован безопасный SELECT (self-correction, whitelist, авто-LIMIT). Строк: {len(data)}.",
+                )
 
             except Exception as e:
                 last_error = str(e)

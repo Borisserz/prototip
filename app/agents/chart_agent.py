@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import time
 
-from app.agents.base import BaseAgent
-from app.schemas import ChartAgentInput, ChartAgentResult
+from app.agents.base_agent import BaseAgent
+from app.agents.models import ChartAgentInput, ChartAgentResult
 from core.llm import call_structured, setup_logging
 from core.models import ChartSpec
 
@@ -46,6 +46,7 @@ class ChartAgent(BaseAgent):
     """Агент выбора и заполнения ChartSpec по вопросу и данным."""
 
     name = "chart_agent"
+    description = "По вопросу + данным выбирает тип графика (line/bar/donut/... по эвристикам) и заполняет ChartSpec (structured). Рендер — всегда через viz/charts.py."
 
     def run(self, question: str, data: list[dict]) -> ChartAgentResult:
         start = time.time()
@@ -92,7 +93,12 @@ class ChartAgent(BaseAgent):
 
         elapsed = int((time.time() - start) * 1000)
         logger.info(f"[ChartAgent] end: chart_type={spec.chart_type} ({elapsed}ms)")
-        return ChartAgentResult(spec=spec)
+        # Минимальное изменение: заполняем reasoning из rationale модели (spec-first принцип)
+        reasoning = (
+            getattr(spec, "rationale", None)
+            or "Модель выбрала тип графика по правилам FEW_SHOT и заполнила ChartSpec."
+        )
+        return ChartAgentResult(spec=spec, reasoning=reasoning)
 
     def run_input(self, inp: ChartAgentInput) -> ChartAgentResult:
         return self.run(inp.question, inp.data)

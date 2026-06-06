@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 import time
 
-from app.agents.base import BaseAgent
-from app.schemas import AnalysisResult, SqlResult  # reuse pattern, but for analyst
+from app.agents.base_agent import BaseAgent
+from app.agents.models import AnalysisResult, SqlResult
 from core.llm import call_structured, setup_logging
 
 # Ensure central logging (idempotent)
@@ -44,6 +44,7 @@ class AnalystAgent(BaseAgent):
     """Агент текстового анализа данных (инсайты на русском)."""
 
     name = "analyst_agent"
+    description = "По вопросу и данным (списку записей) выдаёт 3-4 инсайта, ключевой вывод и аномалию/тренд на русском языке."
 
     def run(self, question: str, data: list[dict]) -> AnalysisResult:
         """Основной метод: вопрос + записи данных → AnalysisResult."""
@@ -61,6 +62,7 @@ class AnalystAgent(BaseAgent):
                 ],
                 key_conclusion="Нет данных для формирования выводов.",
                 anomaly_or_trend=None,
+                reasoning="Fallback: DataAgent вернул пустой результат. Выводы минимальны, чтобы пайплайн не упал.",
             )
 
         sample = data[:8]  # лимитируем для промпта
@@ -102,9 +104,13 @@ class AnalystAgent(BaseAgent):
                 ],
                 key_conclusion="Анализ временно недоступен из-за внутренней ошибки.",
                 anomaly_or_trend=None,
+                reasoning="Fallback: LLM structured call для AnalysisResult не удался. Возвращён безопасный AnalysisResult.",
             )
         elapsed = int((time.time() - start) * 1000)
         logger.info(f"[AnalystAgent] end: insights={len(analysis.insights)} ({elapsed}ms)")
+        # Усиливаем reasoning (модель не всегда его заполняет в старых схемах)
+        if not getattr(analysis, "reasoning", ""):
+            analysis.reasoning = f"Проанализировано {len(data)} записей. Сформировано {len(analysis.insights)} инсайтов + ключевой вывод."
         return analysis
 
     def run_from_sql(self, question: str, sql_result: SqlResult) -> AnalysisResult:

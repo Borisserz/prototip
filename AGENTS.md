@@ -45,6 +45,14 @@ Streamlit → FastAPI → Orchestrator (свой явный пайплайн), �
 наш детерминированный код в едином фирменном стиле. НИКОГДА не выполняй сырой код
 графиков от модели через exec(). Это вопрос и красоты (единый стиль), и безопасности.
 
+### Базовые абстракции (подготовка к PlannerAgent)
+- `BaseAgent` (app/agents/base_agent.py): абстрактный базовый класс. Обязательные атрибуты: `name`, `description`. Абстрактный `run(self, request: Any, *args, **kwargs) -> AgentResult`. Метод `get_capabilities() -> dict`. Все агенты (Data/Analyst/Chart/Dashboard/Presentation) наследуются от него.
+- `AgentResult` (app/agents/models.py): базовый Pydantic для всех результатов агентов. Поля: `success: bool`, `reasoning: str` (обязательно заполняется агентом — объяснение решений/выбора), `error: str | None`.
+- `AgentRegistry` + `AgentExecutor` (app/agents/executor.py): реестр по имени + единая точка вызова `executor.run(agent_name, request, **kw) -> AgentResult`. Логирует все вызовы в формате `[AgentExecutor] call: ... / done: ... (Nms) / error: ...`. Простая обработка ошибок (возвращает failed AgentResult). Orchestrator постепенно использует executor вместо прямых вызовов.
+- Модели для Planner (Task, Plan, AgentCall) уже объявлены в models.py — готовы к использованию.
+
+Orchestrator оставлен тонким (только высокоуровневые ask / dashboard). Логика планирования и сложной маршрутизации — для будущего PlannerAgent.
+
 ## Жёсткие правила разработки
 1. Двигаемся строго по фазам из PROJECT_SPEC.md. Не начинай следующую фазу,
    пока текущая не покрыта тестом и не запускается.
@@ -69,9 +77,16 @@ Phase 8 — обработка ошибок, логирование шагов �
 
 ## Следующий спринт
 - **DashboardAgent** (реализован + UI интегрирован): комплексный дашборд по вопросу (KPI-карточки + 3–5 взаимосвязанных ChartSpec + layout + insights + reasoning + data для рендера). Переиспользует Data/Analyst/ChartAgent (в т.ч. sub calls), spec-first, structured + graceful. Полная интеграция: /generate_dashboard, Orchestrator.dashboard(), вкладка "📈 Дашборды" в Streamlit (KPI st.metric grid, layout-driven multi plotly, post-gen editor типов + client filters, actions). data/source_sql в модели. Тесты (unit + smoke + api) + docs. Готов к PlannerAgent.
+- **PlannerAgent** (подготовка завершена): иерархическая мультиагентная оркестрация. Проект приведён к чистой архитектуре:
+  - Унифицированные модели в `app/agents/models.py` (AgentResult + Task/Plan/AgentCall).
+  - `BaseAgent` + `AgentRegistry`/`AgentExecutor`.
+  - Все агенты возвращают AgentResult с заполненным `reasoning`.
+  - Orchestrator облегчён (высокоуровневые методы + executor).
+  - Логирование и наблюдаемость унифицированы.
+  - viz/ и PresentationAgent/ChartAgent — минимально затронуты (готовы к доработке).
 - Telegram-бот.
 - Расширение датасета и новых типов графиков (scatter, waterfall, area и др.).
-- Дополнительные улучшения по запросу (PlannerAgent и т.д.).
+- Дополнительные улучшения по запросу.
 
 ## Команды
 - Установка: `pip install -r requirements.txt`
