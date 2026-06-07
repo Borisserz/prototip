@@ -19,38 +19,35 @@ _planner_lock = threading.RLock()
 _planner: Any = None
 
 
+def _register_planner_on_executor(executor: AgentExecutor) -> None:
+    """Регистрирует singleton PlannerAgent на shared executor (без дублирования)."""
+    if "planner_agent" in executor.registry:
+        return
+    executor.register(get_planner())
+
+
 def get_executor(*, include_planner: bool = True, fresh: bool = False) -> AgentExecutor:
-    """Return a configured AgentExecutor.
-
-    Args:
-        include_planner: Register PlannerAgent too. Internal sub-agent calls usually
-            do not need it, and setting this to False prevents recursive construction.
-        fresh: Build a new isolated executor instead of using the shared singleton.
-
-    The shared executor is protected by a re-entrant lock. Registration imports are
-    intentionally local, because concrete agents may import this factory to call
-    other agents as tools.
-    """
+    """Return a configured AgentExecutor."""
     global _executor, _executor_with_planner
 
     if fresh:
-        return _build_executor(include_planner=include_planner)
+        ex = _build_executor(include_planner=False)
+        if include_planner:
+            _register_planner_on_executor(ex)
+        return ex
 
     with _executor_lock:
         if _executor is None:
-            _executor = _build_executor(include_planner=include_planner)
-            _executor_with_planner = include_planner
-        elif include_planner and not _executor_with_planner:
-            from app.agents.planner_agent import PlannerAgent
-
-            if "planner_agent" not in _executor.registry:
-                _executor.register(PlannerAgent(use_shared_executor=False))
+            _executor = _build_executor(include_planner=False)
+            _executor_with_planner = False
+        if include_planner and not _executor_with_planner:
+            _register_planner_on_executor(_executor)
             _executor_with_planner = True
         return _executor
 
 
 def _build_executor(*, include_planner: bool) -> AgentExecutor:
-    """Create and register all standard agents."""
+    """Create and register standard leaf agents (planner — отдельно через get_planner)."""
     registry = AgentRegistry()
     executor = AgentExecutor(registry)
 
@@ -67,9 +64,7 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
     executor.register(PresentationAgent())
 
     if include_planner:
-        from app.agents.planner_agent import PlannerAgent
-
-        executor.register(PlannerAgent(use_shared_executor=False))
+        _register_planner_on_executor(executor)
 
     return executor
 

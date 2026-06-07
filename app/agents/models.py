@@ -96,6 +96,7 @@ class AgentCall(BaseModel):
     reasoning: str = ""
     error: str | None = None
     output_summary: str = Field("", description="Краткое описание результата")
+    correlation_id: str | None = Field(None, description="Сквозной ID запроса")
 
 
 class PlanExecutionStep(BaseModel):
@@ -180,6 +181,10 @@ class AnalysisResult(AgentResult):
     data_explanation: str | None = Field(
         None,
         description="Простое объяснение: как получены цифры (фильтры, группировка, агрегация)",
+    )
+    degraded: bool = Field(
+        False,
+        description="True если анализ получен из fallback, а не от LLM",
     )
 
 

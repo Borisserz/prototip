@@ -47,17 +47,14 @@ def _fake_ask_result(
     )
 
 
-def _mock_planner_executor(*ask_results):
+def _mock_slide_pipeline(*ask_results):
+    """Мок slide pipeline (data→chart→analyst) без PlannerAgent."""
     pending = list(ask_results)
-    mock_ex = MagicMock()
 
-    def run_side_effect(agent_name: str, *args, **kwargs):
-        if agent_name == "planner_agent":
-            return pending.pop(0) if pending else MagicMock(success=False, error="no mock result")
-        return MagicMock(success=False, error=f"unexpected agent {agent_name}")
+    def build_slide(question: str, executor):
+        return pending.pop(0) if pending else _fake_ask_result(question=question)
 
-    mock_ex.run.side_effect = run_side_effect
-    return mock_ex
+    return build_slide
 
 
 def test_presentation_agent_mock():
@@ -71,14 +68,16 @@ def test_presentation_agent_mock():
 
     with (
         patch(
-            "app.agents.presentation_agent.get_executor",
-            return_value=_mock_planner_executor(
+            "app.agents.presentation_agent.build_slide_ask_result",
+            side_effect=_mock_slide_pipeline(
                 _fake_ask_result(title="Тест бар 1"),
                 _fake_ask_result(title="Тест бар 2"),
                 _fake_ask_result(title="Тест бар 3"),
             ),
         ),
         patch("app.agents.presentation_agent.call_structured") as mock_narr,
+        patch("app.agents.presentation_agent.build_chart") as mock_build,
+        patch("app.agents.presentation_agent.export_png"),
     ):
         mock_narr.return_value = DeckNarrative(
             overview="test overview",
@@ -86,6 +85,7 @@ def test_presentation_agent_mock():
             key_takeaways=["k1", "k2", "k3", "k4"],
             recommendations=["r1", "r2"],
         )
+        mock_build.return_value = MagicMock()
 
         with patch("app.agents.presentation_agent.Presentation") as mock_prs:
             mock_prs_instance = MagicMock()
@@ -99,7 +99,7 @@ def test_presentation_agent_mock():
 
     assert isinstance(res, PresentationResult)
     assert res.num_slides >= 3 + 4  # questions + title/ov/themes/key/rec at least
-    assert "presentation.pptx" in res.pptx_path
+    assert "presentation_" in res.pptx_path and res.pptx_path.endswith(".pptx")
 
 
 @pytest.mark.live
@@ -177,8 +177,8 @@ def test_presentation_respects_prefs_and_exact_count_nonlive():
 
     with (
         patch(
-            "app.agents.presentation_agent.get_executor",
-            return_value=_mock_planner_executor(
+            "app.agents.presentation_agent.build_slide_ask_result",
+            side_effect=_mock_slide_pipeline(
                 _fake_ask_result(
                     png_path="/tmp/f.png",
                     chart_type="bar",
@@ -252,8 +252,8 @@ def test_presentation_slide_header_uses_action_title() -> None:
 
     with (
         patch(
-            "app.agents.presentation_agent.get_executor",
-            return_value=_mock_planner_executor(ask),
+            "app.agents.presentation_agent.build_slide_ask_result",
+            side_effect=_mock_slide_pipeline(ask),
         ),
         patch("app.agents.presentation_agent.call_structured") as mock_narr,
         patch(

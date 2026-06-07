@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from app.agents.models import (
@@ -16,6 +17,14 @@ from app.agents.models import (
     PlannerTrace,
 )
 from app.config import config
+
+
+def _dataset_mtime_token() -> str:
+    path = Path(config.data_path)
+    try:
+        return str(int(path.stat().st_mtime))
+    except OSError:
+        return "0"
 
 
 def make_planner_trace(
@@ -47,6 +56,7 @@ def planner_cache_key(question: str, drilldown: DrilldownContext | None) -> str:
         "q": question.strip().lower()[:200],
         "dd": drilldown.filters if drilldown else {},
         "trail": drilldown.trail if drilldown else [],
+        "ds_mtime": _dataset_mtime_token(),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

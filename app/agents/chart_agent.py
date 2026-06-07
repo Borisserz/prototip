@@ -79,6 +79,7 @@ class ChartAgent(BaseAgent):
 
     name = "chart_agent"
     description = "По вопросу + данным выбирает тип графика (line/bar/donut/... по эвристикам) и заполняет ChartSpec (structured). Рендер — всегда через viz/charts.py."
+    max_retries = 3
 
     def run(self, question: str, data: list[dict]) -> ChartAgentResult:
         start = time.time()
@@ -108,7 +109,17 @@ class ChartAgent(BaseAgent):
         data_profile = profile_data(data)
         profile_text = format_profile_for_prompt(data_profile)
 
-        prompt = f"""Ты — эксперт по визуализации данных налогов Республики Беларусь (синтетические данные). Ты работаешь как tool-agent: на входе вопрос и готовые records, на выходе только спецификация ChartSpec для детерминированного рендера в viz/charts.py.
+        last_error: str | None = None
+        spec: ChartSpec | None = None
+        for attempt in range(self.max_retries):
+            retry_hint = ""
+            if last_error:
+                retry_hint = (
+                    f"\nПредыдущая попытка не удалась: {last_error}\n"
+                    "Исправь ChartSpec: используй только колонки из профиля данных, "
+                    "валидный chart_type и осмысленные x/y."
+                )
+            prompt = f"""Ты — эксперт по визуализации данных налогов Республики Беларусь (синтетические данные). Ты работаешь как tool-agent: на входе вопрос и готовые records, на выходе только спецификация ChartSpec для детерминированного рендера в viz/charts.py.
 
 {FEW_SHOT_CHART}
 
@@ -131,26 +142,32 @@ class ChartAgent(BaseAgent):
 **Важное правило для вопросов с "по регионам" или "динамика по регионам":**
 Если в вопросе явно про регионы + время/динамика и в данных есть колонка "region" — для line/area **обязательно** ставь color="region".
 Это позволит нарисовать отдельную линию/область на каждый регион. Не агрегируй всё в одну линию, если вопрос просит "по регионам".
+{retry_hint}
 
 Верни JSON строго по схеме ChartSpec.
 """
-        # Прямо просим модель вернуть ChartSpec (она знает схему из structured)
-        try:
-            spec = normalize_chart_spec(
-                call_structured(
-                    prompt,
-                    schema=ChartSpec,
-                    system="Отвечай только валидным JSON по схеме. Все тексты на русском.",
+            try:
+                spec = normalize_chart_spec(
+                    call_structured(
+                        prompt,
+                        schema=ChartSpec,
+                        system="Отвечай только валидным JSON по схеме. Все тексты на русском.",
+                    )
                 )
-            )
-        except Exception as e:
-            logger.info(f"[ChartAgent] error: {e}")
+                break
+            except Exception as e:
+                last_error = str(e)
+                logger.info(
+                    f"[ChartAgent] attempt {attempt + 1}/{self.max_retries} error: {last_error}"
+                )
+
+        if spec is None:
             elapsed = int((time.time() - start) * 1000)
             logger.info(f"[ChartAgent] end_error: ({elapsed}ms)")
-            # Re-raise wrapped friendly (orchestrator will catch; direct use gets nice msg, no raw tb)
             raise RuntimeError(
-                "ChartAgent не смог получить спецификацию графика. Проверьте модель Ollama и попробуйте ещё раз."
-            ) from e
+                f"ChartAgent не смог получить спецификацию графика за {self.max_retries} попыток. "
+                f"Последняя ошибка: {last_error}"
+            )
 
         highlight = getattr(spec, "highlight_category", None)
         if highlight and spec.color is not None:

@@ -1,7 +1,6 @@
 """PresentationAgent (Phase 6+): авто-сборка .pptx презентации.
 
-Оркестрация: PlannerAgent → AskResult[] → DeckNarrative → PresentationRenderer.
-Вся программная верстка — в app/presentation_renderer.py (без master templates).
+Оркестрация: slide_pipeline (data→chart→analyst) → DeckNarrative → PresentationRenderer.
 """
 
 from __future__ import annotations
@@ -18,12 +17,14 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 
+from app.agent_context import presentation_subplan
 from app.agents.base_agent import BaseAgent
 from app.agents.factory import get_executor
 from app.agents.models import AskResult, DeckNarrative, PresentationInput, PresentationResult
 from app.chart_repair import repair_chart_spec
 from app.pipeline_progress import emit_pipeline_stage, suppress_pipeline_emit
 from app.presentation_renderer import PresentationRenderer, PresentationTheme
+from app.slide_pipeline import build_slide_ask_result
 from core.llm import call_structured, setup_logging
 from viz.charts import build_chart, export_png
 
@@ -32,11 +33,11 @@ logger = logging.getLogger("PresentationAgent")
 
 
 class PresentationAgent(BaseAgent):
-    """Агент сборки презентаций .pptx из результатов PlannerAgent/AgentExecutor."""
+    """Агент сборки презентаций .pptx из slide pipeline (без nested Planner)."""
 
     name = "presentation_agent"
     description = (
-        "По списку вопросов собирает .pptx: planner_agent → PNG (viz) → "
+        "По списку вопросов собирает .pptx: slide pipeline → PNG (viz) → "
         "PresentationRenderer (динамические макеты, gov-стиль, KPI, таблицы)."
     )
 
@@ -89,7 +90,7 @@ class PresentationAgent(BaseAgent):
 
     def _collect_results(self, questions: list[str], executor: Any) -> list[AskResult]:
         results: list[AskResult] = []
-        with suppress_pipeline_emit():
+        with presentation_subplan(), suppress_pipeline_emit():
             for qi, q in enumerate(questions):
                 emit_pipeline_stage(
                     "synthesis",
@@ -97,22 +98,7 @@ class PresentationAgent(BaseAgent):
                     f"Вопрос {qi + 1}/{len(questions)}: {str(q)[:50]}...",
                     agent="presentation_agent",
                 )
-                raw = executor.run("planner_agent", q)
-                if isinstance(raw, AskResult):
-                    results.append(raw)
-                else:
-                    results.append(
-                        AskResult(
-                            question=q,
-                            sql=getattr(raw, "source_sql", "") or "",
-                            data=getattr(raw, "data", []) or [],
-                            reasoning=getattr(
-                                raw, "reasoning", "PresentationAgent received non-AskResult"
-                            ),
-                            error=getattr(raw, "error", None),
-                            success=getattr(raw, "success", True),
-                        )
-                    )
+                results.append(build_slide_ask_result(q, executor))
         return results
 
     def _get_deck_narrative(self, questions: list[str], results: list[AskResult]) -> DeckNarrative:
@@ -190,14 +176,6 @@ class PresentationAgent(BaseAgent):
                     fig = build_chart(df, slide_spec)
                     with suppress(Exception):
                         fig.update_layout(title=dict(text=""))
-                    with suppress(Exception):
-                        if getattr(fig.layout, "annotations", None):
-                            fig.layout.annotations = [
-                                a
-                                for a in (fig.layout.annotations or [])
-                                if "Синтетические" not in str(getattr(a, "text", "") or "")
-                                and "Источник" not in str(getattr(a, "text", "") or "")
-                            ]
                     header = q
                     if getattr(slide_spec, "action_title", None):
                         header = slide_spec.action_title or q
@@ -244,23 +222,22 @@ class PresentationAgent(BaseAgent):
             f"inc_title={include_title} inc_recs={include_recommendations}"
         )
 
-        executor = get_executor(include_planner=True)
+        executor = get_executor(include_planner=False)
         out_dir = Path("out")
         out_dir.mkdir(parents=True, exist_ok=True)
-        pptx_path = out_dir / "presentation.pptx"
+        pptx_path = out_dir / f"presentation_{presentation_id}.pptx"
 
-        results = self._collect_results(all_qs, executor)
-        used_results = results[: len(qs)]
+        results = self._collect_results(qs, executor)
 
         try:
-            narrative = self._get_deck_narrative(qs, used_results)
+            narrative = self._get_deck_narrative(qs, results)
         except Exception as e:
             logger.info(f"[PresentationAgent] narrative_error_fallback: {e}")
             narrative = self._fallback_narrative()
 
         slide_png_paths = self._export_slide_charts(
             questions=qs,
-            results=used_results,
+            results=results,
             prefs=prefs,
             out_dir=out_dir,
             presentation_id=presentation_id,
@@ -276,11 +253,11 @@ class PresentationAgent(BaseAgent):
         if include_title:
             renderer.create_title_slide(prs.slides.add_slide(blank))
         renderer.create_summary_slide(
-            prs.slides.add_slide(blank), narrative.overview, used_results[0] if used_results else None
+            prs.slides.add_slide(blank), narrative.overview, results[0] if results else None
         )
         renderer.create_themes_slide(prs.slides.add_slide(blank), narrative.themes, qs)
 
-        for idx, (q, res) in enumerate(zip(qs, used_results)):  # noqa: B905
+        for idx, (q, res) in enumerate(zip(qs, results)):  # noqa: B905
             slide = prs.slides.add_slide(blank)
             renderer.render_question_slide(slide, q, res, prefs.get(idx), slide_png_paths[idx])
             renderer.build_question_slides_footer(slide, len(prs.slides))
@@ -308,7 +285,7 @@ class PresentationAgent(BaseAgent):
             slide_png_paths=png_exported,
             presentation_id=presentation_id,
             reasoning=(
-                f"Собрано {len(prs.slides)} слайдов из {len(qs)} вопросов. "
+                f"Собрано {len(prs.slides)} слайдов из {len(qs)} вопросов (slide pipeline). "
                 "PresentationRenderer: динамические макеты + gov-badge + KPI + таблицы."
             ),
         )

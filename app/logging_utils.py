@@ -25,6 +25,12 @@ def get_correlation_id() -> str:
     return correlation_id_var.get() or ""
 
 
+def set_correlation_id(correlation_id: str) -> str:
+    """Устанавливает correlation_id для текущего контекста (оркестратор / API)."""
+    correlation_id_var.set(correlation_id)
+    return correlation_id
+
+
 class JsonRunLogger:
     """Append-only JSONL лог прогонов в out/runs/."""
 

@@ -13,26 +13,13 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.models import AnalysisResult, SqlResult
+from app.data_sampling import format_data_for_llm
+from app.domain.constants import CHART_TYPE_RU
 from app.storytelling import enrich_analysis_explanation
 from core.llm import call_structured, setup_logging
 
 setup_logging()
 logger = logging.getLogger("AnalystAgent")
-
-CHART_TYPE_RU: dict[str, str] = {
-    "bar": "столбчатой диаграмме",
-    "grouped_bar": "группированной столбчатой диаграмме",
-    "stacked_bar": "стековой столбчатой диаграмме",
-    "line": "линейном графике",
-    "area": "диаграмме с заливкой (area)",
-    "scatter": "точечной диаграмме",
-    "waterfall": "водопадной диаграмме",
-    "horizontal_bar": "горизонтальной столбчатой диаграмме",
-    "donut": "круговой (donut) диаграмме",
-    "kpi": "KPI-индикаторе",
-    "heatmap": "тепловой карте",
-    "treemap": "древовидной диаграмме (treemap)",
-}
 
 FEW_SHOT_ANALYSIS = """
 Ты — аналитик налоговых данных Республики Беларусь (синтетический демо-датасет). Ты работаешь как модуль в цепочке агентов: DataAgent уже подготовил данные, ChartAgent мог построить визуализацию. Не запрашивай новые данные и не описывай SQL, анализируй только переданный data.
@@ -145,10 +132,12 @@ class AnalystAgent(BaseAgent):
                     "Какая задолженность по регионам за последний год?",
                     "Покажи динамику начислений в г. Минск",
                 ],
+                success=False,
+                degraded=True,
                 reasoning="Fallback: передан пустой data. Выводы минимальны, чтобы пайплайн не упал.",
             )
 
-        sample = data[:8]
+        profile_text, sample_repr = format_data_for_llm(data, max_rows=12)
         chart_context = self._format_chart_context(chart_spec)
         data_context = self._format_data_context(
             source_sql=source_sql,
@@ -161,8 +150,10 @@ class AnalystAgent(BaseAgent):
 
 Оригинальный вопрос пользователя: {question}
 
-Данные (первые строки + общее количество {len(data)}):
-{sample}
+Профиль данных:
+{profile_text}
+Репрезентативная выборка ({len(data)} строк всего):
+{sample_repr}
 {data_context}{chart_context}
 Проанализируй данные и верни структурированный AnalysisResult:
 - 3-4 инсайта (чёткие тезисы на русском)
@@ -203,6 +194,8 @@ class AnalystAgent(BaseAgent):
                 key_conclusion="Анализ временно недоступен из-за внутренней ошибки.",
                 anomaly_or_trend=None,
                 follow_up_questions=[],
+                success=False,
+                degraded=True,
                 reasoning="Fallback: LLM structured call для AnalysisResult не удался.",
             )
         elapsed = int((time.time() - start) * 1000)

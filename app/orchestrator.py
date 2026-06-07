@@ -13,7 +13,7 @@ from typing import Any
 from app.agents.factory import get_executor, get_planner
 from app.agents.models import AgentResult
 from app.config import config
-from app.logging_utils import get_correlation_id, new_correlation_id, run_logger
+from app.logging_utils import get_correlation_id, new_correlation_id, run_logger, set_correlation_id
 from app.schemas import (
     AskResult,
     DashboardRequest,
@@ -49,6 +49,7 @@ class Orchestrator:
         Возвращает AskResult, DashboardResult или PresentationResult с заполненным trace.
         """
         cid = correlation_id or get_correlation_id() or new_correlation_id()
+        set_correlation_id(cid)
         start = time.time()
         logger.info(f"[Orchestrator] planner start [{cid}]: question={question[:60]}...")
         run_logger.log_event("ask_start", question=question[:200], correlation_id=cid)
@@ -77,6 +78,7 @@ class Orchestrator:
     ) -> DashboardResult:
         """Явный fast-path для дашбордов (API / programmatic)."""
         cid = correlation_id or get_correlation_id() or new_correlation_id()
+        set_correlation_id(cid)
         start = time.time()
         logger.info(f"[Orchestrator] dashboard start [{cid}]: question={question[:60]}...")
         run_logger.log_event("dashboard_start", question=question[:200], correlation_id=cid)
@@ -112,6 +114,7 @@ class Orchestrator:
     ) -> PresentationResult:
         """Генерация презентации через PresentationAgent (единый entry point)."""
         cid = correlation_id or get_correlation_id() or new_correlation_id()
+        set_correlation_id(cid)
         start = time.time()
         logger.info(f"[Orchestrator] presentation start [{cid}]")
         run_logger.log_event("presentation_start", correlation_id=cid)

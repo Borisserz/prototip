@@ -18,7 +18,9 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from app.agents.base_agent import BaseAgent
-from app.agents.data_agent import ALLOWED_COLUMNS
+from app.agent_context import in_subplan
+from app.domain.constants import ALLOWED_COLUMNS, FORBIDDEN_SUBPLAN_AGENTS
+from app.logging_utils import get_correlation_id
 from app.agents.factory import get_executor
 from app.agents.models import (
     AgentCall,
@@ -187,10 +189,15 @@ class PlannerAgent(BaseAgent):
             "presentation_agent",
         }
         task_ids = {t.id for t in plan.tasks}
+        tasks_by_id = {t.id: t for t in plan.tasks}
 
         for t in plan.tasks:
             if t.agent_name not in known_agents:
                 errors.append(f"Задача {t.id}: неизвестный агент '{t.agent_name}'")
+            if in_subplan() and t.agent_name in FORBIDDEN_SUBPLAN_AGENTS:
+                errors.append(
+                    f"Задача {t.id}: агент '{t.agent_name}' запрещён во вложенном контексте"
+                )
 
             for dep in t.depends_on:
                 if dep not in task_ids:
@@ -198,12 +205,40 @@ class PlannerAgent(BaseAgent):
                 elif dep == t.id:
                     errors.append(f"Задача {t.id}: не может зависеть сама от себя")
 
-        # Проверка порядка (зависимости должны быть раньше)
-        id_to_index = {t.id: i for i, t in enumerate(plan.tasks)}
+        # Детекция циклов в depends_on
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def _has_cycle(tid: str) -> bool:
+            if tid in visiting:
+                return True
+            if tid in visited:
+                return False
+            visiting.add(tid)
+            task = tasks_by_id.get(tid)
+            if task is None:
+                return False
+            for dep in task.depends_on:
+                if dep in tasks_by_id and _has_cycle(dep):
+                    return True
+            visiting.remove(tid)
+            visited.add(tid)
+            return False
+
+        for tid in task_ids:
+            if _has_cycle(tid):
+                errors.append(f"Обнаружен цикл зависимостей, затрагивающий задачу {tid}")
+                break
+
+        # Порядок задач в списке должен уважать depends_on (для UI/отладки)
+        seen_ids: set[str] = set()
         for t in plan.tasks:
             for dep in t.depends_on:
-                if id_to_index.get(dep, -1) >= id_to_index.get(t.id, -1):
-                    errors.append(f"Задача {t.id}: зависимость '{dep}' должна быть раньше в плане")
+                if dep not in seen_ids:
+                    errors.append(
+                        f"Задача {t.id}: зависимость '{dep}' должна быть раньше в плане"
+                    )
+            seen_ids.add(t.id)
 
         return errors
 
@@ -220,39 +255,51 @@ class PlannerAgent(BaseAgent):
         if errors:
             score -= min(0.5, 0.15 * len(errors))
 
-        # Штраф за слишком большое количество задач (для большинства вопросов 1-2 достаточно)
-        if len(plan.tasks) >= 3:
+        agents = {t.agent_name for t in plan.tasks}
+        tasks_by_id = {t.id: t for t in plan.tasks}
+        data_ids = {t.id for t in plan.tasks if t.agent_name == "data_agent"}
+        chart_ids = {t.id for t in plan.tasks if t.agent_name == "chart_agent"}
+        analyst_tasks = [t for t in plan.tasks if t.agent_name == "analyst_agent"]
+        is_diamond = (
+            len(plan.tasks) == 3
+            and agents == {"data_agent", "chart_agent", "analyst_agent"}
+            and len(analyst_tasks) == 1
+            and data_ids
+            and chart_ids
+            and data_ids.issubset(set(analyst_tasks[0].depends_on))
+            and chart_ids.issubset(set(analyst_tasks[0].depends_on))
+        )
+        if len(plan.tasks) >= 3 and not is_diamond:
             score -= 0.25
         elif len(plan.tasks) == 2:
             score -= 0.05
 
-        # Бонус за использование высокоуровневых агентов для широких запросов
+        broad_keywords = [
+            "дашборд",
+            "обзор",
+            "сводка",
+            "презентация",
+            "отчёт",
+            "состояние",
+            "общее",
+            "ключевые",
+            "состояние граждан",
+        ]
+        question_lc = question.lower()
+        is_broad = any(kw in question_lc for kw in broad_keywords)
+
         high_level = {"dashboard_agent", "presentation_agent"}
         if any(t.agent_name in high_level for t in plan.tasks):
-            # Если вопрос выглядит "обзорным" — это хорошо
-            broad_keywords = [
-                "дашборд",
-                "обзор",
-                "презентация",
-                "отчёт",
-                "состояние",
-                "общее",
-                "ключевые",
-            ]
-            if any(kw in question.lower() for kw in broad_keywords):
+            if is_broad:
                 score += 0.15
 
-        # Штраф, если для обзорного вопроса использовали низкоуровневую цепочку
         low_level_chain = {"data_agent", "chart_agent", "analyst_agent"}
         if (
             len(plan.tasks) >= 2
             and all(t.agent_name in low_level_chain for t in plan.tasks)
-            and any(
-                kw in question.lower()
-                for kw in ["дашборд", "презентация", "обзор", "состояние граждан"]
-            )
+            and is_broad
         ):
-            score -= 0.20
+            score -= 0.35
 
         # Бонус за наличие стратегии
         if plan.strategy and len(plan.strategy) > 15:
@@ -508,7 +555,7 @@ class PlannerAgent(BaseAgent):
         context: dict[str, AgentResult] = {}
         executed_calls: list[AgentCall] = []
         plan_execution: list[dict] = []
-        lock = threading.Lock()
+        lock = threading.RLock()
 
         tasks = {t.id: t for t in plan.tasks}
         pending = set(tasks.keys())
@@ -535,6 +582,16 @@ class PlannerAgent(BaseAgent):
                         task_params.setdefault("chart_spec", dep_res.spec.model_dump())
             return task_params
 
+        def _deps_ok(task: Task) -> bool:
+            with lock:
+                for dep_id in task.depends_on:
+                    dep_res = context.get(dep_id)
+                    if dep_res is None:
+                        return False
+                    if not getattr(dep_res, "success", True):
+                        return False
+            return True
+
         def submit_ready(pool: ThreadPoolExecutor) -> None:
             with lock:
                 completed_ids = set(context.keys())
@@ -542,7 +599,48 @@ class PlannerAgent(BaseAgent):
                 tasks[tid]
                 for tid in list(pending)
                 if all(dep in completed_ids for dep in tasks[tid].depends_on)
+                and _deps_ok(tasks[tid])
             ]
+            # Пропуск задач с упавшими зависимостями
+            with lock:
+                for tid in list(pending):
+                    task = tasks[tid]
+                    if not all(dep in completed_ids for dep in task.depends_on):
+                        continue
+                    if _deps_ok(task):
+                        continue
+                    err = AgentResult(
+                        success=False,
+                        error="Пропущено: одна из зависимостей завершилась с ошибкой",
+                        reasoning=f"Задача {task.id} не запущена из-за failed dependency",
+                    )
+                    context[task.id] = err
+                    plan_execution.append(
+                        {
+                            "num": len(plan_execution) + 1,
+                            "agent_name": task.agent_name,
+                            "description": task.description,
+                            "status": "ошибка",
+                            "brief_result": err.error,
+                            "depends_on": task.depends_on or [],
+                        }
+                    )
+                    executed_calls.append(
+                        AgentCall(
+                            agent_name=task.agent_name,
+                            input_summary=str(task.params)[:250],
+                            success=False,
+                            error=err.error,
+                            correlation_id=get_correlation_id() or None,
+                        )
+                    )
+                    emit_agent_finished(
+                        task.agent_name,
+                        success=False,
+                        brief=err.error or "Пропущено",
+                        error=err.error,
+                    )
+                    pending.remove(tid)
             for task in ready:
                 params = build_params(task)
                 emit_agent_started(
@@ -637,6 +735,7 @@ class PlannerAgent(BaseAgent):
                                 reasoning=getattr(res, "reasoning", ""),
                                 error=getattr(res, "error", None),
                                 output_summary=brief,
+                                correlation_id=get_correlation_id() or None,
                             )
                         )
                     logger.info(f"[PlannerAgent] task {task.id} ({task.agent_name}) → {brief}")
@@ -689,13 +788,28 @@ class PlannerAgent(BaseAgent):
         )
 
         if data_res is not None and (analysis_res is not None or chart_res is not None):
+            data_ok = getattr(data_res, "success", True) and bool(getattr(data_res, "data", None))
+            chart_ok = chart_res is None or (
+                getattr(chart_res, "success", True) and getattr(chart_res, "spec", None) is not None
+            )
+            analyst_ok = analysis_res is None or getattr(analysis_res, "success", True)
+
             result = AskResult(question=original_question, sql="", data=[])
             result.sql = getattr(data_res, "sql", "") or ""
             result.data = getattr(data_res, "data", []) or []
             if analysis_res is not None and hasattr(analysis_res, "insights"):
                 result.analysis = analysis_res  # type: ignore[assignment]
-            if chart_res is not None and hasattr(chart_res, "spec"):
+            if chart_res is not None and hasattr(chart_res, "spec") and chart_res.spec:
                 result.chart_spec = chart_res.spec
+
+            result.success = data_ok and chart_ok and analyst_ok
+            if not result.success:
+                for part in (data_res, chart_res, analysis_res):
+                    if part is not None and not getattr(part, "success", True):
+                        result.error = getattr(part, "error", None) or "Ошибка в цепочке агентов"
+                        break
+                if not result.data and not result.chart_spec:
+                    result.error = result.error or "Нет данных для отображения"
 
             if result.chart_spec is not None and result.data:
                 try:
@@ -713,7 +827,15 @@ class PlannerAgent(BaseAgent):
                     )
                     result.chart_spec = repaired
                     fig = build_chart(df, repaired)
-                    png_file = (out_dir / f"chart_{self._slug(original_question)}.png").resolve()
+                    import hashlib
+
+                    data_hash = hashlib.sha256(
+                        str(len(result.data)).encode()
+                    ).hexdigest()[:8]
+                    png_file = (
+                        out_dir
+                        / f"chart_{self._slug(original_question)}_{data_hash}.png"
+                    ).resolve()
                     export_png(fig, png_file, scale=2.0)
                     result.png_path = str(png_file)
                     emit_pipeline_stage("viz", "done", f"Артефакт: {png_file.name}", agent="planner_agent")
@@ -841,11 +963,13 @@ class PlannerAgent(BaseAgent):
         """Только генерирует план (без выполнения). Используется для показа пользователю перед подтверждением."""
         return self._generate_plan(question)
 
-    def execute_plan(self, plan: Plan) -> AgentResult:
-        """Выполняет уже готовый план и возвращает результат.
-        Прикрепляет PlannerTrace в result.trace для отображения в UI.
-        """
-        return self._execute_plan(plan, getattr(plan, "goal", ""))
+    def execute_plan(
+        self,
+        plan: Plan,
+        drilldown: DrilldownContext | None = None,
+    ) -> AgentResult:
+        """Выполняет уже готовый план и возвращает результат."""
+        return self._execute_plan(plan, getattr(plan, "goal", ""), drilldown=drilldown)
 
     def run(self, question: str, drilldown: DrilldownContext | None = None) -> AgentResult:
         """Главная точка входа (автоматический режим: генерирует план и сразу выполняет).
