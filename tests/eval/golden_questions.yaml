@@ -1,0 +1,72 @@
+# Golden questions — demo prototip (для будущего run_eval.py)
+# Фаза 0 продукта: заменить на вопросы заказчика с expected_properties
+
+version: "0.1"
+dataset: data/sample.csv
+
+# Уровни: L1 sql_ok, L2 data_ok, L3 viz_ok, L4 insight_ok — см. templates/acceptance_criteria.md
+
+questions:
+  - id: gq-01
+    question: "Какие регионы имеют наибольшую задолженность по НДС?"
+    uc_ref: UC-01
+    expected:
+      chart_type: horizontal_bar
+      sql_contains: ["НДС", "debt", "region"]
+      min_rows: 1
+      levels: [L1, L2, L3, L4]
+
+  - id: gq-02
+    question: "Динамика начислений по г. Минск за все месяцы?"
+    expected:
+      chart_type: line
+      sql_contains: ["г. Минск", "accrued", "period"]
+      levels: [L1, L3, L4]
+
+  - id: gq-03
+    question: "Топ-3 региона по задолженности в 2024?"
+    expected:
+      chart_type: horizontal_bar
+      sql_contains: ["2024", "debt", "LIMIT 3"]
+      levels: [L1, L2, L3]
+
+  - id: gq-04
+    question: "Доля подоходного налога в общих начислениях по регионам"
+    expected:
+      chart_type: horizontal_bar
+      sql_contains: ["Подоходный налог", "accrued"]
+      levels: [L1, L3]
+
+  - id: gq-05
+    question: "Дай сводку по налогам по регионам"
+    expected:
+      route: dashboard
+      dashboard_template: dash-regional-overview
+      levels: [L1, L3, L4]
+
+  - id: gq-06
+    question: "Сколько налогоплательщиков в среднем по областям?"
+    expected:
+      chart_type: horizontal_bar
+      sql_contains: ["taxpayers", "AVG"]
+      levels: [L1, L3]
+
+  - id: gq-07
+    question: "Структура налогов по видам"
+    expected:
+      chart_type: donut
+      sql_contains: ["tax_type", "accrued"]
+      levels: [L1, L3]
+
+  - id: gq-08
+    question: "Динамика начислений по регионам"
+    expected:
+      chart_type: line
+      sql_contains: ["period", "region", "accrued"]
+      levels: [L1, L3]
+
+# Пороги eval (согласовать с acceptance_criteria)
+thresholds:
+  sql_success_rate: 0.85
+  full_success_rate: 0.80
+  max_latency_sec_simple: 90

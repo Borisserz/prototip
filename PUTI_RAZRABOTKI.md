@@ -284,9 +284,11 @@ flowchart LR
 
 | Артефакт | Путь | Статус |
 |----------|------|--------|
+| Пакет для руководства | [PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md) | ✅ |
 | Вопросник для заказчика | [templates/customer_questionnaire.md](templates/customer_questionnaire.md) | ✅ |
-| Карточка use case | [templates/use_case_card.md](templates/use_case_card.md) | ✅ |
+| UI brief, приёмка, воркшоп | [templates/](templates/) | ✅ |
 | Скелеты semantic layer | [domain/](domain/) | ✅ demo |
+| Golden questions (eval) | [tests/eval/golden_questions.yaml](tests/eval/golden_questions.yaml) | ✅ demo |
 | Индекс документации | [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md) | ✅ |
 
 ---

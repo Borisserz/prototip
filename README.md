@@ -242,6 +242,7 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 | Файл | Назначение |
 |------|------------|
 | [README.md](README.md) | Обзор, быстрый старт (этот файл) |
+| **[PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md)** | **Встреча с руководством: демо, решения, FAQ, чеклист** |
 | **[DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md)** | **Индекс: кому что читать, статус, навигация** |
 | **[PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md)** | **Альтернативы и пути развития после прототипа** |
 | **[OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md)** | **Обзор для руководства: простыми словами + полная архитектура** |

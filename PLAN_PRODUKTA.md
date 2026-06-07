@@ -5,7 +5,9 @@
 
 **Связанные документы:** [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md), [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md), [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md), [SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md), [PROJECT_SPEC.md](PROJECT_SPEC.md)
 
-**Шаблоны для заказчика:** [templates/customer_questionnaire.md](templates/customer_questionnaire.md), [templates/use_case_card.md](templates/use_case_card.md)
+**Встреча с руководством:** [PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md)
+
+**Шаблоны:** [templates/](templates/) — вопросник, UC, ui_brief, acceptance_criteria, workshop_agenda
 
 **Скелеты semantic layer:** [domain/](domain/) (целевой формат для фазы 0)
 

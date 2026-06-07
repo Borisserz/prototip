@@ -18,7 +18,7 @@
 
 | Роль | С чего начать | Затем | Действие |
 |------|---------------|-------|----------|
-| **Руководство** | [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md) часть 1 | [SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md) §1–2 | Демо: `streamlit run ui/streamlit_app.py` или `showcase/` |
+| **Руководство** | **[PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md)** | [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md) часть 1 | Демо: `streamlit run ui/streamlit_app.py` или `showcase/` |
 | **PM / аналитик продукта** | [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) | [PLAN_PRODUKTA.md](PLAN_PRODUKTA.md) | Отправить заказчику [templates/customer_questionnaire.md](templates/customer_questionnaire.md) |
 | **Разработчик (новый)** | [README.md](README.md) | [AGENTS.md](AGENTS.md) → [PROJECT_SPEC.md](PROJECT_SPEC.md) | `pytest -m "not live" -q` |
 | **Разработчик (продукт)** | [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) | [PLAN_PRODUKTA.md](PLAN_PRODUKTA.md) фазы 0–5, [domain/README.md](domain/README.md) | Ждать/заполнять `domain/*.yaml` |
@@ -32,6 +32,7 @@
 | Документ | Аудитория | Содержание |
 |----------|-----------|------------|
 | **[DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md)** | Все | **Этот файл** — навигация |
+| **[PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md)** | Руководство | Встреча 45 мин: что сказать, решения, чеклист, FAQ |
 | **[PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md)** | Команда, PM | Альтернативы, сценарии, блокеры, что делать без/с заказчиком |
 | [README.md](README.md) | Разработчик | Быстрый старт, структура, API |
 | [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md) | Руководство | Простыми словами + архитектура агентов |
@@ -45,8 +46,9 @@
 
 | Путь | Назначение | Статус |
 |------|------------|--------|
-| [templates/](templates/) | Шаблоны для заказчика (вопросник, карточка UC) | Готово к отправке |
-| [domain/](domain/) | Скелеты semantic layer (YAML) | Demo-заполнение; не подключено к runtime |
+| [templates/](templates/) | Вопросник, UC, UI brief, приёмка, воркшоп | Готово к отправке |
+| [domain/](domain/) | Semantic layer + dashboard templates (YAML) | Demo; не подключено к runtime |
+| [tests/eval/golden_questions.yaml](tests/eval/golden_questions.yaml) | Эталонные вопросы для eval | Demo-набор |
 | `app/domain/constants.py` | Текущий runtime: 8 колонок, типы графиков | Активно в коде |
 | `showcase/` | Офлайн-портфолио для демо | Готово |
 
@@ -80,6 +82,8 @@
 
 ```
 DOKUMENTACIYA_INDEX (вы здесь)
+        │
+        ├── PAKET_DLYA_RUKOVODSTVA ─── встреча с руководством
         │
         ├── PUTI_RAZRABOTKI ─── альтернативы, пути, приоритеты
         │         │

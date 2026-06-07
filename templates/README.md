@@ -4,18 +4,26 @@
 
 ## Файлы
 
-| Файл | Назначение |
-|------|------------|
-| [customer_questionnaire.md](customer_questionnaire.md) | Полный вопросник — можно отправить заказчику как есть |
-| [use_case_card.md](use_case_card.md) | Одна карточка сценария — заполнить 10–20 штук |
+| Файл | Назначение | Кому |
+|------|------------|------|
+| [customer_questionnaire.md](customer_questionnaire.md) | Полный вопросник по данным, UI, инфра | Заказчик (аналитик + IT) |
+| [use_case_card.md](use_case_card.md) | Одна карточка сценария (10–20 шт.) | Бизнес + аналитики |
+| [ui_brief.md](ui_brief.md) | Экраны, layout, бренд, эталон ответа | Дизайн / BI-команда |
+| [acceptance_criteria.md](acceptance_criteria.md) | Критерии приёмки ответов (L1–L4) | PM + руководство + аналитик |
+| [workshop_agenda.md](workshop_agenda.md) | Повестка воркшопа 2–3 ч (фаза 0) | Ведущий воркшопа |
+
+**Встреча с руководством:** [PAKET_DLYA_RUKOVODSTVA.md](../PAKET_DLYA_RUKOVODSTVA.md)
 
 ## Как использовать
 
-1. PM отправляет `customer_questionnaire.md` ответственному со стороны заказчика (аналитик + IT).
-2. Для приоритетных сценариев — копии `use_case_card.md` (по одной на UC).
-3. Полученные материалы складываются в общую папку проекта (вне git или в защищённом хранилище).
-4. Аналитик команды переносит согласованное в [domain/](../domain/) (YAML) — см. [domain/README.md](../domain/README.md).
-5. Сроки фаз 1–2 пересчитываются в [PLAN_PRODUKTA.md](../PLAN_PRODUKTA.md).
+1. **С руководством** — [PAKET_DLYA_RUKOVODSTVA.md](../PAKET_DLYA_RUKOVODSTVA.md) (45 мин, решения, демо).
+2. PM отправляет `customer_questionnaire.md` ответственному со стороны заказчика.
+3. Для приоритетных сценариев — копии `use_case_card.md` (по одной на UC).
+4. Параллельно — `ui_brief.md` (дизайн) и `acceptance_criteria.md` (пороги качества).
+5. Первая рабочая встреча — по `workshop_agenda.md`.
+6. Материалы складываются в защищённое хранилище (вне git при необходимости).
+7. Аналитик команды переносит согласованное в [domain/](../domain/) — см. [domain/README.md](../domain/README.md).
+8. Сроки фаз 1–2 пересчитываются в [PLAN_PRODUKTA.md](../PLAN_PRODUKTA.md).
 
 ## Минимум для старта пилота
 

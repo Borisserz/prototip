@@ -12,8 +12,9 @@
 | [metrics_catalog.yaml](metrics_catalog.yaml) | Бизнес-метрики и формулы SQL |
 | [chart_playbook.yaml](chart_playbook.yaml) | Сценарий вопроса → тип графика |
 | [sql_examples.yaml](sql_examples.yaml) | Эталонные SQL для few-shot DataAgent |
+| [dashboard_templates.yaml](dashboard_templates.yaml) | Шаблоны дашбордов (layout, KPI, графики) |
 
-Планируются при расширении: `dashboard_templates.yaml`, `tests/eval/golden_questions.yaml`.
+Eval-набор вопросов: [tests/eval/golden_questions.yaml](../tests/eval/golden_questions.yaml).
 
 ## Как заполнять (фаза 0)
 

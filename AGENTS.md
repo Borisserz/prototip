@@ -171,6 +171,7 @@ python scripts/generate_leadership_showcase.py
 
 | Документ | Когда читать |
 |----------|--------------|
+| [PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md) | Встреча с руководством |
 | [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md) | Точка входа: статус, навигация |
 | [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) | Альтернативы, что делать без/с заказчиком |
 | [PLAN_PRODUKTA.md](PLAN_PRODUKTA.md) | Фазы продукта, semantic layer |
