@@ -243,6 +243,7 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 |------|------------|
 | [README.md](README.md) | Обзор, быстрый старт (этот файл) |
 | **[OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
+| **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics (таблицы, логика)** |
 | [AGENTS.md](AGENTS.md) | Правила для разработки и AI-ассистентов |
 | [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы, критерии |
 | [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) | Детальный план тестирования |

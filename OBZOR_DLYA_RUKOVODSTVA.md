@@ -490,11 +490,21 @@ prototip/
 
 ---
 
-## 2.14. Связанная документация
+## 2.14. Сравнение с Epsilon Metrics (статья о AI-агентах в BI)
+
+Подробная таблица сходства с [публикацией Epsilon Metrics](https://blogs.epsilonmetrics.ru/generativnye-ai-agenty-i-llm-v-bi/) (без учёта RAG):  
+**[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)**
+
+Краткий вывод: по **идее диалогового BI и иерархическим агентам** prototip совпадает с подходом статьи на **~70–80%**; по **корпоративной инфраструктуре данных** — это упрощённый демо-прототип, а не аналог Epsilon Workspace.
+
+---
+
+## 2.15. Связанная документация
 
 | Документ | Аудитория |
 |----------|-----------|
 | [README.md](README.md) | Быстрый старт, обзор |
+| **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics** |
 | [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы |
 | [AGENTS.md](AGENTS.md) | Правила разработки |
 | [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) | Стратегия тестирования |

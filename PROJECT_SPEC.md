@@ -211,5 +211,6 @@ ruff check .
 
 - [README.md](README.md) — быстрый старт
 - [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md) — обзор для руководства
+- [SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md) — сравнение со статьёй Epsilon Metrics
 - [AGENTS.md](AGENTS.md) — правила разработки
 - [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) — тест-стратегия
