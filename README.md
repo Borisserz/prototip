@@ -19,7 +19,7 @@
 | **UI** | 4 вкладки, режимы «Для руководства» / «Для аналитика», drill-down, закрепление графиков |
 | **Showcase** | Офлайн-портфолио: 12 графиков + 4 презентации для демо руководству |
 | **API** | FastAPI: `/health`, `/ask`, `/generate_dashboard`, `/generate_presentation` |
-| **Тесты** | 139 автотестов (`pytest -m "not live"`), ruff |
+| **Тесты** | 146 автотестов (`pytest -m "not live"`), live e2e с Ollama |
 
 ---
 
@@ -111,9 +111,9 @@ PNG, CSV, «На дашборд», «В презентацию», drill-down п�
 Streamlit UI / FastAPI / CLI / тесты
               ↓
          Orchestrator
-    ask() → PlannerAgent (план 1–3 задачи, DAG, trace)
+    ask() → PlannerAgent (план 1–3 задачи, DAG, trace, честный success)
     dashboard() → DashboardAgent
-    presentation() → PresentationAgent
+    presentation() → PresentationAgent (slide pipeline, без nested Planner)
               ↓
     AgentExecutor → data_agent | chart_agent | analyst_agent | …
               ↓
@@ -153,6 +153,8 @@ Streamlit UI / FastAPI / CLI / тесты
 prototip/
 ├── app/
 │   ├── agents/          # Data, Chart, Analyst, Dashboard, Presentation, Planner
+│   ├── slide_pipeline.py # data→chart→analyst для слайдов презентации
+│   ├── domain/          # Общие константы (колонки, типы графиков)
 │   ├── orchestrator.py  # Единая точка входа
 │   ├── main.py          # FastAPI
 │   ├── chart_repair.py  # Нормализация и repair ChartSpec
@@ -170,7 +172,7 @@ prototip/
 ├── data/                # sample.csv + make_dataset.py
 ├── showcase/            # Демо для руководства (PNG, HTML, PPTX)
 ├── scripts/             # generate_leadership_showcase.py
-└── tests/               # 25 файлов, 139+ тестов
+└── tests/               # 26 файлов, 146 non-live + 8 live тестов
 ```
 
 ---
@@ -240,6 +242,7 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 | Файл | Назначение |
 |------|------------|
 | [README.md](README.md) | Обзор, быстрый старт (этот файл) |
+| **[OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
 | [AGENTS.md](AGENTS.md) | Правила для разработки и AI-ассистентов |
 | [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы, критерии |
 | [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) | Детальный план тестирования |
@@ -248,6 +251,6 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 
 ## Статус
 
-Фазы 0–8 выполнены. Post-Phase 8: DashboardAgent, PlannerAgent v2.5+, gov UX, leadership showcase, drill-down, pinned dashboard.
+Фазы 0–8 выполнены. Post-Phase 8: DashboardAgent, PlannerAgent v2.5+, gov UX, leadership showcase, drill-down, pinned dashboard. Волны 1–3 оркестрации: честный success, slide pipeline, retry LLM, singleton Planner, LRU-кэш.
 
 **Не production:** нет реальной БД, auth, SLA, ETL. Прототип для демо и внутренней разработки.

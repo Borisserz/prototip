@@ -3,7 +3,7 @@
 Детальная стратегия для графиков, дашбордов, презентаций и PlannerAgent.  
 Дополняет `pytest`-набор в `tests/`.
 
-**Статус (июнь 2026):** 147 тестов собрано, **139** в быстром прогоне (`pytest -m "not live"`). 8 тестов с маркером `live` требуют Ollama.
+**Статус (июнь 2026):** 154 теста собрано, **146** в быстром прогоне (`pytest -m "not live"`). 8 тестов с маркером `live` требуют Ollama. Live e2e (`test_e2e.py`) — сквозной `Orchestrator.ask()` с реальной моделью (~78 с).
 
 **Гейты перед коммитом:**
 
@@ -29,6 +29,7 @@ python -m pytest -m "not live" -q
 
 | Файл | Фокус |
 |------|-------|
+| `test_agent_waves.py` | честный success, skip deps, slide pipeline, degraded, retry |
 | `test_planner_agent.py` | repair, invoke, execute, orchestrated flows |
 | `test_viz_charts.py` | build_chart, exports, 12 типов, penalties |
 | `test_chart_agent.py` | ChartAgent + mock LLM |
@@ -131,6 +132,8 @@ python -m pytest -m live -q
 ---
 
 ## Чеклист перед демо руководству
+
+Документ для совещания: [OBZOR_DLYA_RUKOVODSTVA.md](../OBZOR_DLYA_RUKOVODSTVA.md).
 
 1. `ollama list` — модель на месте.
 2. `streamlit run ui/streamlit_app.py` — UI открывается, Ollama: ok.

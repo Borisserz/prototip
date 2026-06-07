@@ -42,12 +42,12 @@
 ```
 UI / API / CLI
      ↓
-Orchestrator
-  .ask()          → PlannerAgent (основной путь)
+Orchestrator (+ correlation_id)
+  .ask()          → PlannerAgent (singleton, LRU-кэш)
   .dashboard()    → DashboardAgent (fast-path)
-  .presentation() → PresentationAgent (fast-path)
+  .presentation() → PresentationAgent → slide_pipeline (без nested Planner)
      ↓
-AgentExecutor + AgentRegistry
+AgentExecutor + AgentRegistry (factory.get_executor / get_planner)
      ↓
 data_agent → chart_agent → analyst_agent
 dashboard_agent, presentation_agent (высокоуровневые)
@@ -62,11 +62,19 @@ LLM возвращает **ChartSpec** (Pydantic). Рисует только `vi
 
 ### PlannerAgent
 
+- **Singleton** через `get_planner()` — один экземпляр, общий LRU-кэш (`PlannerResultCache`).
 - Генерирует план из 1–3 задач (`Task` с `depends_on`).
-- Topological sort, injection `data` / `source_sql` по зависимостям.
-- Graceful degradation: падение одной задачи не роняет весь план.
-- Прикрепляет `PlannerTrace` к результату (`executed_plan`, `plan_execution`).
-- Высокоуровневые агенты (dashboard, presentation) вызывают sub-агентов внутри себя — sub-вызовы не дублируются в trace планировщика.
+- DAG-исполнение (ThreadPoolExecutor, RLock), injection `data` / `source_sql` / `chart_spec`.
+- **Пропуск зависимых задач** при `success=False` у родителя.
+- **Честная агрегация** AskResult: `success = data_ok AND chart_ok AND analyst_ok`.
+- Прикрепляет `PlannerTrace` к результату (`executed_plan`, `plan_execution`, `agent_calls`).
+- Высокоуровневые агенты вызывают sub-агентов внутри себя — sub-вызовы не дублируются в trace планировщика.
+
+### PresentationAgent + slide_pipeline
+
+- `app/slide_pipeline.py`: для каждого вопроса слайда — data_agent → chart_agent → analyst_agent.
+- Контекст `presentation_subplan()` запрещает `planner_agent` / `presentation_agent` во вложенных планах.
+- `get_executor(include_planner=False)` — без рекурсии планировщика.
 
 ### Базовые абстракции
 
@@ -84,7 +92,7 @@ LLM возвращает **ChartSpec** (Pydantic). Рисует только `vi
 | **chart_agent** | вопрос + data | ChartSpec | FEW_SHOT, `normalize_chart_spec` + `repair_chart_spec` |
 | **analyst_agent** | вопрос + data (+ chart_spec) | AnalysisResult | 3–5 тезисов на русском |
 | **dashboard_agent** | DashboardRequest | DashboardResult | KPI + 3–5 графиков, reuse ChartAgent |
-| **presentation_agent** | вопросы / тема | PresentationResult | `.pptx`, DeckNarrative |
+| **presentation_agent** | вопросы / тема | PresentationResult | slide_pipeline → `.pptx`, DeckNarrative |
 | **planner_agent** | вопрос | AskResult / Dashboard / Presentation | Оркестрация, trace |
 
 ---
@@ -147,7 +155,10 @@ python scripts/generate_leadership_showcase.py
 | Путь | Назначение |
 |------|------------|
 | `app/orchestrator.py` | Фасад ask/dashboard/presentation |
-| `app/agents/planner_agent.py` | Планировщик (~900 строк) |
+| `app/slide_pipeline.py` | Пайплайн слайда презентации |
+| `app/domain/constants.py` | ALLOWED_COLUMNS, CHART_TYPE_RU |
+| `app/agents/planner_agent.py` | Планировщик (~1000 строк) |
+| `OBZOR_DLYA_RUKOVODSTVA.md` | Документ для руководства |
 | `app/chart_repair.py` | `normalize_chart_spec`, `repair_chart_spec` |
 | `viz/charts.py` | `build_chart`, 12 типов |
 | `ui/streamlit_app.py` | Основной UI |

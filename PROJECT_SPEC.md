@@ -80,14 +80,34 @@ Streamlit чат, графики, презентация.
 
 ### Post-Phase 8 (текущее состояние) ✅
 
-- **PlannerAgent v2.5+:** generate/execute/repair, trace, cache.
+- **PlannerAgent v2.5+:** generate/execute/repair, trace, LRU-кэш, DAG-параллелизм.
 - **DashboardAgent:** KPI, layout, post-gen editor, client filters.
 - **Gov UX:** disclaimer, режимы руководство/аналитик, 4 вкладки, unified actions.
 - **Drill-down:** клик на графике → фильтр → уточняющий вопрос.
 - **Pinned dashboard:** закрепление и сравнение графиков.
 - **Showcase:** `scripts/generate_leadership_showcase.py` → `showcase/`.
 - **Chart repair:** `normalize_chart_spec`, `repair_chart_spec` перед рендером.
-- **Тесты:** 139 non-live, `test_planner_agent.py`, `test_showcase.py`.
+- **Тесты:** 146 non-live + 8 live, `test_agent_waves.py`, `test_planner_agent.py`.
+
+### Волны улучшения оркестрации (1–3) ✅
+
+**Волна 1 — честность и баги:**
+- Singleton `PlannerAgent` (`get_planner()`), без дублирования в Presentation.
+- `_aggregate_result()` уважает `success` data/chart/analyst.
+- Пропуск зависимых задач при failed parent.
+- `slide_pipeline.py` для презентаций (data→chart→analyst).
+- AnalystAgent: `degraded=True`, `success=False` на fallback.
+
+**Волна 2 — качество:**
+- `data_sampling.py` — профиль + стратифицированная выборка для промптов.
+- Retry ChartAgent (3 попытки) и `core/llm.py` (retry + JSON-repair).
+- `app/domain/constants.py` — единый источник колонок и CHART_TYPE_RU.
+
+**Волна 3 — архитектура:**
+- `agent_context.py` — запрет planner/presentation во вложенных планах.
+- `correlation_id` в Orchestrator и AgentCall.
+- `PlannerResultCache` с mtime датасета.
+- RLock в DAG-исполнении (fix deadlock).
 
 ---
 
@@ -152,7 +172,8 @@ showcase/
 ## Тестирование
 
 ```bash
-python -m pytest -m "not live" -q   # 139 тестов
+python -m pytest -m "not live" -q   # 146 тестов
+python -m pytest tests/test_e2e.py -m live   # сквозной прогон с Ollama
 ruff check .
 ```
 
@@ -189,5 +210,6 @@ ruff check .
 ## Ссылки
 
 - [README.md](README.md) — быстрый старт
+- [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md) — обзор для руководства
 - [AGENTS.md](AGENTS.md) — правила разработки
 - [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) — тест-стратегия
