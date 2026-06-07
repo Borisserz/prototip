@@ -3,7 +3,11 @@
 **Контекст:** сейчас есть рабочий прототип (агенты, Planner, UI, демо-CSV).  
 **Цель:** при получении от заказчика **структур БД**, **желаемого вида дашбордов/графиков** и **основных use cases** — превратить prototip в продукт, пригодный для пилота и последующего production.
 
-**Связанные документы:** [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md), [SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md), [PROJECT_SPEC.md](PROJECT_SPEC.md)
+**Связанные документы:** [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md), [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md), [OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md), [SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md), [PROJECT_SPEC.md](PROJECT_SPEC.md)
+
+**Шаблоны для заказчика:** [templates/customer_questionnaire.md](templates/customer_questionnaire.md), [templates/use_case_card.md](templates/use_case_card.md)
+
+**Скелеты semantic layer:** [domain/](domain/) (целевой формат для фазы 0)
 
 **Дата:** июнь 2026
 
@@ -335,6 +339,8 @@ SLA: < 90 сек
 ---
 
 # Часть F. Что улучшить в текущем prototip «по пути» (не ждать всех данных)
+
+> **Альтернативы, приоритеты и блокеры** для каждого пункта — в [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) (сценарий «Укрепление demo»).
 
 Эти шаги полезны уже сейчас и не блокируются отсутствием БД заказчика:
 

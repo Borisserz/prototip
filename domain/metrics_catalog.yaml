@@ -1,0 +1,55 @@
+# Скелет каталога метрик — demo prototip
+# При продукте: каждая метрика согласуется с аналитиками заказчика.
+
+version: "0.1"
+
+metrics:
+  - id: total_debt
+    name: Общая задолженность
+    description: Сумма задолженности по выборке
+    unit: Br
+    formula_sql: "SUM(debt)"
+    default_agg: sum
+    dimensions: [region, tax_type, period]
+
+  - id: total_accrued
+    name: Общие начисления
+    description: Сумма начислений
+    unit: Br
+    formula_sql: "SUM(accrued)"
+    default_agg: sum
+    dimensions: [region, tax_type, period]
+
+  - id: total_paid
+    name: Общие уплаты
+    description: Сумма уплаченных сумм
+    unit: Br
+    formula_sql: "SUM(paid)"
+    default_agg: sum
+    dimensions: [region, tax_type, period]
+
+  - id: collection_rate
+    name: Уровень сбора
+    description: Доля уплат от начислений, %
+    unit: "%"
+    formula_sql: "SUM(paid) * 100.0 / NULLIF(SUM(accrued), 0)"
+    default_agg: ratio
+    dimensions: [region, tax_type, period]
+
+  - id: debt_per_taxpayer
+    name: Задолженность на плательщика
+    description: Средняя задолженность на одного налогоплательщика
+    unit: Br
+    formula_sql: "SUM(debt) / NULLIF(SUM(taxpayers), 0)"
+    default_agg: ratio
+    dimensions: [region, tax_type]
+
+  - id: income_tax_share
+    name: Доля подоходного налога
+    description: Доля подоходного налога в общих начислениях по региону, %
+    unit: "%"
+    formula_sql: >
+      SUM(CASE WHEN tax_type = 'Подоходный налог' THEN accrued ELSE 0 END) * 100.0
+      / NULLIF(SUM(accrued), 0)
+    default_agg: ratio
+    dimensions: [region]

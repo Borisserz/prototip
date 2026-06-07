@@ -242,9 +242,13 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 | Файл | Назначение |
 |------|------------|
 | [README.md](README.md) | Обзор, быстрый старт (этот файл) |
+| **[DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md)** | **Индекс: кому что читать, статус, навигация** |
+| **[PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md)** | **Альтернативы и пути развития после прототипа** |
 | **[OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
 | **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics (таблицы, логика)** |
 | **[PLAN_PRODUKTA.md](PLAN_PRODUKTA.md)** | **План перехода к продукту: что запросить у заказчика, фазы работ** |
+| [templates/](templates/) | Шаблоны для заказчика (вопросник, карточки UC) |
+| [domain/](domain/) | Скелеты semantic layer (YAML, не в runtime) |
 | [AGENTS.md](AGENTS.md) | Правила для разработки и AI-ассистентов |
 | [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы, критерии |
 | [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) | Детальный план тестирования |

@@ -499,10 +499,19 @@ prototip/
 
 ---
 
-## 2.15. Связанная документация
+## 2.15. Куда развивать дальше
+
+Прототип **готов к демонстрации**; переход к продукту требует материалов от заказчика (схема БД, метрики, сценарии, дизайн). Альтернативы по каждому слою (данные, UI, LLM, интеграции) и рекомендуемая последовательность работ — в **[PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md)**. План фаз и вопросник для заказчика — в **[PLAN_PRODUKTA.md](PLAN_PRODUKTA.md)** и **[templates/](templates/)**.
+
+---
+
+## 2.16. Связанная документация
 
 | Документ | Аудитория |
 |----------|-----------|
+| [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md) | Навигация по всей документации |
+| [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) | Пути и альтернативы развития |
+| [PLAN_PRODUKTA.md](PLAN_PRODUKTA.md) | План перехода к продукту |
 | [README.md](README.md) | Быстрый старт, обзор |
 | **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics** |
 | [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы |

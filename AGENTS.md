@@ -167,6 +167,19 @@ python scripts/generate_leadership_showcase.py
 
 ---
 
+## Документация для разработки
+
+| Документ | Когда читать |
+|----------|--------------|
+| [DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md) | Точка входа: статус, навигация |
+| [PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md) | Альтернативы, что делать без/с заказчиком |
+| [PLAN_PRODUKTA.md](PLAN_PRODUKTA.md) | Фазы продукта, semantic layer |
+| [domain/](domain/) | Целевой формат YAML (скелеты, не runtime) |
+
+При архитектурных решениях — сначала PUTI_RAZRABOTKI, затем обновить INDEX и затронутые MD.
+
+---
+
 ## Definition of Done
 
 - Код типизирован, есть тест.

@@ -1,0 +1,59 @@
+# Эталонные SQL — demo prototip
+# Источник: FEW_SHOT в app/agents/data_agent.py
+# При продукте: заменить на SQL аналитиков заказчика.
+
+version: "0.1"
+
+rules:
+  period_year: "Для фильтра по году используй period LIKE '2024-%', не period = '2024'"
+  safety: "Только SELECT, всегда с LIMIT"
+
+examples:
+  - id: sql-01
+    question: "Какие регионы имеют наибольшую задолженность по НДС?"
+    sql: |
+      SELECT region, SUM(debt) AS total_debt
+      FROM df
+      WHERE tax_type = 'НДС'
+      GROUP BY region
+      ORDER BY total_debt DESC
+      LIMIT 10
+
+  - id: sql-02
+    question: "Динамика начислений по г. Минск за все месяцы?"
+    sql: |
+      SELECT period, SUM(accrued) AS total_accrued
+      FROM df
+      WHERE region = 'г. Минск'
+      GROUP BY period
+      ORDER BY period
+      LIMIT 20
+
+  - id: sql-03
+    question: "Топ-3 региона по задолженности в 2024?"
+    sql: |
+      SELECT region, SUM(debt) AS total_debt
+      FROM df
+      WHERE period LIKE '2024-%'
+      GROUP BY region
+      ORDER BY total_debt DESC
+      LIMIT 3
+
+  - id: sql-04
+    question: "Доля подоходного налога в общих начислениях по регионам"
+    sql: |
+      SELECT region,
+        SUM(CASE WHEN tax_type = 'Подоходный налог' THEN accrued ELSE 0 END) * 100.0 / SUM(accrued) AS share_pct
+      FROM df
+      GROUP BY region
+      ORDER BY share_pct DESC
+      LIMIT 10
+
+  - id: sql-05
+    question: "Средняя задолженность на налогоплательщика в топ-регионах"
+    sql: |
+      SELECT region, SUM(debt) / SUM(taxpayers) AS debt_per_taxpayer
+      FROM df
+      GROUP BY region
+      ORDER BY debt_per_taxpayer DESC
+      LIMIT 5
