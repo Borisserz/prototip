@@ -16,11 +16,11 @@ def compute_overview_kpis(data: list[dict]) -> list[tuple[str, str]]:
         cards: list[tuple[str, str]] = []
         if "accrued" in df.columns:
             cards.append(
-                ("Суммарные начисления", format_number_ru(float(df["accrued"].sum()), suffix="Br"))
+                ("Суммарные начисления", format_number_ru(float(df["accrued"].sum()), suffix="бел. руб."))
             )
         if "debt" in df.columns:
             cards.append(
-                ("Общая задолженность", format_number_ru(float(df["debt"].sum()), suffix="Br"))
+                ("Общая задолженность", format_number_ru(float(df["debt"].sum()), suffix="бел. руб."))
             )
         if "region" in df.columns:
             cards.append(("Регионов в выборке", str(int(df["region"].nunique()))))

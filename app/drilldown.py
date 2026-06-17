@@ -102,9 +102,7 @@ def drilldown_context_fingerprint(ctx: dict[str, Any] | None) -> str:
     if not ctx:
         return ""
     return hashlib.sha256(
-        f"{ctx.get('source_chart_key')}|{ctx.get('dimension')}|{ctx.get('segment_label')}|{ctx.get('filters')}".encode(
-            "utf-8"
-        )
+        f"{ctx.get('source_chart_key')}|{ctx.get('dimension')}|{ctx.get('segment_label')}|{ctx.get('filters')}".encode()
     ).hexdigest()[:20]
 
 

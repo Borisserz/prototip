@@ -1,4 +1,4 @@
-"""DataAgent (Phase 2): вопрос на русском → безопасный SELECT SQL + данные через DuckDB.
+"""DataAgent (Phase 2): вопрос на русском → безопасный SELECT SQL + данные через ClickHouse (DWH).
 
 Только SELECT + LIMIT (авто-добавляем если нет), белый список колонок.
 Few-shot + self-correction (до 3 попыток при ошибке выполнения).
@@ -11,20 +11,20 @@ import logging
 import time
 from pathlib import Path
 
-import duckdb
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from app.agents.base_agent import BaseAgent
-from app.pipeline_progress import emit_pipeline_stage
 from app.agents.models import DataAgentInput, SqlResult
+from app.pipeline_progress import emit_pipeline_stage
 from core.llm import call_structured, setup_logging
 
 # Ensure central logging (idempotent)
 setup_logging()
 logger = logging.getLogger("DataAgent")
 
-# Колонки датасета (белый список)
+from app.agents.db_schema_extractor import get_schema_prompt
+
+# Колонки для drilldown (базовый белый список для UI, хотя SQL агент теперь всеяден)
 ALLOWED_COLUMNS = {
     "period",
     "region",
@@ -33,74 +33,41 @@ ALLOWED_COLUMNS = {
     "paid",
     "debt",
     "taxpayers",
-    "penalties",  # Phase 2: добавлено для richer dataset (штрафы/пени)
+    "penalties",
 }
 
-DATA_PATH = Path("data/sample.csv")
 
-# Few-shot примеры (хорошие запросы для белорусских данных)
-FEW_SHOT = """
-Важное правило для фильтрации по году: колонка period — строка формата 'YYYY-MM'.
-Для фильтра по году используй period LIKE '2024-%' (или substr(period,1,4)='2024').
-НЕ используй period = '2024' и НЕ YEAR(period) / EXTRACT(YEAR FROM period).
-
-Примеры хороших запросов (только SELECT, с LIMIT):
-
-Q: Какие регионы имеют наибольшую задолженность по НДС?
-SQL: SELECT region, SUM(debt) as total_debt FROM df WHERE tax_type = 'НДС' GROUP BY region ORDER BY total_debt DESC LIMIT 10
-
-Q: Динамика начислений по г. Минск за все месяцы?
-SQL: SELECT period, SUM(accrued) as total_accrued FROM df WHERE region = 'г. Минск' GROUP BY period ORDER BY period LIMIT 20
-
-Q: Динамика начислений по регионам
-SQL: SELECT period, region, SUM(accrued) as total_accrued FROM df GROUP BY period, region ORDER BY period, region LIMIT 40
-
-Q: Сколько налогоплательщиков в среднем по областям?
-SQL: SELECT region, AVG(taxpayers) as avg_taxpayers FROM df GROUP BY region ORDER BY avg_taxpayers DESC LIMIT 10
-
-Q: Топ-3 региона по задолженности в 2024?
-SQL: SELECT region, SUM(debt) as total_debt FROM df WHERE period LIKE '2024-%' GROUP BY region ORDER BY total_debt DESC LIMIT 3
-
-Q: Доля подоходного налога в общих начислениях по регионам
-SQL: SELECT region, SUM(CASE WHEN tax_type = 'Подоходный налог' THEN accrued ELSE 0 END) * 100.0 / SUM(accrued) as share_pct FROM df GROUP BY region ORDER BY share_pct DESC LIMIT 10
-
-Q: Средняя задолженность на налогоплательщика в топ-регионах
-SQL: SELECT region, SUM(debt) / SUM(taxpayers) as debt_per_taxpayer FROM df GROUP BY region ORDER BY debt_per_taxpayer DESC LIMIT 5
-
-# Примечание: алиасы total_debt / total_accrued и т.п. — источник возможных английских лейблов в ChartSpec.y.
-# Обработка в viz/style.py:get_russian_label (стрип префиксов + fallback) + в viz/charts (conditional labels).
-# Всегда возвращаем данные с алиасами как есть; RU-лейблы на этапе viz.
-"""
-
+from app.agents.config_loader import get_agent_config
 
 class _SqlOnly(BaseModel):
-    """Внутренняя схема для LLM: только SQL строка."""
+    """Внутренняя схема для LLM: SQL строка и пошаговые рассуждения."""
 
+    step_by_step_reasoning: str = Field(
+        ..., 
+        description="Пошаговый план запроса: 1. Таблицы 2. Фильтры 3. Группировки"
+    )
     sql: str = Field(..., description="Только SELECT запрос, без объяснений")
 
 
 class DataAgent(BaseAgent):
-    """Агент Text-to-SQL по sample.csv (DuckDB)."""
+    """Агент Text-to-SQL (ClickHouse)."""
 
     name = "data_agent"
-    description = "Генерирует безопасный SELECT SQL по вопросу на русском (DuckDB над CSV, whitelist, self-correction до 3 попыток)."
+    description = "Генерирует безопасный SELECT SQL по вопросу на русском (ClickHouse DWH, whitelist, self-correction до 3 попыток)."
     max_retries = 3
 
     def __init__(self, model: str | None = None) -> None:
         self.model = model
-        self._df: pd.DataFrame | None = None
+        self._schema_cache: str | None = None
 
-    def _load_df(self) -> pd.DataFrame:
-        if self._df is None:
-            if not DATA_PATH.exists():
-                raise FileNotFoundError(
-                    "data/sample.csv не найден. Запусти python data/make_dataset.py"
-                )
-            self._df = pd.read_csv(DATA_PATH)
-        return self._df
+    def _get_dynamic_schema(self, question: str) -> str:
+        if not self._schema_cache:
+            from app.agents.db_schema_extractor import get_schema_prompt
+            self._schema_cache = get_schema_prompt()
+        return self._schema_cache
 
     def _execute_sql(self, sql: str) -> list[dict]:
-        """Безопасное выполнение: только SELECT, регистрируем df, добавляем LIMIT если нужно."""
+        """Безопасное выполнение через ClickHouse."""
         sql = sql.strip().rstrip(";")
         if not sql.lower().startswith("select"):
             raise ValueError("Разрешены только SELECT запросы")
@@ -109,14 +76,55 @@ class DataAgent(BaseAgent):
         if "limit" not in sql.lower():
             sql = sql + " LIMIT 500"
 
-        df = self._load_df()
-        con = duckdb.connect()
-        con.register("df", df)
+        import re
+
+        from app.utils.clickhouse_client import ch_client
+        
+        # Заменяем обращения к таблице df на enterprise_taxes если нужно (совместимость со старыми few-shot)
+        ch_sql = re.sub(r'(?i)\bFROM df\b', 'FROM default.enterprise_taxes', sql)
+        
+        from app.agent_context import get_user_role
+        import sqlglot
+        from sqlglot import exp
+        
+        role = get_user_role()
+        region_filter = None
+        if role == "grodno_manager":
+            region_filter = "г. Гродно"
+        elif role == "minsk_manager":
+            region_filter = "г. Минск"
+            
+        if region_filter:
+            try:
+                parsed = sqlglot.parse_one(ch_sql, read="clickhouse")
+                where_clause = exp.condition(f"region = '{region_filter}'")
+                parsed = parsed.where(where_clause)
+                ch_sql = parsed.sql(dialect="clickhouse")
+                logger.info(f"RLS Applied to DataAgent. Modified Query: {ch_sql}")
+            except Exception as parse_e:
+                logger.warning(f"Failed to parse query for RLS in DataAgent: {parse_e}")
+        
+        # Eval: Проверка синтаксиса перед выполнением (SQL-Eval Pattern)
         try:
-            result = con.execute(sql).fetchdf()
-            return result.to_dict(orient="records")
-        finally:
-            con.close()
+            explain_query = f"EXPLAIN SYNTAX {ch_sql}"
+            ch_client.execute_df(explain_query)
+            logger.info("[DataAgent] SQL Eval пройден (EXPLAIN SYNTAX)")
+        except Exception as eval_e:
+            logger.error(f"[DataAgent] SQL Eval (EXPLAIN) провалился: {eval_e}")
+            raise ValueError(f"Ошибка в синтаксисе SQL или названиях таблиц/колонок: {eval_e}. Проверь семантическую модель.")
+        
+        try:
+            df_result = ch_client.execute_df(ch_sql)
+            logger.info("[DataAgent] Запрос успешно выполнен в ClickHouse")
+            # Convert pandas timestamp / dates to strings to avoid JSON serialization issues
+            for col in df_result.select_dtypes(include=['datetime64', 'datetimetz']).columns:
+                df_result[col] = df_result[col].astype(str)
+            import numpy as np
+            df_result = df_result.replace({np.nan: None})
+            return df_result.to_dict(orient="records")
+        except Exception as e:
+            logger.error(f"[DataAgent] Ошибка выполнения в ClickHouse: {e}")
+            raise ValueError(f"ClickHouse Execution Error: {e}")
 
     def _format_drilldown_constraints(self, filters: dict[str, str] | None) -> str:
         if not filters:
@@ -133,6 +141,13 @@ class DataAgent(BaseAgent):
             + " AND ".join(clauses)
             + "."
         )
+        
+    def _get_semantic_schema(self) -> str:
+        """Загружает семантический слой YAML через Advanced Semantic Engine (Phase 11)."""
+        from app.semantic.catalog import SemanticCatalog
+        schema_path = Path(__file__).parent.parent.parent / "data" / "semantic_model.yaml"
+        catalog = SemanticCatalog.load(schema_path)
+        return catalog.to_llm_prompt()
 
     def _build_prompt(
         self,
@@ -141,23 +156,39 @@ class DataAgent(BaseAgent):
         *,
         drilldown_filters: dict[str, str] | None = None,
     ) -> str:
-        schema_info = f"Доступные колонки: {', '.join(sorted(ALLOWED_COLUMNS))}. Таблица: df (pandas + duckdb)."
-        prompt = f"""Ты — эксперт по SQL для аналитики налогов в Республике Беларусь (синтетические данные, включая Phase 2 колонки типа penalties).
+        semantic_context = self._get_semantic_schema()
+        schema_info = self._get_dynamic_schema(question)
+        
+        # Phase 16: Внедряем контекст памяти
+        from app.utils.memory import conversation_memory
+        memory_context = conversation_memory.get_context_string("default_session")
+        
+        cfg = get_agent_config("data_agent")
+        
+        prompt = f"""Ты — {cfg.role}. Твоя задача — {cfg.goal}
 
+=== DYNAMIC SCHEMA (Flat Tables) ===
 {schema_info}
 
-Пиши ТОЛЬКО валидный SELECT (DuckDB совместимый). Используй точные имена колонок. Добавляй LIMIT если нужно (макс 1000 строк).
+=== SEMANTIC MODEL (MDL) ===
+ВНИМАНИЕ: Это бизнес-слой. Строго используй описанные здесь метрики, таблицы и расчеты. Не придумывай свои агрегации, если они уже есть в MDL.
+{semantic_context}
 
-Правило для года: period LIKE 'YYYY-%' (например '2024-%') или substr(period,1,4)='2024'. Никогда не period = '2024' и не YEAR(period).
+=== MEMORY CONTEXT ===
+{memory_context}
 
-{FEW_SHOT}
+=== RULES ===
+{cfg.rules}
 
-Вопрос пользователя: {question}
+=== FEW-SHOT EXAMPLES ===
+{cfg.few_shot}
+
+Вопрос пользователя (с учетом истории диалога): {question}
 {self._format_drilldown_constraints(drilldown_filters)}
 """
         if previous_error:
-            prompt += f"\nПредыдущий SQL вызвал ошибку: {previous_error}\nИсправь запрос и верни только корректный SQL."
-        prompt += '\nВерни JSON строго по схеме: {"sql": "..."}'
+            prompt += f"\nПРЕДЫДУЩАЯ ОШИБКА (SQL EVAL): {previous_error}\nВнимательно проверь синтаксис (EXPLAIN SYNTAX) и сверься с Semantic Model. Исправь запрос."
+        prompt += '\nВерни JSON строго по схеме: {"step_by_step_reasoning": "...", "sql": "..."}'
         return prompt
 
     def run(self, request: str | DataAgentInput) -> SqlResult:
@@ -168,6 +199,29 @@ class DataAgent(BaseAgent):
             inp = DataAgentInput(question=str(request))
         start = time.time()
         logger.info(f"[DataAgent] start: question={inp.question[:60]}...")
+        
+        # Phase 15: Semantic cache - SKIP if drilldown filters are present to ensure fresh SQL with correct filters
+        from app.utils.semantic_cache import semantic_cache
+        if not inp.drilldown_filters:
+            cached_sql = semantic_cache.get_sql(inp.question)
+            if cached_sql:
+                try:
+                    emit_pipeline_stage("sql", "done", f"SQL найден в кэше ({len(cached_sql)} символов)", agent="data_agent")
+                    emit_pipeline_stage("clickhouse", "running", "Извлечение данных по кэшированному SQL...", agent="data_agent")
+                    data = self._execute_sql(cached_sql)
+                    emit_pipeline_stage("clickhouse", "done", f"Обработано строк: {len(data)}", agent="data_agent")
+                    elapsed = int((time.time() - start) * 1000)
+                    return SqlResult(
+                        sql=cached_sql,
+                        data=data,
+                        row_count=len(data),
+                        reasoning=f"Запрос найден в кэше (ускорение LLM). Строк: {len(data)}. ({elapsed}ms)"
+                    )
+                except Exception as e:
+                    logger.warning(f"[DataAgent] Ошибка выполнения кэшированного SQL (продолжаем штатно): {e}")
+        else:
+            logger.info(f"[DataAgent] Drilldown filters present - skipping semantic cache to apply filters: {inp.drilldown_filters}")
+                
         last_error: str | None = None
         sql_succeeded = False
 
@@ -182,7 +236,7 @@ class DataAgent(BaseAgent):
                     "LLM генерирует безопасный SELECT...",
                     agent="data_agent",
                 )
-                sql_obj = call_structured(prompt, schema=_SqlOnly, model=self.model)
+                sql_obj = call_structured(prompt, schema=_SqlOnly, model=self.model, agent_name=self.name)
                 sql = sql_obj.sql.strip()
                 emit_pipeline_stage(
                     "sql",
@@ -197,23 +251,48 @@ class DataAgent(BaseAgent):
                 for bad in ("insert", "update", "delete", "drop", "create", "alter", ";--"):
                     if bad in lowered:
                         raise ValueError(f"Запрещённая операция в SQL: {bad}")
-
+                        
+                # 1. Быстрая проверка синтаксиса (Бесплатно)
+                from app.utils.clickhouse_client import ch_client
+                try:
+                    ch_client.execute_df(f"EXPLAIN SYNTAX {sql}")
+                except Exception as syntax_e:
+                    raise ValueError(f"Синтаксическая ошибка SQL: {syntax_e}. Проверь названия колонок и синтаксис ClickHouse.")
+                # 2. Выполнение запроса (Получение реальных данных для Dry-Run)
                 emit_pipeline_stage(
-                    "duckdb",
+                    "clickhouse",
                     "running",
-                    "DuckDB выполняет запрос к датасету...",
+                    "ClickHouse выполняет запрос к БД...",
                     agent="data_agent",
                 )
                 data = self._execute_sql(sql)
                 emit_pipeline_stage(
-                    "duckdb",
+                    "clickhouse",
                     "done",
                     f"Обработано строк: {len(data)}",
                     agent="data_agent",
                 )
+                        
+                # 3. Продвинутый SQL Eval (LLM-as-a-Judge - Дорого)
+                from app.agents.sql_evaluator import SqlEvaluatorAgent
+                evaluator = SqlEvaluatorAgent()
+                eval_schema = self._get_dynamic_schema(inp.question)
+                eval_res = evaluator.evaluate(inp.question, sql, eval_schema, sample_data=data[:5])
+                if not eval_res.is_correct:
+                    logger.warning(f"[DataAgent] SQL Eval забраковал запрос: {eval_res.feedback}")
+                    raise ValueError(f"SQL Eval Logical Error: {eval_res.feedback}")
+
                 elapsed = int((time.time() - start) * 1000)
                 logger.info(f"[DataAgent] end: rows={len(data)} sql_len={len(sql)} ({elapsed}ms)")
+                
+                # Сохраняем успешный запрос в кэш только если нет drilldown-фильтров.
+                # Drill-down генерирует SQL с WHERE фильтрами (напр. region='Гродно'),
+                # который нельзя кэшировать — он не подходит для обычных запросов с тем же текстом.
+                if not inp.drilldown_filters:
+                    semantic_cache.set_sql(inp.question, sql)
+                
                 return SqlResult(
+                    step_by_step_planning=sql_obj.step_by_step_reasoning,
                     sql=sql,
                     data=data,
                     row_count=len(data),
@@ -231,9 +310,9 @@ class DataAgent(BaseAgent):
                 )
                 if sql_succeeded:
                     emit_pipeline_stage(
-                        "duckdb",
+                        "clickhouse",
                         "error",
-                        "DuckDB не выполнил запрос",
+                        "ClickHouse не выполнил запрос",
                         agent="data_agent",
                         error=last_error,
                     )

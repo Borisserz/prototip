@@ -23,10 +23,10 @@ def test_data_agent_basic_mock() -> None:
     """Простой мок: возвращает валидный SELECT, выполняется без ошибок."""
     agent = DataAgent()
 
-    fake_sql = "SELECT region, SUM(debt) as d FROM df WHERE tax_type = 'НДС' GROUP BY region ORDER BY d DESC LIMIT 5"
+    fake_sql = "SELECT region, SUM(amount) as d FROM default.enterprise_taxes WHERE tax_type = 'НДС' GROUP BY region ORDER BY d DESC LIMIT 5"
 
     with patch("app.agents.data_agent.call_structured") as mock_call:
-        mock_call.return_value = type("obj", (object,), {"sql": fake_sql})()
+        mock_call.return_value = type("obj", (object,), {"sql": fake_sql, "step_by_step_reasoning": "mock"})()
         result = agent.run("Какие регионы имеют наибольшую задолженность по НДС?")
 
     assert isinstance(result, SqlResult)
@@ -39,10 +39,10 @@ def test_data_agent_rejects_write() -> None:
     """Мок с попыткой INSERT — агент должен отвергнуть или self-correct до ошибки."""
     agent = DataAgent()
 
-    bad_sql = "INSERT INTO df VALUES (1)"
+    bad_sql = "INSERT INTO default.enterprise_taxes VALUES (1)"
 
     with patch("app.agents.data_agent.call_structured") as mock_call:
-        mock_call.return_value = type("obj", (object,), {"sql": bad_sql})()
+        mock_call.return_value = type("obj", (object,), {"sql": bad_sql, "step_by_step_reasoning": "mock"})()
         with pytest.raises(RuntimeError):
             agent.run("Сделай что-то плохое")
 
@@ -56,12 +56,12 @@ def test_data_agent_self_correction_on_error() -> None:
         calls.append(prompt)
         if len(calls) == 1:
             # первая попытка — несуществующая колонка (должна вызвать ошибку DuckDB -> self-correction)
-            return type("obj", (object,), {"sql": "SELECT foo FROM df LIMIT 3"})()
+            return type("obj", (object,), {"sql": "SELECT foo FROM default.enterprise_taxes LIMIT 3", "step_by_step_reasoning": "mock"})()
         # вторая — исправленный
         return type(
             "obj",
             (object,),
-            {"sql": "SELECT region, COUNT(*) as c FROM df GROUP BY region LIMIT 3"},
+            {"sql": "SELECT region, COUNT(*) as c FROM default.enterprise_taxes GROUP BY region LIMIT 3", "step_by_step_reasoning": "mock"},
         )()
 
     with patch("app.agents.data_agent.call_structured", side_effect=fake_call):
@@ -109,9 +109,9 @@ def test_data_agent_live_5_questions() -> None:
     reason="Ollama + qwen2.5-coder:7b-instruct недоступен для живого регресс-теста",
 )
 def test_data_agent_year_filter_regression_non_empty_and_png() -> None:
-    """Регресс-тест: годовой фильтр не должен давать пустой результат (period LIKE '2024-%')."""
+    """Регресс-тест: годовой фильтр не должен давать пустой результат (period LIKE '2023-%')."""
     agent = DataAgent()
-    res = agent.run("Топ-3 региона по задолженности в 2024?")
+    res = agent.run("Топ-3 региона по задолженности в 2023?")
     assert isinstance(res, SqlResult)
     assert res.sql.strip().upper().startswith("SELECT")
     assert res.row_count > 0, f"Ожидался непустой результат, но получено 0 строк. SQL: {res.sql}"

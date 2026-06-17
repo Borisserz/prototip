@@ -20,10 +20,7 @@ _planner: Any = None
 
 
 def _register_planner_on_executor(executor: AgentExecutor) -> None:
-    """Регистрирует singleton PlannerAgent на shared executor (без дублирования)."""
-    if "planner_agent" in executor.registry:
-        return
-    executor.register(get_planner())
+    pass
 
 
 def get_executor(*, include_planner: bool = True, fresh: bool = False) -> AgentExecutor:
@@ -56,12 +53,14 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
     from app.agents.dashboard_agent import DashboardAgent
     from app.agents.data_agent import DataAgent
     from app.agents.presentation_agent import PresentationAgent
+    from app.agents.rag_agent import RagAgent
 
     executor.register(DataAgent())
     executor.register(AnalystAgent())
     executor.register(ChartAgent())
     executor.register(DashboardAgent())
     executor.register(PresentationAgent())
+    executor.register(RagAgent())
 
     if include_planner:
         _register_planner_on_executor(executor)
@@ -70,15 +69,4 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
 
 
 def get_planner(*, fresh: bool = False) -> Any:
-    """Singleton PlannerAgent с общим LRU-кэшем (для Orchestrator и UI)."""
-    global _planner
-
-    from app.agents.planner_agent import PlannerAgent
-
-    if fresh:
-        return PlannerAgent(use_shared_executor=True)
-
-    with _planner_lock:
-        if _planner is None:
-            _planner = PlannerAgent(use_shared_executor=True)
-        return _planner
+    return None

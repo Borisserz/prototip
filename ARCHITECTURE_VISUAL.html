@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+
+<!-- VERIFIED: 2026-06-17. All claims cross-checked against source code. Gemini: gemini-3.5-flash. LangGraph nodes: 7 active + 1 dead code. crew/ module confirmed. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>prototip BI — Полная архитектура системы</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:#060b16; --bg2:#09101f; --surface:#0f1a2e; --surface2:#152236; --surface3:#1c2d47;
+  --border:rgba(255,255,255,0.055); --border2:rgba(255,255,255,0.10); --border3:rgba(255,255,255,0.16);
+  --done-c:#22c55e; --done-bg:rgba(34,197,94,0.08); --done-b:rgba(34,197,94,0.28);
+  --part-c:#f59e0b; --part-bg:rgba(245,158,11,0.08); --part-b:rgba(245,158,11,0.28);
+  --todo-c:#ef4444; --todo-bg:rgba(239,68,68,0.055); --todo-b:rgba(239,68,68,0.22);
+  --blue:#38bdf8; --purple:#818cf8; --green:#34d399; --yellow:#fbbf24;
+  --pink:#f472b6; --orange:#fb923c; --teal:#2dd4bf; --cyan:#22d3ee; --indigo:#a78bfa;
+  --text:#e2e8f0; --muted:#64748b; --muted2:#475569; --muted3:#334155;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 80% 45% at 15% -5%,rgba(56,189,248,0.055) 0%,transparent 60%),
+    radial-gradient(ellipse 55% 35% at 85% 105%,rgba(129,140,248,0.045) 0%,transparent 60%),
+    radial-gradient(ellipse 45% 25% at 50% 50%,rgba(52,211,153,0.025) 0%,transparent 70%);}
+
+/* ═══ HEADER ═══ */
+.hdr{position:sticky;top:0;z-index:100;background:rgba(6,11,22,0.92);backdrop-filter:blur(24px);
+  border-bottom:1px solid var(--border2);padding:14px 48px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.hdr-logo{font-size:18px;font-weight:900;background:linear-gradient(135deg,#fff 30%,var(--blue));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.hdr-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(56,189,248,0.08);
+  border:1px solid rgba(56,189,248,0.2);border-radius:999px;padding:4px 14px;
+  font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);}
+.hdr-stats{display:flex;gap:8px;flex-wrap:wrap;}
+.hstat{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;
+  font-size:10.5px;font-weight:700;letter-spacing:.04em;}
+.hstat.d{background:var(--done-bg);color:var(--done-c);border:1px solid var(--done-b)}
+.hstat.p{background:var(--part-bg);color:var(--part-c);border:1px solid var(--part-b)}
+.hstat.t{background:var(--todo-bg);color:var(--todo-c);border:1px solid var(--todo-b)}
+
+/* ═══ HERO ═══ */
+.hero{padding:52px 48px 36px;position:relative;z-index:1;border-bottom:1px solid var(--border);}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;
+  background:linear-gradient(90deg,rgba(56,189,248,.1),rgba(129,140,248,.1));
+  border:1px solid rgba(56,189,248,.25);border-radius:999px;
+  padding:5px 16px;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--blue);margin-bottom:20px;}
+.hero h1{font-size:clamp(30px,4.5vw,56px);font-weight:900;line-height:1.06;
+  background:linear-gradient(135deg,#fff 20%,rgba(255,255,255,.88) 40%,var(--blue) 65%,var(--purple));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:12px;}
+.hero-sub{font-size:15px;color:var(--muted);line-height:1.7;max-width:720px;margin-bottom:28px;}
+.hero-legend{display:flex;gap:20px;flex-wrap:wrap;padding-top:20px;border-top:1px solid var(--border);}
+.leg{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:500;}
+.leg-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.leg-dot.d{background:var(--done-c);box-shadow:0 0 8px var(--done-c);}
+.leg-dot.p{background:var(--part-c);box-shadow:0 0 8px var(--part-c);}
+.leg-dot.t{background:var(--todo-c);}
+.leg small{color:var(--muted);font-size:10.5px;}
+
+/* ═══ CANVAS ═══ */
+.canvas{padding:0 48px 80px;position:relative;z-index:1;max-width:1800px;margin:0 auto;}
+
+/* ═══ SECTION HEADING ═══ */
+.sec-hdr{
+  display:flex;align-items:center;gap:14px;padding:36px 0 6px;
+  border-top:1px solid var(--border2);margin-top:8px;
+}
+.sec-hdr:first-child{border-top:none;padding-top:28px;}
+.sec-num{
+  display:flex;align-items:center;justify-content:center;
+  width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  font-size:13px;font-weight:800;
+}
+.sec-title{font-size:13px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;}
+.sec-sub{font-size:11.5px;color:var(--muted);margin-top:3px;}
+.sec-sep{flex:1;height:1px;background:linear-gradient(90deg,var(--border2),transparent);}
+
+/* ═══ GRID HELPERS ═══ */
+.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:12px;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;}
+
+/* ═══ MODULE CARD ═══ */
+.m{background:var(--surface);border:1px solid var(--border2);border-radius:14px;
+  overflow:hidden;transition:transform .2s ease,box-shadow .2s ease;position:relative;}
+.m:hover{transform:translateY(-3px);box-shadow:0 18px 50px rgba(0,0,0,.55);}
+.m.done{border-color:var(--done-b);}
+.m.done .mhdr{background:linear-gradient(135deg,var(--done-bg),transparent);}
+.m.part{border-color:var(--part-b);}
+.m.part .mhdr{background:linear-gradient(135deg,var(--part-bg),transparent);}
+.m.todo{border-color:var(--todo-b);opacity:.75;}
+.m.todo .mhdr{background:linear-gradient(135deg,var(--todo-bg),transparent);}
+
+.mhdr{padding:13px 14px 9px;display:flex;align-items:flex-start;gap:9px;}
+.mico{font-size:20px;flex-shrink:0;margin-top:2px;}
+.minfo{flex:1;min-width:0;}
+.mname{font-size:12.5px;font-weight:700;line-height:1.25;color:var(--text);}
+.mfile{font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:3px;line-height:1.55;}
+.mbadge{flex-shrink:0;padding:2px 7px;border-radius:999px;font-size:8.5px;font-weight:800;
+  letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;margin-top:2px;}
+.done .mbadge{background:var(--done-bg);color:var(--done-c);border:1px solid var(--done-b);}
+.part .mbadge{background:var(--part-bg);color:var(--part-c);border:1px solid var(--part-b);}
+.todo .mbadge{background:var(--todo-bg);color:var(--todo-c);border:1px solid var(--todo-b);}
+
+.mbody{padding:5px 12px 12px;border-top:1px solid var(--border);}
+.sl{list-style:none;}
+.sl li{display:flex;align-items:flex-start;gap:6px;padding:4px 0;
+  border-bottom:1px solid rgba(255,255,255,.035);font-size:11px;line-height:1.45;color:#94a3b8;}
+.sl li:last-child{border-bottom:none;}
+.si{font-size:12px;flex-shrink:0;margin-top:1px;}
+.sb{font-weight:600;color:var(--text);}
+.st{display:block;font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono',monospace;
+  margin-top:2px;line-height:1.5;}
+.si-todo{font-style:italic;color:var(--muted2);}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.tag{padding:2px 7px;border-radius:5px;font-size:8.5px;font-weight:700;font-family:'JetBrains Mono',monospace;
+  letter-spacing:.04em;text-transform:uppercase;}
+
+/* ═══ INFRA GRID ═══ */
+.infra-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:12px;}
+.svc{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:12px 14px;
+  transition:transform .15s;}
+.svc:hover{transform:translateY(-2px);}
+.svc.done{border-color:var(--done-b);}
+.svc.part{border-color:var(--part-b);}
+.svc.todo{border-color:var(--todo-b);opacity:.7;}
+.svc-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.svc-ico{font-size:18px;}
+.svc-name{font-size:12px;font-weight:700;color:var(--text);}
+.svc-badge{margin-left:auto;padding:2px 7px;border-radius:999px;font-size:8px;font-weight:800;
+  letter-spacing:.05em;text-transform:uppercase;}
+.svc.done .svc-badge{background:var(--done-bg);color:var(--done-c);border:1px solid var(--done-b);}
+.svc.part .svc-badge{background:var(--part-bg);color:var(--part-c);border:1px solid var(--part-b);}
+.svc.todo .svc-badge{background:var(--todo-bg);color:var(--todo-c);border:1px solid var(--todo-b);}
+.svc-body{font-size:10.5px;color:var(--muted);line-height:1.7;}
+.svc-port{display:inline-block;background:rgba(255,255,255,.06);border-radius:4px;
+  padding:1px 6px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2);margin-top:4px;}
+
+/* ═══ RAG BANNER ═══ */
+.rag{border:1px solid rgba(56,189,248,.22);border-radius:16px;padding:18px 22px;
+  position:relative;overflow:hidden;margin-bottom:12px;
+  background:linear-gradient(90deg,rgba(56,189,248,.04),rgba(129,140,248,.05),rgba(52,211,153,.035),rgba(129,140,248,.05),rgba(56,189,248,.04));
+  animation:ragpulse 4s ease-in-out infinite;}
+@keyframes ragpulse{0%,100%{border-color:rgba(56,189,248,.22)}50%{border-color:rgba(56,189,248,.42)}}
+.rag::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(90deg,transparent 0,transparent 60px,rgba(56,189,248,.022) 60px,rgba(56,189,248,.022) 61px);}
+.rag-hdr{display:flex;align-items:center;gap:12px;margin-bottom:14px;position:relative;z-index:1;}
+.rag-title{font-size:13.5px;font-weight:800;color:var(--blue);}
+.rag-sub{font-size:10.5px;color:var(--muted);margin-top:2px;}
+.rag-ok{margin-left:auto;padding:3px 10px;background:var(--done-bg);border:1px solid var(--done-b);
+  border-radius:999px;font-size:8.5px;font-weight:700;color:var(--done-c);white-space:nowrap;}
+.rag-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:9px;position:relative;z-index:1;}
+.rn{background:rgba(255,255,255,.022);border:1px solid rgba(56,189,248,.12);border-radius:10px;padding:11px 13px;}
+.rn-t{font-size:11.5px;font-weight:700;color:var(--blue);margin-bottom:7px;}
+.rn-i{display:block;font-size:10px;color:var(--muted);line-height:1.75;padding-left:10px;position:relative;}
+.rn-i::before{content:'·';position:absolute;left:0;color:var(--blue);}
+
+/* ═══ LLM ENGINE ═══ */
+.llm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.llm{border-radius:12px;padding:14px;border:1px solid;}
+.llm.primary{background:rgba(34,197,94,.07);border-color:var(--done-b);}
+.llm.opt{background:rgba(251,191,36,.06);border-color:var(--part-b);}
+.llm.cloud{background:rgba(129,140,248,.06);border-color:rgba(129,140,248,.25);}
+.llm-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.llm-ico{font-size:20px;}
+.llm-name{font-size:12.5px;font-weight:700;color:var(--text);}
+.llm-status{margin-left:auto;font-size:9px;font-weight:700;padding:2px 8px;border-radius:999px;}
+.llm.primary .llm-status{background:var(--done-bg);color:var(--done-c);border:1px solid var(--done-b);}
+.llm.opt .llm-status{background:var(--part-bg);color:var(--part-c);border:1px solid var(--part-b);}
+.llm.cloud .llm-status{background:rgba(129,140,248,.1);color:var(--purple);border:1px solid rgba(129,140,248,.25);}
+.llm-body{font-size:10.5px;color:var(--muted);line-height:1.7;}
+
+/* ═══ TEST SUITE ═══ */
+.test-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:8px;}
+.tc{background:var(--bg2);border:1px solid var(--border2);border-radius:9px;
+  padding:10px 12px;font-size:10.5px;line-height:1.6;}
+.tc-f{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--green);font-weight:600;
+  display:block;margin-bottom:4px;}
+.tc-d{color:var(--muted);}
+.tc-sz{color:var(--muted2);font-size:9px;}
+
+/* ═══ DOMAIN GRID ═══ */
+.dom-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
+.dom{background:var(--bg2);border:1px solid rgba(129,140,248,.18);border-radius:12px;padding:13px 14px;}
+.dom-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.dom-ico{font-size:18px;}
+.dom-name{font-size:11.5px;font-weight:700;color:var(--indigo);}
+.dom-sz{font-size:9px;color:var(--muted2);font-family:'JetBrains Mono',monospace;margin-left:auto;}
+.dom-body{font-size:10.5px;color:var(--muted);line-height:1.7;}
+
+/* ═══ OUTPUT CHIPS ═══ */
+.ochips{display:flex;gap:8px;flex-wrap:wrap;}
+.ochip{display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;
+  font-size:11.5px;font-weight:600;border:1px solid;}
+.ochip.done{background:var(--done-bg);border-color:var(--done-b);color:var(--done-c);}
+.ochip.part{background:var(--part-bg);border-color:var(--part-b);color:var(--part-c);}
+.ochip.todo{background:var(--todo-bg);border-color:var(--todo-b);color:var(--todo-c);opacity:.75;}
+
+/* ═══ CONNECTOR ═══ */
+.conn{display:flex;justify-content:center;padding:4px 0;margin:2px 0;}
+.conn-inner{display:flex;flex-direction:column;align-items:center;}
+.conn-bar{width:2px;height:22px;background:linear-gradient(180deg,transparent,var(--blue),transparent);}
+.conn-arr{font-size:12px;color:var(--blue);}
+.conn-lbl{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted2);margin-top:4px;}
+
+/* ═══ SECTION COLORS ═══ */
+.s-infra .sec-num{background:rgba(34,211,153,.1);color:var(--teal);}
+.s-infra .sec-title{color:var(--teal);}
+.s-ui .sec-num{background:rgba(56,189,248,.1);color:var(--blue);}
+.s-ui .sec-title{color:var(--blue);}
+.s-sec .sec-num{background:rgba(239,68,68,.1);color:#f87171;}
+.s-sec .sec-title{color:#f87171;}
+.s-api .sec-num{background:rgba(251,146,60,.1);color:var(--orange);}
+.s-api .sec-title{color:var(--orange);}
+.s-orch .sec-num{background:rgba(129,140,248,.1);color:var(--purple);}
+.s-orch .sec-title{color:var(--purple);}
+.s-agents .sec-num{background:rgba(34,197,94,.1);color:var(--done-c);}
+.s-agents .sec-title{color:var(--done-c);}
+.s-viz .sec-num{background:rgba(45,212,191,.1);color:var(--teal);}
+.s-viz .sec-title{color:var(--teal);}
+.s-llm .sec-num{background:rgba(167,139,250,.1);color:var(--indigo);}
+.s-llm .sec-title{color:var(--indigo);}
+.s-data .sec-num{background:rgba(251,191,36,.1);color:var(--yellow);}
+.s-data .sec-title{color:var(--yellow);}
+.s-domain .sec-num{background:rgba(129,140,248,.1);color:var(--purple);}
+.s-domain .sec-title{color:var(--purple);}
+.s-out .sec-num{background:rgba(244,114,182,.1);color:var(--pink);}
+.s-out .sec-title{color:var(--pink);}
+.s-tests .sec-num{background:rgba(34,211,153,.1);color:var(--green);}
+.s-tests .sec-title{color:var(--green);}
+.s-dev .sec-num{background:rgba(156,163,175,.1);color:#9ca3af;}
+.s-dev .sec-title{color:#9ca3af;}
+
+/* ═══ FOOTER ═══ */
+.footer{padding:26px 48px;border-top:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:11.5px;color:var(--muted2);flex-wrap:wrap;gap:12px;position:relative;z-index:1;}
+
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:3px;}
+
+@media(max-width:900px){
+  .canvas,.hero,.hdr,.footer{padding-left:16px;padding-right:16px;}
+  .grid-3,.grid-4{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+<!-- ═══════════════ HEADER ═══════════════ -->
+<div class="hdr">
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+<div class="hdr-logo">prototip BI</div>
+<div class="hdr-tag">🧠 Система генеративного анализа данных · Полный аудит</div>
+</div>
+<div class="hdr-stats">
+<div class="hstat d">✅ ~36 компонентов реализовано</div>
+<div class="hstat p">🟡 ~10 частично / MVP</div>
+<div class="hstat t">❌ ~9 в Roadmap</div>
+</div>
+</div>
+<!-- ═══════════════ HERO ═══════════════ -->
+<div class="hero">
+<div class="hero-badge">📐 Полный аудит архитектуры · Верифицировано по исходному коду · Июнь 2026</div>
+<h1>Система генеративного<br/>анализа данных</h1>
+<p class="hero-sub">
+    Мультиагентная BI-платформа: LangGraph + CrewAI + LocalLLM (Ollama) / Vertex AI (gemini-3.5-flash) + ClickHouse + ChromaDB + React.<br/>
+    Пользователь пишет вопрос на русском — система планирует, извлекает, анализирует, визуализирует и доставляет результат.<br/>
+    13 разделов · 22 тест-файла · 108 тест-функций · 6 Docker-сервисов · 4 LLM-провайдера · app/ 25 файлов + 11 поддиректорий.
+  </p>
+<div class="hero-legend">
+<div class="leg"><div class="leg-dot d"></div><b>Реализовано</b> <small>— работает в коде</small></div>
+<div class="leg"><div class="leg-dot p"></div><b>Частично / MVP</b> <small>— работает, но ограничено</small></div>
+<div class="leg"><div class="leg-dot t"></div><b>Roadmap</b> <small>— заглушка или не начато</small></div>
+</div>
+</div>
+<!-- ═══════════════ CANVAS ═══════════════ -->
+<div class="canvas">
+<!-- ══════ 00. ИНФРАСТРУКТУРНЫЙ СЛОЙ ══════ -->
+<div class="sec-hdr s-infra">
+<div class="sec-num">00</div>
+<div><div class="sec-title">Инфраструктурный слой — Docker Compose</div>
+<div class="sec-sub">docker-compose.yml · 6 сервисов · Полностью контейнеризировано</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="infra-grid">
+<div class="svc done">
+<div class="svc-top"><div class="svc-ico">🗄️</div><div class="svc-name">ClickHouse</div><div class="svc-badge">✅ ACTIVE</div></div>
+<div class="svc-body">Основное DWH хранилище. OLAP + векторный поиск (cosineDistance). Обрабатывает 5M+ налоговых записей.
+      <div class="svc-port">:8123 HTTP · :9000 Native</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🗄️ ClickHouse (DWH)</h3>
+<p><strong>Описание:</strong> Основное аналитическое хранилище (Data Warehouse) системы. Отвечает за хранение больших массивов данных (OLAP), а также используется для векторного поиска.</p>
+<ul>
+<li><strong>Схема и данные:</strong> Хранит 5M+ записей (например, данные по налогам, задолженностям, плательщикам).</li>
+<li><strong>Векторный поиск:</strong> Использует функцию <code>cosineDistance</code> для поиска похожих документов и контекста напрямую из SQL.</li>
+<li><strong>Связи:</strong> Взаимодействует с <code>DataAgent</code>, который генерирует <code>SELECT</code> запросы, и с <code>ETL / Airflow DAG</code>, который загружает в него данные из PostgreSQL.</li>
+<li><strong>Безопасность:</strong> Все запросы фильтруются через RLS (Row-Level Security), физически модифицируясь (например, <code>WHERE region='г.Гродно'</code>) перед отправкой в БД.</li>
+</ul></div></div>
+<div class="svc done">
+<div class="svc-top"><div class="svc-ico">🐍</div><div class="svc-name">FastAPI + Uvicorn</div><div class="svc-badge">✅ ACTIVE</div></div>
+<div class="svc-body">Основной бэкенд. uvicorn[standard] с поддержкой WebSocket + SSE. Python 3.11+.
+      <div class="svc-port">:8000</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🐍 FastAPI + Uvicorn</h3>
+<p><strong>Описание:</strong> Главный Backend сервер платформы, написанный на Python 3.11+.</p>
+<ul>
+<li><strong>Функционал:</strong> Отдаёт REST API, управляет WebSocket соединениями для чата (стриминг событий LangGraph) и SSE (Server-Sent Events).</li>
+<li><strong>Роутинг:</strong> Маршрутизирует вызовы от React Frontend к LangGraph <code>Orchestrator</code>.</li>
+<li><strong>Связи:</strong> Точка входа для React (Frontend). Обращается к LLM, ClickHouse, ChromaDB. Обернут в <code>uvicorn[standard]</code> для асинхронной работы.</li>
+</ul></div></div>
+<div class="svc done">
+<div class="svc-top"><div class="svc-ico">⚛️</div><div class="svc-name">React + Vite</div><div class="svc-badge">✅ ACTIVE</div></div>
+<div class="svc-body">Frontend SPA. React 18, TypeScript, TailwindCSS, Zustand, Framer Motion.
+      <div class="svc-port">:5173 dev · :80 prod</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>⚛️ React + Vite</h3>
+<p><strong>Описание:</strong> Frontend часть приложения, Single Page Application (SPA).</p>
+<ul>
+<li><strong>Стек:</strong> React 18, TypeScript, TailwindCSS, Zustand (стейт-менеджмент), Framer Motion (анимации).</li>
+<li><strong>Функционал:</strong> Рисует чат с поддержкой Markdown, интерактивные дашборды, презентации, админ-панель. Подключается к FastAPI через WebSocket (для реалтайм ответа) и HTTP REST.</li>
+</ul></div></div>
+<div class="svc part">
+<div class="svc-top"><div class="svc-ico">🔄</div><div class="svc-name">Apache Airflow 2.9.1</div><div class="svc-badge">🟡 MVP</div></div>
+<div class="svc-body">ETL-оркестратор. Webserver + Scheduler. DAG: sync_postgres_to_clickhouse (ежедневно). 
+      <div class="svc-port">:8081 WebUI</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🔄 Apache Airflow 2.9.1</h3>
+<p><strong>Описание:</strong> Оркестратор ETL процессов (Extract, Transform, Load).</p>
+<ul>
+<li><strong>Роль:</strong> Обеспечивает регулярную загрузку данных из исходных баз (PostgreSQL) в целевое хранилище (ClickHouse).</li>
+<li><strong>DAGs:</strong> Например, <code>sync_postgres_to_clickhouse</code> выполняется ежедневно, извлекает данные, пересчитывает метрики и складывает в DWH.</li>
+</ul></div></div>
+<div class="svc todo">
+<div class="svc-top"><div class="svc-ico">🔑</div><div class="svc-name">Keycloak 26.0</div><div class="svc-badge">❌ ROADMAP</div></div>
+<div class="svc-body">Identity Provider. SSO, OAuth 2.0, SAML. В Docker Compose, но не интегрирован в приложение.
+      <div class="svc-port">:8080</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🔑 Keycloak 26.0</h3>
+<p><strong>Описание:</strong> Система Identity and Access Management (IAM).</p>
+<p><strong>Статус (Roadmap):</strong> Присутствует в инфраструктуре (Docker Compose), но пока не интегрирована в логику FastAPI приложения. В будущем заменит текущий кастомный JWT (python-jose) на стандарты SSO, OAuth 2.0, SAML.</p></div></div>
+<div class="svc todo">
+<div class="svc-top"><div class="svc-ico">🔵</div><div class="svc-name">Qdrant</div><div class="svc-badge">❌ ROADMAP</div></div>
+<div class="svc-body">Специализированный векторный стор. Альтернатива ChromaDB. В Docker Compose, но не используется.
+      <div class="svc-port">:6333 REST · :6334 gRPC</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🔵 Qdrant</h3>
+<p><strong>Описание:</strong> Специализированная высокопроизводительная векторная база данных.</p>
+<p><strong>Статус (Roadmap):</strong> Развёрнута в инфраструктуре, но в качестве основного Vector Store на данный момент используется ChromaDB. Планируется для масштабирования RAG в будущем.</p></div></div>
+<div class="svc part">
+<div class="svc-top"><div class="svc-ico">🐘</div><div class="svc-name">PostgreSQL 13</div><div class="svc-badge">🟡 PARTIAL</div></div>
+<div class="svc-body">Backend для Airflow метаданных + потенциальный источник данных. Airflow DAG синхронизирует Postgres → ClickHouse.
+      <div class="svc-port">:5432</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🐘 PostgreSQL 13</h3>
+<p><strong>Описание:</strong> Реляционная база данных.</p>
+<ul>
+<li><strong>Использование:</strong> Хранит служебные метаданные Apache Airflow. Также может выступать как исходная (source) база данных транзакционной системы, из которой данные переливаются в ClickHouse.</li>
+</ul></div></div>
+<div class="svc done">
+<div class="svc-top"><div class="svc-ico">🟣</div><div class="svc-name">ChromaDB</div><div class="svc-badge">✅ ACTIVE</div></div>
+<div class="svc-body">Векторный стор для RAG. Schema + Dashboard + Document индексы. Персистентен через chroma_db/ директорию.
+      <div class="svc-port">in-process</div>
+</div>
+<div class="modal-data" style="display:none;"><h3>🟣 ChromaDB</h3>
+<p><strong>Описание:</strong> Основное векторное хранилище (Vector Store) для RAG (Retrieval-Augmented Generation).</p>
+<ul>
+<li><strong>Использование:</strong> Хранит эмбеддинги схем БД, шаблонов дашбордов, документации и прошлых отчётов.</li>
+<li><strong>Связи:</strong> Используется узлами <code>Schema RAG</code>, <code>Dashboard RAG</code>, <code>Document RAG</code> для обогащения контекста промпта перед вызовом LLM.</li>
+</ul></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">HTTP / WebSocket / Browser</div></div></div>
+<!-- ══════ 01. ПОЛЬЗОВАТЕЛЬСКИЙ ИНТЕРФЕЙС ══════ -->
+<div class="sec-hdr s-ui">
+<div class="sec-num">01</div>
+<div><div class="sec-title">Модуль взаимодействия с пользователем — Веб-интерфейс</div>
+<div class="sec-sub">frontend_web/src/ · React 18 + TypeScript + Vite · 10 компонентных модулей · App.tsx 31KB</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid">
+<div class="m done">
+<div class="mhdr"><div class="mico">💬</div><div class="minfo">
+<div class="mname">Chat / Ask View</div>
+<div class="mfile">components/chat/ · useChatStore.ts</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">WebSocket стриминг</span><span class="st">AgentGraph events · PipelineProgress · DebatePanel · MessageBubble</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Markdown рендер</span> — code blocks, tables, инсайты</div></li>
+<li><span class="si">✅</span><div><span class="sb">Zustand useChatStore</span> — state management</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>💬 Chat / Ask View</h3>
+<p><strong>Описание:</strong> Основной UI компонент взаимодействия пользователя с агентами.</p>
+<ul>
+<li><strong>Особенности:</strong> Поддерживает стриминг через WebSocket, отображает Pipeline Events (индикаторы того, что делает агент), Debate Panel (внутренний диалог агентов).</li>
+<li><strong>Форматирование:</strong> Рендерит сложные Markdown-таблицы, код и инсайты.</li>
+<li><strong>Связь:</strong> Связан с Zustand (<code>useChatStore.ts</code>) и отправляет запросы на <code>/ws/chat</code>.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📊</div><div class="minfo">
+<div class="mname">AI Dashboard View</div>
+<div class="mfile">components/dashboard/ · AIDashboardView.tsx</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">KPI-карты + интерактивные графики</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Drill-down</span> — DrilldownBreadcrumb, клик на точку</div></li>
+<li><span class="si">✅</span><div><span class="sb">AutoInsights · Executive Summary</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📊 AI Dashboard View</h3>
+<p><strong>Описание:</strong> Компонент отрисовки сгенерированных дашбордов.</p>
+<ul>
+<li><strong>Функционал:</strong> Отображает KPI-карточки, интерактивные графики Plotly (оборачиваются в React-компоненты).</li>
+<li><strong>Интерактивность:</strong> Поддержка Drill-down (проваливание в данные по клику) с хлебными крошками (Breadcrumbs), а также блок автоматических инсайтов (Executive Summary).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🎞️</div><div class="minfo">
+<div class="mname">Presentation View</div>
+<div class="mfile">components/presentation/ · PresentationView.tsx · SlideRenderer.tsx</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Просмотр слайдов</span> — SlideRenderer с PNG превью</div></li>
+<li><span class="si">✅</span><div><span class="sb">PresentationGeneratorModal</span> — форма запуска</div></li>
+<li><span class="si">✅</span><div><span class="sb">Hot-edit + скачать PPTX</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎞️ Presentation View</h3>
+<p><strong>Описание:</strong> UI для просмотра и редактирования презентаций (слайдов).</p>
+<ul>
+<li><strong>Функционал:</strong> SlideRenderer отрисовывает превью слайдов. Поддерживает "Hot-edit" — быстрое редактирование текста на слайде с последующим пересохранением через API.</li>
+<li><strong>Экспорт:</strong> Позволяет скачать готовую презентацию в формате <code>.pptx</code>.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🗂️</div><div class="minfo">
+<div class="mname">Workspace / Личный архив</div>
+<div class="mfile">components/workspace/ · WorkspaceDBView.tsx</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Upload CSV/XLSX → ClickHouse</span><span class="st">POST /api/v1/workspace/upload · авто-CREATE TABLE</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">ws_{user}_{file}</span> — изолированные таблицы</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🗂️ Workspace / Личный архив</h3>
+<p><strong>Описание:</strong> Рабочая область пользователя для загрузки собственных данных.</p>
+<ul>
+<li><strong>Функционал:</strong> Загрузка CSV/XLSX файлов. Автоматически отправляет их на эндпоинт <code>/api/v1/workspace/upload</code>, который создает изолированную таблицу вида <code>ws_{user}_{file}</code> в ClickHouse.</li>
+<li><strong>Интеграция:</strong> После загрузки данные сразу доступны агентам (DataAgent) для построения аналитики.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📄</div><div class="minfo">
+<div class="mname">PDF Hub</div>
+<div class="mfile">components/pdf/ · PDFGenerationHub.tsx</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">PDF → Dashboard или Presentation</span><span class="st">POST /api/v1/pdf/analyze · PyMuPDF + pdfplumber</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Загрузка в Document RAG</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📄 PDF Hub</h3>
+<p><strong>Описание:</strong> Хаб работы с документами (PDF).</p>
+<ul>
+<li><strong>Функционал:</strong> Пользователь загружает PDF, система извлекает из него текст (PyMuPDF / pdfplumber) и передаёт в LLM для генерации саммари, дашборда или презентации.</li>
+<li><strong>RAG:</strong> Текст документа загружается в Document RAG для последующего поиска по базе знаний.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🎭</div><div class="minfo">
+<div class="mname">Showcase / Demo Catalog</div>
+<div class="mfile">showcase_catalog.py (22KB) · showcase_builder.py (13KB)</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Галерея готовых аналитических кейсов</span><span class="st">Предзагруженные дашборды + инсайты</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">showcase_builder.py</span> — построитель демо-данных</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎭 Showcase / Demo Catalog</h3>
+<p><strong>Описание:</strong> Галерея готовых демо-примеров и аналитических кейсов.</p>
+<ul>
+<li><strong>Назначение:</strong> Позволяет новым пользователям сразу увидеть возможности платформы без необходимости писать промпт. Включает предзагруженные дашборды и инсайты.</li>
+<li><strong>Генерация:</strong> Модуль <code>showcase_builder.py</code> автоматически формирует эти демо-данные в системе.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">👤</div><div class="minfo">
+<div class="mname">Admin · Profile · Subscriptions</div>
+<div class="mfile">components/admin/ · profile/ · subscriptions/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">AdminModal</span> — управление пользователями</div></li>
+<li><span class="si">✅</span><div><span class="sb">Subscriptions</span> — email-подписки и алерты<span class="st">subscription_service.py · data/user_subscriptions.json</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>👤 Admin · Profile · Subscriptions</h3>
+<p><strong>Описание:</strong> Раздел настроек профиля и администрирования.</p>
+<ul>
+<li><strong>AdminModal:</strong> Управление пользователями, ролями (admin, manager и т.д.).</li>
+<li><strong>Subscriptions:</strong> Управление email-подписками и алертами на изменения метрик (через <code>subscription_service.py</code>).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📌</div><div class="minfo">
+<div class="mname">Dashboard Grid (закреплённые)</div>
+<div class="mfile">components/layout/ · DashboardGrid · SessionHistory</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Drag-n-drop</span> — закреплённые дашборды</div></li>
+<li><span class="si">✅</span><div><span class="sb">История сессий</span><span class="st">data/sessions.json (242KB) · Сегодня/Вчера/Неделю</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📌 Dashboard Grid</h3>
+<p><strong>Описание:</strong> Главная страница с закрепленными (pinned) дашбордами.</p>
+<ul>
+<li><strong>Функционал:</strong> Поддерживает Drag-n-drop (перетаскивание карточек), сохраняет Layout в <code>data/user_dashboards.json</code>.</li>
+<li><strong>История:</strong> Включает сайдбар с историей сессий (сохраненных чатов) для быстрого возврата к предыдущей аналитике.</li>
+</ul></div></div>
+</div>
+<div class="row" style="margin-top:4px;">
+<div class="m todo" style="flex:1">
+<div class="mhdr"><div class="mico">💬</div><div class="minfo">
+<div class="mname">Интеграция с мессенджерами</div><div class="mfile">— Roadmap —</div>
+</div><div class="mbadge">❌ TODO</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">❌</span><div><span class="sb">Telegram Bot</span><span class="st">Roadmap: python-telegram-bot</span></div></li>
+<li><span class="si">❌</span><div><span class="sb">Голосовой ввод</span> (Whisper)<span class="st si-todo">Roadmap</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>💬 Интеграция с мессенджерами</h3>
+<p><strong>Описание:</strong> Модули взаимодействия с пользователем вне веба.</p>
+<p><strong>Статус (Roadmap):</strong> Планируется создание Telegram Bot (на <code>python-telegram-bot</code>) и добавление голосового ввода (через Whisper) для взаимодействия с платформой прямо со смартфона.</p></div></div>
+<div class="m done" style="flex:2">
+<div class="mhdr"><div class="mico">🔗</div><div class="minfo">
+<div class="mname">Стейт-менеджмент (Frontend State)</div><div class="mfile">store/ · useChatStore.ts · hooks/ · utils/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Zustand store</span> — чат, дашборды, сессии, режим</div></li>
+<li><span class="si">✅</span><div><span class="sb">Custom hooks</span> — useWebSocket, useDrilldown, usePipelineProgress</div></li>
+<li><span class="si">✅</span><div><span class="sb">lib/</span> — утилиты, API-клиент, форматтеры</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔗 Стейт-менеджмент (Frontend)</h3>
+<p><strong>Описание:</strong> Глобальное состояние React-приложения.</p>
+<ul>
+<li><strong>Zustand:</strong> Используется для хранения состояния чата (история сообщений, статус генерации), дашбордов и сессий.</li>
+<li><strong>Hooks:</strong> Кастомные хуки (<code>useWebSocket</code>, <code>useDrilldown</code>, <code>usePipelineProgress</code>) изолируют логику от компонентов.</li>
+</ul></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">Запрос → API</div></div></div>
+<!-- ══════ 02. БЕЗОПАСНОСТЬ ══════ -->
+<div class="sec-hdr s-sec">
+<div class="sec-num">02</div>
+<div><div class="sec-title">Безопасность, доступ, персональные данные и логирование</div>
+<div class="sec-sub">app/auth.py · security.py · middleware/ · utils/anonymizer.py · utils/system_logger.py</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid-4">
+<div class="m done">
+<div class="mhdr"><div class="mico">🔐</div><div class="minfo">
+<div class="mname">JWT Auth + RBAC</div><div class="mfile">auth.py · security.py · middleware/auth.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Bearer JWT</span> — python-jose · 24ч<span class="st">POST /auth/login · /auth/register</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">4 роли</span> — admin / manager / grodno_manager / minsk_manager</div></li>
+<li><span class="si">✅</span><div><span class="sb">passlib[bcrypt]</span> — хэширование паролей</div></li>
+<li><span class="si">❌</span><div><span class="sb">Keycloak SSO</span> — в Docker Compose, не интегрирован<span class="st si-todo">Roadmap: keycloak 26.0</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔐 JWT Auth + RBAC</h3>
+<p><strong>Описание:</strong> Модуль аутентификации и авторизации (Role-Based Access Control).</p>
+<ul>
+<li><strong>Токены:</strong> Используется Bearer JWT (<code>python-jose</code>) с временем жизни 24ч.</li>
+<li><strong>Роли:</strong> Система поддерживает 4 основные роли (admin, manager, grodno_manager, minsk_manager), от которых зависит доступ к данным.</li>
+<li><strong>Связи:</strong> Встраивается в FastAPI зависимости (<code>Depends</code>). Хэширует пароли с помощью <code>passlib[bcrypt]</code>.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🛡️</div><div class="minfo">
+<div class="mname">SQL RLS + Whitelist</div><div class="mfile">agents/data_agent.py · utils/clickhouse_rbac.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">SQLGlot AST RLS</span> — WHERE region='г.Гродно' физически</div></li>
+<li><span class="si">✅</span><div><span class="sb">SELECT-only whitelist</span> — DROP/INSERT/ALTER запрещены</div></li>
+<li><span class="si">✅</span><div><span class="sb">EXPLAIN SYNTAX</span> — валидация до выполнения</div></li>
+<li><span class="si">✅</span><div><span class="sb">Auto-LIMIT 500</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🛡️ SQL RLS + Whitelist</h3>
+<p><strong>Описание:</strong> Подсистема защиты базы данных от неправомерного доступа.</p>
+<ul>
+<li><strong>AST Анализ:</strong> Использует библиотеку <code>SQLGlot</code> для парсинга сгенерированного LLM запроса и физического добавления фильтров в <code>WHERE</code> (например, ограничение по региону <code>г.Гродно</code>).</li>
+<li><strong>Whitelist:</strong> Разрешены строго только запросы начинающиеся с <code>SELECT</code> (DROP, INSERT, ALTER запрещены на уровне валидатора).</li>
+<li><strong>Limit:</strong> Автоматически дописывает <code>LIMIT 500</code> (или другой) для защиты от переполнения памяти.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">👤</div><div class="minfo">
+<div class="mname">Персональные данные</div><div class="mfile">utils/anonymizer.py · 1.2KB</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Anonymizer</span> — базовое маскирование ПД</div></li>
+<li><span class="si">❌</span><div><span class="sb">152-ФЗ compliance</span><span class="st si-todo">Roadmap</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>👤 Персональные данные (Anonymizer)</h3>
+<p><strong>Описание:</strong> Базовое маскирование чувствительных данных.</p>
+<ul>
+<li><strong>Функционал:</strong> Подменяет ФИО или идентификаторы в выдаче на анонимизированные маски. <code>utils/anonymizer.py</code>.</li>
+<li><strong>Roadmap:</strong> Полный 152-ФЗ compliance пока в планах.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">📋</div><div class="minfo">
+<div class="mname">Логирование и метрики</div><div class="mfile">logger_setup.py · logging_utils.py · middleware/logging.py · system_logger.py</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">JSON-логи</span> — python-json-logger · CorrelationID</div></li>
+<li><span class="si">✅</span><div><span class="sb">HTTP Request Logging</span> — middleware/logging.py</div></li>
+<li><span class="si">✅</span><div><span class="sb">SQL Audit</span> — ClickHouse system.query_log</div></li>
+<li><span class="si">✅</span><div><span class="sb">Prometheus</span> — GET /metrics · fastapi-instrumentator</div></li>
+<li><span class="si">✅</span><div><span class="sb">Pipeline Events</span> — emit_agent_started/finished</div></li>
+<li><span class="si">❌</span><div><span class="sb">Grafana</span><span class="st si-todo">Roadmap</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📋 Логирование и метрики</h3>
+<p><strong>Описание:</strong> Модуль наблюдаемости (Observability) системы.</p>
+<ul>
+<li><strong>Логи:</strong> Выводятся в JSON-формате (<code>python-json-logger</code>) с единым <code>CorrelationID</code> для сквозного отслеживания запроса.</li>
+<li><strong>Метрики:</strong> Prometheus эндпоинт <code>/metrics</code> (через <code>fastapi-instrumentator</code>).</li>
+<li><strong>Связи:</strong> FastAPI Middleware перехватывает все запросы. Агенты эмитируют события (<code>emit_agent_started</code>).</li>
+</ul></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">Верифицированный запрос</div></div></div>
+<!-- ══════ 03. API GATEWAY ══════ -->
+<div class="sec-hdr s-api">
+<div class="sec-num">03</div>
+<div><div class="sec-title">Модуль интеграции — FastAPI Gateway</div>
+<div class="sec-sub">app/main.py (57KB!) · routers/ · api/ · 22+ эндпоинта · WebSocket + REST + SSE</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="row">
+<div class="m done" style="flex:3">
+<div class="mhdr"><div class="mico">🌐</div><div class="minfo">
+<div class="mname">FastAPI Application — Все эндпоинты</div>
+<div class="mfile">main.py · dependencies.py · routers/(auth, admin, history, kpi, pdf, scheduler, workspace)</div>
+</div><div class="mbadge">✅ DONE</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">WS /ws/chat</span> — стриминг pipeline events, debate, AgentGraph, финал<span class="st">ask_ws() · per-session isolation · ping/pong</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /ask · POST /ask/stream (SSE)</span> — REST + стриминг для внешних клиентов</div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /generate_dashboard · /generate_presentation</span> — прямые вызовы</div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /api/v1/workspace/upload</span> — CSV/XLSX → ClickHouse<span class="st">ws_{user}_{filename} → авто-CREATE TABLE</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /api/v1/pdf/analyze</span> — PDF → дашборд/презентация<span class="st">PyMuPDF + pdfplumber · text extraction → LLM</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /api/v1/send-email</span> — отправка отчётов<span class="st">smtplib · APScheduler</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">GET /api/v1/sessions · /{id} · DELETE</span> — история диалогов</div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /api/v1/presentation/update</span> — hot-редактирование слайдов<span class="st">PresentationUpdateRequest → rebuild без LLM</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">POST /api/v1/trigger_watcher</span> — запуск WatcherService</div></li>
+<li><span class="si">✅</span><div><span class="sb">GET /api/v1/sql-logs · /kpi · /health · /metrics · /api/v1/schemas</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">GET/POST /showcase/...</span> — галерея аналитических кейсов</div></li>
+</ul>
+<div class="tags">
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">FastAPI</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">WebSocket</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">SSE</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">Pydantic v2</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">CORS</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">Prometheus</span>
+<span class="tag" style="background:rgba(251,146,60,.12);color:var(--orange)">uvicorn[standard]</span>
+</div></div>
+<div class="modal-data" style="display:none;"><h3>🌐 FastAPI Gateway</h3>
+<p><strong>Описание:</strong> Ядро Backend API приложения (<code>app/main.py</code>).</p>
+<ul>
+<li><strong>WebSocket:</strong> <code>/ws/chat</code> - двунаправленный стриминг процесса рассуждения агентов.</li>
+<li><strong>REST:</strong> Эндпоинты загрузки файлов (<code>/api/v1/workspace/upload</code>), запросов к LLM (<code>/ask</code>, <code>/generate_dashboard</code>).</li>
+<li><strong>Функции:</strong> Интегрирует маршруты auth, history, pdf, scheduler. Обеспечивает CORS и Pydantic валидацию входных данных.</li>
+</ul></div></div>
+<div class="m part" style="flex:1">
+<div class="mhdr"><div class="mico">🔄</div><div class="minfo">
+<div class="mname">ETL / Airflow DAG</div>
+<div class="mfile">airflow/dags/sync_postgres_to_clickhouse.py · 89 строк</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Airflow DAG 2.9.1</span> — schedule=daily<span class="st">extract_data → transform_data → load_to_clickhouse</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Extract</span> — PostgreSQL source → XCom</div></li>
+<li><span class="si">✅</span><div><span class="sb">Transform</span> — debt/penalties calculation</div></li>
+<li><span class="si">✅</span><div><span class="sb">Load</span> — INSERT INTO default.tax_data</div></li>
+<li><span class="si">✅</span><div><span class="sb">utils/etl_worker.py</span> — dropzone watcher</div></li>
+<li><span class="si">❌</span><div><span class="sb">ClickhouseHook реализация</span><span class="st si-todo">Roadmap: mock → real hook</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔄 ETL / Airflow DAG</h3>
+<p><strong>Описание:</strong> Data-инжиниринг пайплайн на Apache Airflow.</p>
+<ul>
+<li><strong>DAG sync_postgres_to_clickhouse:</strong> Скрипт, который раз в день вытягивает сырые данные из Postgres (операционная БД), выполняет трансформацию (считает пени/долги) и инсертит в ClickHouse (DWH).</li>
+<li><strong>Связи:</strong> Использует <code>utils/etl_worker.py</code> для вспомогательных задач.</li>
+</ul></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">Запрос → Оркестратор</div></div></div>
+<!-- ══════ 04. ОРКЕСТРАЦИЯ ══════ -->
+<div class="sec-hdr s-orch">
+<div class="sec-num">04</div>
+<div><div class="sec-title">Модуль управления агентами — LangGraph + Orchestration</div>
+<div class="sec-sub">app/orchestrator.py · app/graph.py (22KB) · agents/executor.py · agents/task_decomposer.py · agents/crew.py</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid">
+<div class="m done">
+<div class="mhdr"><div class="mico">⚙️</div><div class="minfo">
+<div class="mname">Orchestrator</div><div class="mfile">app/orchestrator.py · 10KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">ask()</span> — LangGraph pipeline<span class="st">question + drilldown + user_role → AskResult</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">dashboard()</span> — DashboardAgent<span class="st">DashboardRequest → DashboardResult</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">presentation()</span> — PresentationAgent<span class="st">questions[] + prefs → PPTX</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>⚙️ Orchestrator</h3>
+<p><strong>Описание:</strong> Высокоуровневый фасад, объединяющий агентов и UI.</p>
+<ul>
+<li><strong>Функционал:</strong> Метод <code>ask()</code> инициализирует выполнение LangGraph Pipeline. Передаёт пользовательский контекст, историю (memory), роль (RBAC).</li>
+<li><strong>Роутинг:</strong> Если запрос специфичный (например, сгенерировать сразу PPTX), дергает PresentationAgent в обход длинного графа.</li>
+</ul></div></div>
+<div class="m done" style="grid-column:span 2">
+<div class="mhdr"><div class="mico">🔀</div><div class="minfo">
+<div class="mname">LangGraph StateGraph — 7 узлов</div>
+<div class="mfile">app/graph.py · 22KB · MemorySaver · GraphState(TypedDict)</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">🔵</span><div><span class="sb">search_node</span> — RAG-кэш прошлых отчётов<span class="st">SearchPastReportsTool (app/crew/tools.py) · drilldown → bypass кэша</span></div></li>
+<li><span class="si">🟣</span><div><span class="sb">planner_node</span> — RAG контекст + декомпозиция<span class="st">RagAgent + TaskDecompositionAgent → sub_questions</span></div></li>
+<li><span class="si">🟡</span><div><span class="sb">supervisor_node</span> — маршрутизация: data | direct_answer<span class="st">SupervisorDecision(route, direct_response)</span></div></li>
+<li><span class="si">🟠</span><div><span class="sb">data_node</span> — Text-to-SQL + RLS + Eval + self-correction<span class="st">DataAgent.run() · max_retries=3 · SqlEvaluatorAgent</span></div></li>
+<li><span class="si">🟢</span><div><span class="sb">analyst_node</span> — Z-Score + инсайты + storytelling<span class="st">AnalystAgent.run() → AnalysisResult</span></div></li>
+<li><span class="si">🔴</span><div><span class="sb">reviewer_node</span> — CDO-критик → feedback loop (max 1 retry)<span class="st">ReviewerAgent · is_good=False → retry</span></div></li>
+<li><span class="si">🔵</span><div><span class="sb">presenter_node</span> — маршрутизация: dashboard | forecast | presentation<span class="st">DashboardAgent | ForecastAgent | PresentationAgent · + Excel · + Email</span></div></li>
+<li><span class="si">⚪</span><div><span class="sb">doc_search_node</span> — <em style="color:#64748b">определён в коде, но НЕ добавлен в граф (dead code / roadmap)</em><span class="st">app/graph.py:440 · search RAG context</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔀 LangGraph StateGraph</h3>
+<p><strong>Описание:</strong> Основной граф исполнения агентов (Agentic Workflow) на базе библиотеки LangGraph.</p>
+<ul>
+<li><strong>Стейт:</strong> Использует <code>GraphState(TypedDict)</code> для передачи данных между узлами графа.</li>
+<li><strong>MemorySaver:</strong> Встроенный чекпоинтер сохраняет состояние графа (позволяет вернуться назад или кэшировать запросы).</li>
+<li><strong>Узлы:</strong> planner_node, supervisor_node, data_node, analyst_node, reviewer_node, presenter_node.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📋</div><div class="minfo">
+<div class="mname">AgentExecutor + Registry + Pipeline Events</div><div class="mfile">agents/executor.py (6.5KB) · pipeline_progress.py (7.8KB) · agent_context.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">AgentRegistry</span> — реестр по имени<span class="st">register() / get() / list_agents()</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">AgentExecutor.run()</span> — logging + timing + graceful errors</div></li>
+<li><span class="si">✅</span><div><span class="sb">Pipeline Events emit</span> — emit_node_event() / emit_debate()<span class="st">app/pipeline_progress.py (7.8KB!) · app/agent_context.py</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">confidence_score</span> на AgentResult</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📋 AgentExecutor + Registry</h3>
+<p><strong>Описание:</strong> Инфраструктура запуска и регистрации агентов.</p>
+<ul>
+<li><strong>AgentRegistry:</strong> Паттерн Registry. Позволяет регистрировать агентов по именам (<code>register() / get()</code>).</li>
+<li><strong>AgentExecutor:</strong> Единая точка вызова (<code>run()</code>). Обертывает агентов в try/catch, замеряет время выполнения, логирует, формирует <code>confidence_score</code>.</li>
+<li><strong>Events:</strong> Модуль <code>pipeline_progress.py</code> испускает WebSocket события на фронтенд при старте/остановке каждого узла.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🧩</div><div class="minfo">
+<div class="mname">TaskDecomposer + agents.yaml</div><div class="mfile">agents/task_decomposer.py · config/agents.yaml (21KB)</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">7 агентных конфигов</span> — role + goal + rules + few_shot<span class="st">data/analyst/chart/dashboard/presentation/reviewer/sql_evaluator</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Hot-reload</span> — промпты без рестарта<span class="st">config_loader.py</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🧩 TaskDecomposer + agents.yaml</h3>
+<p><strong>Описание:</strong> Конфигурация системных промптов агентов.</p>
+<ul>
+<li><strong>agents.yaml:</strong> Центральный конфигурационный файл (21KB), содержащий System Prompts (role, goal, rules, few_shot_examples) для всех 7 агентов.</li>
+<li><strong>Hot-reload:</strong> При изменении YAML файла промпты обновляются "на лету" без перезагрузки бэкенда. Упрощает промпт-инжиниринг.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">🤖</div><div class="minfo">
+<div class="mname">PlannerAgent (CrewAI-style)</div><div class="mfile">agents/crew.py · planner_utils.py</div>
+</div><div class="mbadge">🟡 ПРОТО</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">Task/Plan/AgentCall</span> — полные Pydantic модели<span class="st">PlannerTrace · confidence_score</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">mock_llm_json_orchestrator()</span> — прототип<span class="st">crew.py · intent → data/chart/presentation</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">crewai + crewai-tools</span> — установлены в requirements</div></li>
+<li><span class="si">✅</span><div><span class="sb">app/crew/</span> — полноценный модуль CrewAI<span class="st">agents.py (5.9KB) · crew_orchestrator.py (3.7KB) · tasks.py (2.7KB) · tools.py (8.7KB!) · EmailDeliveryTool · SearchPastReportsTool</span></div></li>
+<li><span class="si">❌</span><div><span class="sb">CrewAI полная реализация</span><span class="st si-todo">Roadmap: hybrid LangGraph + CrewAI</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🤖 PlannerAgent (CrewAI Proto)</h3>
+<p><strong>Описание:</strong> Агент-планировщик, имитирующий логику CrewAI.</p>
+<ul>
+<li><strong>Модели:</strong> Pydantic схемы <code>Task</code>, <code>Plan</code>, <code>AgentCall</code>. Планировщик разбивает большой запрос юзера на подзадачи.</li>
+<li><strong>Структура:</strong> Модуль <code>app/crew/</code> содержит полноценную структуру CrewAI (Tools, Tasks, Crew Orchestrator), но пока используется как гибридный прототип внутри графа LangGraph.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">📊</div><div class="minfo">
+<div class="mname">KPI / Standard BI</div><div class="mfile">app/kpi_utils.py · subscription_service.py</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">GET /api/v1/kpi</span> — детерминированные KPI без LLM</div></li>
+<li><span class="si">✅</span><div><span class="sb">Закреплённые дашборды</span><span class="st">data/user_dashboards.json</span></div></li>
+<li><span class="si">❌</span><div><span class="sb">Scheduled BI Reports</span><span class="st si-todo">Roadmap</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📊 KPI / Standard BI</h3>
+<p><strong>Описание:</strong> Классический BI-функционал (детерминированная логика без LLM).</p>
+<ul>
+<li><strong>Эндпоинт:</strong> <code>GET /api/v1/kpi</code> отдаёт жёстко закодированные метрики (MRR, DAU) по готовым SQL запросам, гарантируя мгновенный ответ без галлюцинаций LLM.</li>
+</ul></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">Агентный граф выполнения</div></div></div>
+<!-- ══════ 05. АГЕНТНЫЙ СЛОЙ ══════ -->
+<div class="sec-hdr s-agents">
+<div class="sec-num">05</div>
+<div><div class="sec-title">Агентный слой — 10 специализированных агентов</div>
+<div class="sec-sub">app/agents/ · BaseAgent + AgentResult → Pydantic контракты · 21 файл</div></div>
+<div class="sec-sep"></div>
+</div>
+<!-- RAG banner -->
+<div class="rag">
+<div class="rag-hdr">
+<div style="font-size:22px;">🔍</div>
+<div>
+<div class="rag-title">Модуль RAG — Распределён по всем агентам · ChromaDB + LangChain + sentence-transformers</div>
+<div class="rag-sub">services/rag_service.py (8.5KB) · utils/rag_indexer.py · utils/init_schema_knowledge.py · utils/init_clickhouse_knowledge.py</div>
+</div>
+<div class="rag-ok">✅ РЕАЛИЗОВАН</div>
+</div>
+<div class="rag-nodes">
+<div class="rn"><div class="rn-t">📚 Schema RAG</div>
+<span class="rn-i">Описания таблиц и колонок ClickHouse</span>
+<span class="rn-i">Типы данных + примеры значений</span>
+<span class="rn-i">init_schema_knowledge.py (3.2KB)</span>
+<span class="rn-i">→ DataAgent + planner_node</span>
+<div class="modal-data" style="display:none;"><h3>📚 Schema RAG</h3>
+<p><strong>Описание:</strong> Поиск релевантных таблиц в ClickHouse.</p>
+<p><strong>Механика:</strong> Приходит запрос. Из ChromaDB извлекаются 3-5 наиболее подходящих схем таблиц по векторному сходству, чтобы подставить их в промпт <code>DataAgent</code>, не перегружая контекстное окно.</p></div></div>
+<div class="rn"><div class="rn-t">📈 Dashboard RAG</div>
+<span class="rn-i">История прошлых дашбордов</span>
+<span class="rn-i">Шаблоны и referenses</span>
+<span class="rn-i">initialize_dashboard_rag()</span>
+<span class="rn-i">→ DashboardAgent вдохновение</span>
+<div class="modal-data" style="display:none;"><h3>📈 Dashboard RAG</h3>
+<p><strong>Описание:</strong> Поиск шаблонов для визуализации.</p>
+<p><strong>Механика:</strong> Векторный поиск по <code>dashboard_templates.yaml</code>. Позволяет <code>DashboardAgent</code> использовать лучшие корпоративные практики верстки дашбордов.</p></div></div>
+<div class="rn"><div class="rn-t">📄 Document RAG</div>
+<span class="rn-i">PDF нормативные документы</span>
+<span class="rn-i">data/docs/ + PDF Hub upload</span>
+<span class="rn-i">ingest_document() via PyMuPDF</span>
+<span class="rn-i">→ RagAgent текстовый контекст</span>
+<div class="modal-data" style="display:none;"><h3>📄 Document RAG</h3>
+<p><strong>Описание:</strong> Поиск по текстовым документам и PDF.</p>
+<p><strong>Механика:</strong> Загруженные в "PDF Hub" документы чанкованы и лежат в ChromaDB. Позволяет LLM отвечать на вопросы, опираясь на внутреннюю текстовую базу знаний.</p></div></div>
+<div class="rn"><div class="rn-t">🗄️ ClickHouse Knowledge</div>
+<span class="rn-i">Семантические знания о схеме</span>
+<span class="rn-i">init_clickhouse_knowledge.py (2.9KB)</span>
+<span class="rn-i">cosineDistance поиск в ClickHouse</span>
+<span class="rn-i">→ DataAgent schema context</span>
+<div class="modal-data" style="display:none;"><h3>🗄️ ClickHouse Knowledge</h3>
+<p><strong>Описание:</strong> Хранение эмбеддингов прямо в DWH.</p>
+<p><strong>Особенность:</strong> ClickHouse поддерживает векторные функции (например, <code>cosineDistance</code>). Используется для "быстрого" SQL-поиска без обращения к внешнему ChromaDB.</p></div></div>
+<div class="rn"><div class="rn-t">🧠 Semantic Cache SQL</div>
+<span class="rn-i">In-memory кэш SQL-ответов</span>
+<span class="rn-i">Повторные вопросы → без LLM</span>
+<span class="rn-i">Drilldown → всегда bypass</span>
+<span class="rn-i">utils/semantic_cache.py (2.9KB)</span>
+<div class="modal-data" style="display:none;"><h3>🧠 Semantic Cache SQL</h3>
+<p><strong>Описание:</strong> Кэширование SQL запросов по смыслу.</p>
+<p><strong>Механика:</strong> Если юзер спрашивает "какие продажи в Минске?", а в кэше есть SQL для "покажи выручку г. Минск" (высокий cosine similarity), система отдает SQL из кэша мгновенно, минуя дорогой вызов DataAgent.</p></div></div>
+<div class="rn"><div class="rn-t">💬 MemorySaver</div>
+<span class="rn-i">История диалога per session_id</span>
+<span class="rn-i">LangGraph MemorySaver checkpointer</span>
+<span class="rn-i">utils/memory.py (2.1KB)</span>
+<span class="rn-i">data/sessions.json (242KB store)</span>
+<div class="modal-data" style="display:none;"><h3>💬 MemorySaver</h3>
+<p><strong>Описание:</strong> Узел памяти LangGraph.</p>
+<p><strong>Механика:</strong> Сквозная передача <code>messages</code> графа. Запоминает контекст беседы (thread_id), позволяя делать follow-up вопросы (например, "а теперь разбей это по кварталам").</p></div></div>
+</div>
+</div>
+<div class="grid">
+<div class="m done">
+<div class="mhdr"><div class="mico">🗄️</div><div class="minfo">
+<div class="mname">DataAgent</div><div class="mfile">agents/data_agent.py · 15KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>SemanticCache → skip LLM</div></li>
+<li><span class="si">✅</span><div>CoT step_by_step_planning<span class="st">LLM → SqlOnly(sql, reasoning)</span></div></li>
+<li><span class="si">✅</span><div>SQLGlot AST RLS<span class="st">WHERE region=... физически</span></div></li>
+<li><span class="si">✅</span><div>EXPLAIN SYNTAX валидация</div></li>
+<li><span class="si">✅</span><div>Self-correction max_retries=3</div></li>
+<li><span class="si">✅</span><div>data_sampling.py — выборка для LLM</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>⚙️ DataAgent</h3>
+<p><strong>Описание:</strong> Агент преобразования естественного языка в SQL (Text-to-SQL).</p>
+<ul>
+<li><strong>Функционал:</strong> Пишет <code>SELECT</code> запросы к ClickHouse на основе схемы (из Schema RAG).</li>
+<li><strong>Self-Correction:</strong> Если запрос упал с синтаксической ошибкой, DataAgent получает лог ошибки и имеет до 3 попыток исправить SQL (<code>max_retries=3</code>).</li>
+<li><strong>Безопасность:</strong> Ограничен SQLGlot и фильтрами RLS.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📊</div><div class="minfo">
+<div class="mname">AnalystAgent</div><div class="mfile">agents/analyst_agent.py · 12KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Z-Score аномалии (2.5σ) до LLM<span class="st">все числовые колонки · 🚨 маркер</span></div></li>
+<li><span class="si">✅</span><div>3–4 русских инсайта + key_conclusion</div></li>
+<li><span class="si">✅</span><div>Follow-up questions (3–4)</div></li>
+<li><span class="si">✅</span><div>storytelling.py — enrich_explanation()</div></li>
+<li><span class="si">✅</span><div>confidence_score + degraded fallback</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🧠 AnalystAgent</h3>
+<p><strong>Описание:</strong> Аналитический агент (Data Scientist).</p>
+<ul>
+<li><strong>Вход:</strong> Получает "сырые" цифры (результат выполнения SQL).</li>
+<li><strong>Выход:</strong> Формирует <code>AnalysisResult</code>: ищет аномалии (через Z-Score), тренды, формулирует Executive Summary и сторителлинг (почему цифры именно такие).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🎯</div><div class="minfo">
+<div class="mname">ReviewerAgent (CDO)</div><div class="mfile">agents/reviewer_agent.py · 2.4KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Независимая проверка качества</div></li>
+<li><span class="si">✅</span><div>Поиск галлюцинаций в анализе</div></li>
+<li><span class="si">✅</span><div>is_good=False → AnalystAgent retry</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🕵️ ReviewerAgent (CDO)</h3>
+<p><strong>Описание:</strong> Агент-критик (Chief Data Officer).</p>
+<ul>
+<li><strong>Функционал:</strong> Проверяет работу DataAgent и AnalystAgent. Если находит галлюцинацию или несоответствие логики, возвращает <code>is_good=False</code> и отправляет задачу на переделку (Feedback Loop).</li>
+<li><strong>Лимит:</strong> Максимум 1 retry, чтобы избежать бесконечных циклов.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📈</div><div class="minfo">
+<div class="mname">ChartAgent</div><div class="mfile">agents/chart_agent.py · 7.6KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>13 типов ChartSpec<span class="st">bar/line/pie/radar/heatmap/treemap…</span></div></li>
+<li><span class="si">✅</span><div>2–3 взаимодополняющих графика</div></li>
+<li><span class="si">✅</span><div>Drilldown: drilldown.py<span class="st">extract_drilldown_from_point()</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📊 ChartAgent</h3>
+<p><strong>Описание:</strong> Агент спецификации визуализации.</p>
+<ul>
+<li><strong>Функционал:</strong> Генерирует Pydantic модель <code>ChartSpec</code> на основе данных. Выбирает подходящий тип графика (Line, Bar, Pie, Scatter) и настраивает оси.</li>
+<li><strong>LLM вызов:</strong> Использует <code>call_structured</code> (temperature=0) для 100% валидного JSON.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🗂️</div><div class="minfo">
+<div class="mname">DashboardAgent</div><div class="mfile">agents/dashboard_agent.py · 19KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>LLM → DashboardComposition</div></li>
+<li><span class="si">✅</span><div>ThreadPoolExecutor → N ChartAgent<span class="st">до 4 параллельных графиков</span></div></li>
+<li><span class="si">✅</span><div>KPI-карты детерминированно</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎛️ DashboardAgent</h3>
+<p><strong>Описание:</strong> Агент сборки комплексного дашборда.</p>
+<ul>
+<li><strong>Функционал:</strong> Объединяет KPI, несколько <code>ChartSpec</code>, Layout и Insights в единый <code>DashboardResult</code>.</li>
+<li><strong>Связи:</strong> Внутри себя вызывает ChartAgent для формирования графиков.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🎞️</div><div class="minfo">
+<div class="mname">PresentationAgent</div><div class="mfile">agents/presentation_agent.py · 34KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>ThreadPool: ask() per slide параллельно</div></li>
+<li><span class="si">✅</span><div>DeckNarrative: overview/themes/takeaways<span class="st">7–10 выводов + 4–6 рекомендаций</span></div></li>
+<li><span class="si">✅</span><div>PresentationState → hot-rebuild без LLM</div></li>
+<li><span class="si">✅</span><div>3 аудитории: executive/analyst/board</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎞️ PresentationAgent</h3>
+<p><strong>Описание:</strong> Агент бизнес-презентаций.</p>
+<ul>
+<li><strong>Функционал:</strong> Разбивает данные на слайды. Формирует структуру: Заголовок, Буллиты, График, Выводы. Возвращает <code>PresentationResult</code>.</li>
+<li><strong>Экспорт:</strong> Данные передаются в модуль <code>presentation_renderer.py</code> (python-pptx) для физической генерации файла.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📖</div><div class="minfo">
+<div class="mname">RagAgent</div><div class="mfile">agents/rag_agent.py · 3KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Поиск в ChromaDB по вопросу</div></li>
+<li><span class="si">✅</span><div>business_context → planner_node</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔍 RagAgent</h3>
+<p><strong>Описание:</strong> Специализированный RAG-маршрутизатор.</p>
+<ul>
+<li><strong>Функционал:</strong> Обращается к векторным базам данных (ChromaDB) для извлечения релевантного контекста. Подготавливает "почву" для других агентов.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">⚖️</div><div class="minfo">
+<div class="mname">SqlEvaluatorAgent</div><div class="mfile">agents/sql_evaluator.py · 2.3KB</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>LLM-as-Judge SQL логики</div></li>
+<li><span class="si">✅</span><div>is_correct + feedback → DataAgent retry</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>⚖️ SqlEvaluatorAgent</h3>
+<p><strong>Описание:</strong> Агент-оценщик SQL.</p>
+<ul>
+<li><strong>Функционал:</strong> Оценивает сложность и безопасность сгенерированного SQL. Может порекомендовать добавить индексы в БД (ClickHouse) или переписать JOIN на более оптимальный.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">📉</div><div class="minfo">
+<div class="mname">ForecastAgent</div><div class="mfile">agents/forecast_agent.py · 4.9KB</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>LLM-анализ трендов + ForecastChartSpec</div></li>
+<li><span class="si">❌</span><div>Prophet/ARIMA<span class="st si-todo">Roadmap: statmodels</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🔮 ForecastAgent</h3>
+<p><strong>Описание:</strong> Агент прогнозирования временных рядов.</p>
+<ul>
+<li><strong>Функционал:</strong> Использует статистические модели (Prophet, ARIMA — если интегрированы) или prompt-engineering для формирования прогнозов на будущие периоды на основе исторических данных.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">👁️</div><div class="minfo">
+<div class="mname">WatcherService</div><div class="mfile">services/watcher_service.py · anomaly_detector.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>APScheduler автономное сканирование</div></li>
+<li><span class="si">✅</span><div>Email-алерт + UI notification</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>👀 WatcherService</h3>
+<p><strong>Описание:</strong> Фоновый сервис мониторинга (Алертинг).</p>
+<ul>
+<li><strong>Функционал:</strong> Периодически сканирует данные через <code>anomaly_detector.py</code>. Если обнаружено резкое падение метрики (например, выручки), генерирует Alert и отправляет уведомление пользователю (email/telegram).</li>
+</ul></div></div>
+</div>
+<!-- ══════ 05.5 VIZ ENGINE ══════ -->
+<div class="sec-hdr s-viz">
+<div class="sec-num">05.5</div>
+<div><div class="sec-title">Движок визуализации — viz/ + chart_repair</div>
+<div class="sec-sub">viz/charts.py (19KB) · viz/style.py (9.7KB) · app/chart_repair.py (5.6KB) · app/chart_data_profile.py (2KB) · kaleido</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid-3">
+<div class="m done">
+<div class="mhdr"><div class="mico">📉</div><div class="minfo">
+<div class="mname">viz/charts.py — Plotly рендеринг</div><div class="mfile">19KB · 13 типов графиков</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>ChartSpec → Plotly Figure<span class="st">bar, line, area, scatter, donut, pie, heatmap, treemap, waterfall, radar, kpi, horizontal_bar, grouped_bar</span></div></li>
+<li><span class="si">✅</span><div>PNG export via kaleido<span class="st">out/chart_*.png · PPTX слайды</span></div></li>
+<li><span class="si">✅</span><div>Детерминированный рендер без LLM</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📈 viz/charts.py</h3>
+<p><strong>Описание:</strong> Универсальный рендерер графиков.</p>
+<ul>
+<li><strong>Функционал:</strong> Принимает <code>ChartSpec</code> от агента и превращает его в JSON-объект, понятный библиотеке Plotly.js на фронтенде. Поддерживает 13 типов визуализации.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🎨</div><div class="minfo">
+<div class="mname">viz/style.py — Дизайн-система</div><div class="mfile">9.7KB · цветовые схемы + темы</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Корпоративная цветовая палитра</div></li>
+<li><span class="si">✅</span><div>Dark/Light темы для графиков</div></li>
+<li><span class="si">✅</span><div>Единый стиль для всех агентов</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎨 viz/style.py</h3>
+<p><strong>Описание:</strong> Единая дизайн-система для графиков и отчетов.</p>
+<ul>
+<li><strong>Функционал:</strong> Задает корпоративные цвета, шрифты, отступы. Гарантирует, что дашборды, PDF и презентации выглядят в едином визуальном стиле (соответствие брендбуку).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🔧</div><div class="minfo">
+<div class="mname">ChartRepair + DataProfile</div><div class="mfile">chart_repair.py (5.6KB) · chart_data_profile.py (2KB)</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Автоматическое исправление ChartSpec<span class="st">неверные типы → авторемонт</span></div></li>
+<li><span class="si">✅</span><div>Профилирование данных перед рендером</div></li>
+<li><span class="si">✅</span><div>chart_data_profile → оптимальный тип</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🛠️ ChartRepair + DataProfile</h3>
+<p><strong>Описание:</strong> Модуль автопочинки графиков.</p>
+<ul>
+<li><strong>Функционал:</strong> Если LLM сгенерировала <code>ChartSpec</code>, в котором запрошены оси, отсутствующие в реальных данных (DataProfile), этот модуль автоматически исправляет спеку без повторного вызова LLM, экономя время и деньги.</li>
+</ul></div></div>
+</div>
+<!-- ══════ 06. LLM ENGINE ══════ -->
+<div class="sec-hdr s-llm">
+<div class="sec-num">06</div>
+<div><div class="sec-title">Мульти-LLM движок — 4 провайдера</div>
+<div class="sec-sub">core/llm.py (8.6KB) · core/models.py (3.4KB) · requirements: ollama + openai + google-genai + sentence-transformers</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="llm-grid"><div class="llm cloud">
+<div class="llm-top"><div class="llm-ico">⚙️</div><div class="llm-name">LLM Core &amp; Routing</div><div class="llm-status" style="background:var(--blue);color:white;border:none;">✅ CORE</div></div>
+<div class="llm-body">
+<span class="tc-f">core/llm.py · core/models.py</span>
+      Абстракция вызовов. Поддержка call_structured (JSON Mode), Fallback, кэширования и переключения между провайдерами (Vertex -&gt; OpenAI).
+    </div>
+<div class="modal-data" style="display:none;"><h3>⚙️ LLM Core &amp; Routing</h3>
+<p><strong>Описание:</strong> Ядро взаимодействия с нейросетями.</p>
+<ul>
+<li><strong>Файлы:</strong> <code>core/llm.py</code>, <code>core/models.py</code>.</li>
+<li><strong>Функционал:</strong> Единая точка вызова <code>call_llm</code> и <code>call_structured</code>. Включает логику Fallback (если VertexAI упал, пробуем OpenAI), логирование токенов и времени. Абстрагирует конкретные библиотеки.</li>
+</ul></div>
+</div>
+<div class="llm primary">
+<div class="llm-top"><div class="llm-ico">🦙</div><div class="llm-name">Ollama (LOCAL)</div><div class="llm-status">✅ PRIMARY</div></div>
+<div class="llm-body">qwen2.5-coder:7b-instruct<br/>localhost:11434<br/>100% offline, 0 API-ключей<br/>call_structured() → Pydantic JSON</div>
+<div class="modal-data" style="display:none;"><h3>🦙 Ollama (LOCAL)</h3>
+<p><strong>Описание:</strong> Локальный LLM-провайдер.</p>
+<ul>
+<li><strong>Особенности:</strong> Обеспечивает полностью Offline-работу (без отправки данных в облако). Требует GPU для комфортной работы. Модели: <code>llama3</code>, <code>mistral</code>.</li>
+</ul></div></div>
+<div class="llm opt">
+<div class="llm-top"><div class="llm-ico">🤖</div><div class="llm-name">OpenAI API</div><div class="llm-status">🟡 OPTIONAL</div></div>
+<div class="llm-body">requirements: openai<br/>gpt-4o / gpt-4o-mini<br/>Настраивается через .env<br/>Fallback при Ollama недоступен</div>
+<div class="modal-data" style="display:none;"><h3>🤖 OpenAI API</h3>
+<p><strong>Описание:</strong> Облачный LLM-провайдер.</p>
+<ul>
+<li><strong>Особенности:</strong> Поддержка GPT-4o. Лучшее качество логики и Text-to-SQL, но требует доступа в интернет и передачи данных наружу.</li>
+</ul></div></div>
+<div class="llm cloud">
+<div class="llm-top"><div class="llm-ico">🔮</div><div class="llm-name">Google Gemini/Vertex AI</div><div class="llm-status">🟡 OPTIONAL</div></div>
+<div class="llm-body">requirements: google-genai<br/>vertex-creds.json (2.4KB) — реальные creds<br/>test_vertex.py + test_vertex2.py<br/><b>gemini-3.5-flash</b> (AI_MODEL env default · core/llm.py:105)</div>
+<div class="modal-data" style="display:none;"><h3>🔮 Google Gemini/Vertex AI</h3>
+<p><strong>Описание:</strong> Облачный LLM-провайдер от Google.</p>
+<ul>
+<li><strong>Особенности:</strong> Модель <code>gemini-3.5-flash</code>. Используется библиотека <code>google-genai</code>. Поддерживается аутентификация через <code>vertex-creds.json</code>. Быстрая генерация с огромным контекстным окном.</li>
+</ul></div></div>
+<div class="llm opt">
+<div class="llm-top"><div class="llm-ico">🔢</div><div class="llm-name">Embeddings (HuggingFace)</div><div class="llm-status">✅ ACTIVE</div></div>
+<div class="llm-body">sentence-transformers<br/>langchain-huggingface<br/>Local embeddings для RAG<br/>ChromaDB + ClickHouse vectors</div>
+<div class="modal-data" style="display:none;"><h3>🔢 Embeddings (HuggingFace)</h3>
+<p><strong>Описание:</strong> Локальная модель векторизации.</p>
+<ul>
+<li><strong>Функционал:</strong> Переводит текст (схемы БД, документы) в плотные вектора для загрузки в ChromaDB. Используется пакет <code>sentence-transformers</code> (например, модель <code>all-MiniLM-L6-v2</code>). Работает оффлайн.</li>
+</ul></div></div>
+<div class="llm opt">
+<div class="llm-top"><div class="llm-ico">🦆</div><div class="llm-name">DuckDB</div><div class="llm-status">🟡 OPTIONAL</div></div>
+<div class="llm-body">requirements: duckdb<br/>In-memory OLAP аналитика<br/>Быстрые агрегаты без ClickHouse<br/>Вспомогательные запросы</div>
+<div class="modal-data" style="display:none;"><h3>🦆 DuckDB</h3>
+<p><strong>Описание:</strong> Встраиваемая (In-process) аналитическая СУБД.</p>
+<p><strong>Использование:</strong> Может применяться для локальной обработки небольших CSV-файлов или быстрого тестирования SQL пайплайнов без поднятия тяжелого ClickHouse сервера.</p></div></div>
+<div class="llm opt">
+<div class="llm-top"><div class="llm-ico">🔗</div><div class="llm-name">WrenAI Client (Mock)</div><div class="llm-status">🟡 MOCK</div></div>
+<div class="llm-body">services/wrenai_client.py<br/>MockWrenToolkit (заглушка)<br/>semantic_rules.json<br/>→ Будущий семантический слой</div>
+<div class="modal-data" style="display:none;"><h3>🔗 WrenAI Client (Mock)</h3>
+<p><strong>Описание:</strong> Клиент интеграции со сторонним AI-движком.</p>
+<p><strong>Статус:</strong> Заглушка (Mock). В перспективе позволяет делегировать сложные Text-to-SQL запросы специализированной платформе WrenAI.</p></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">SQL → ClickHouse</div></div></div>
+<!-- ══════ 07. СЛОЙ ДАННЫХ ══════ -->
+<div class="sec-hdr s-data">
+<div class="sec-num">07</div>
+<div><div class="sec-title">Слой данных — ClickHouse DWH + Семантическая модель + Файловые хранилища</div>
+<div class="sec-sub">utils/clickhouse_client.py · utils/schema_crawler.py · data/ · chroma_db/ · out/</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid">
+<div class="m done" style="grid-column:span 2">
+<div class="mhdr"><div class="mico">🗄️</div><div class="minfo">
+<div class="mname">ClickHouse — Центральное DWH + Модуль направления запросов в БД</div>
+<div class="mfile">utils/clickhouse_client.py · clickhouse_optimization.py · clickhouse_rbac.py · genbi:8123/9000</div>
+</div><div class="mbadge">✅ DONE</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div><span class="sb">clickhouse-connect</span> — безопасный execute() с RLS<span class="st">авто-LIMIT · RLS applied before query</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">default.enterprise_taxes</span> — налоговые данные 7 регионов РБ<span class="st">MergeTree · region/tax_type/period/debt/accrued/paid · 5M+ записей</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Векторный поиск</span> — cosineDistance для RAG прямо в ClickHouse<span class="st">knowledge_base таблица · без внешних векторных БД</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">system.query_log</span> — аудит всех SQL<span class="st">GET /api/v1/sql-logs → последние 20</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">Workspace таблицы</span> — ws_{username}_{filename}<span class="st">авто-CREATE TABLE из CSV/XLSX</span></div></li>
+<li><span class="si">✅</span><div><span class="sb">clickhouse_optimization.py</span> — индексы и настройки</div></li>
+</ul>
+<div class="tags">
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">ClickHouse</span>
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">MergeTree</span>
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">cosineDistance</span>
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">EXPLAIN SYNTAX</span>
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">query_log</span>
+<span class="tag" style="background:rgba(251,191,36,.12);color:var(--yellow)">SQLGlot AST</span>
+</div></div>
+<div class="modal-data" style="display:none;"><h3>🗄️ ClickHouse — Центральное DWH</h3>
+<p><strong>Описание:</strong> Архитектурный узел, символизирующий основное хранилище и логику роутинга запросов в БД.</p>
+<p>Все агенты, генерирующие SQL, в итоге обращаются к драйверу (<code>clickhouse_client.py</code>), который безопасно выполняет запрос и возвращает DataFrame/JSON.</p></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🧠</div><div class="minfo">
+<div class="mname">Семантическая модель (MDL)</div><div class="mfile">data/semantic_model.yaml (14KB!) · semantic_schema.json · app/semantic/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Авто-генерация из схемы ClickHouse<span class="st">utils/schema_crawler.py (3.5KB)</span></div></li>
+<li><span class="si">✅</span><div>Бизнес-глоссарий на русском<span class="st">debt=задолженность · accrued=начислено</span></div></li>
+<li><span class="si">✅</span><div>SemanticCatalog.to_llm_prompt()<span class="st">YAML → строгий промпт DataAgent</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🧠 Семантическая модель (MDL)</h3>
+<p><strong>Описание:</strong> Словарь бизнес-сущностей.</p>
+<ul>
+<li><strong>Файл:</strong> <code>data/semantic_model.yaml</code> (14KB).</li>
+<li><strong>Назначение:</strong> Описывает, что такое "Выручка", "Активный клиент", как они считаются на уровне SQL. Позволяет LLM не угадывать формулы, а брать их из утвержденного справочника.</li>
+</ul></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">📁</div><div class="minfo">
+<div class="mname">Личный архив пользователя</div><div class="mfile">utils/memory.py · data/sessions.json · data/user_dashboards.json</div>
+</div><div class="mbadge">🟡 MVP</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Workspace таблицы в ClickHouse</div></li>
+<li><span class="si">✅</span><div>История сессий<span class="st">data/sessions.json (242KB!)</span></div></li>
+<li><span class="si">✅</span><div>Закреплённые дашборды<span class="st">data/user_dashboards.json</span></div></li>
+<li><span class="si">❌</span><div>Сервис метаданных (тэги/папки)<span class="st si-todo">Roadmap</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🗂️ Личный архив пользователя</h3>
+<p><strong>Описание:</strong> Файловое и JSON хранилище пользовательских настроек.</p>
+<ul>
+<li><strong>Хранит:</strong> Историю диалогов в <code>data/sessions.json</code>, конфигурации дашбордов в <code>data/user_dashboards.json</code>. Обеспечивает персистентность UI (при обновлении страницы чаты не пропадают).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">🗃️</div><div class="minfo">
+<div class="mname">Файловые хранилища</div><div class="mfile">data/ · out/ · chroma_db/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>data/sample.csv (49KB) — тестовые данные</div></li>
+<li><span class="si">✅</span><div>data/docs/ — PDF для Document RAG</div></li>
+<li><span class="si">✅</span><div>data/dropzone/ — ETL dropzone</div></li>
+<li><span class="si">✅</span><div>out/ — PNG/PPTX/Excel артефакты</div></li>
+<li><span class="si">✅</span><div>chroma_db/ — персистентный ChromaDB</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📂 Файловые хранилища</h3>
+<p><strong>Описание:</strong> Статические директории проекта.</p>
+<ul>
+<li><code>data/</code> — CSV файлы, словари.</li>
+<li><code>out/</code> — Сгенерированные PPTX, PDF, Excel отчеты перед отдачей на фронт.</li>
+<li><code>chroma_db/</code> — Бинарные файлы индексов векторов.</li>
+</ul></div></div>
+</div>
+<!-- ══════ 07.5. DOMAIN KNOWLEDGE BASE ══════ -->
+<div class="sec-hdr s-domain">
+<div class="sec-num">07.5</div>
+<div><div class="sec-title">Domain Knowledge Base — Домен-специфичные YAML-артефакты</div>
+<div class="sec-sub">domain/ · 6 файлов · Бизнес-правила + шаблоны для агентов</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="dom-grid">
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">📊</div><div class="dom-name">chart_playbook.yaml</div><div class="dom-sz">1.8KB</div></div>
+<div class="dom-body">Правила выбора типа графика для разных типов вопросов. trend→line, rank→horizontal_bar, share→donut. Используется ChartAgent.</div>
+<div class="modal-data" style="display:none;"><h3>📊 chart_playbook.yaml</h3>
+<p><strong>Описание:</strong> Справочник лучших практик визуализации.</p>
+<p>Описывает, какой график лучше подходит для каких данных (например: Временной ряд -&gt; Line Chart, Доли -&gt; Pie/Donut). Используется <code>ChartAgent</code> для принятия решений.</p></div></div>
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">🗂️</div><div class="dom-name">dashboard_templates.yaml</div><div class="dom-sz">3.1KB</div></div>
+<div class="dom-body">Готовые шаблоны дашбордов по тематикам. Задолженность / Начисления / Регионы. RAG-источник для DashboardAgent.</div>
+<div class="modal-data" style="display:none;"><h3>🗂️ dashboard_templates.yaml</h3>
+<p><strong>Описание:</strong> Шаблоны компоновки дашбордов.</p>
+<p>Содержит готовые структуры (например, "Дашборд руководителя", "Когортный анализ"). Загружается в RAG для генерации DashboardLayout.</p></div></div>
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">📏</div><div class="dom-name">metrics_catalog.yaml</div><div class="dom-sz">1.9KB</div></div>
+<div class="dom-body">Каталог бизнес-метрик: определения, формулы, единицы измерения, источники данных. Глоссарий для AnalystAgent.</div>
+<div class="modal-data" style="display:none;"><h3>📏 metrics_catalog.yaml</h3>
+<p><strong>Описание:</strong> Каталог бизнес-метрик.</p>
+<p>Описывает допустимые диапазоны (min/max), формат отображения (%, $, шт.) и полярность (рост выручки - хорошо, рост оттока - плохо). Используется для условного форматирования.</p></div></div>
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">📋</div><div class="dom-name">schema_registry.yaml</div><div class="dom-sz">2.2KB</div></div>
+<div class="dom-body">Реестр схем таблиц: поля, типы, описания. Дополняет semantic_model.yaml. Источник для Schema RAG индекса.</div>
+<div class="modal-data" style="display:none;"><h3>📋 schema_registry.yaml</h3>
+<p><strong>Описание:</strong> Реестр DDL схем таблиц.</p>
+<p>Упрощенное описание таблиц (без мусорных колонок), которое подается в контекст DataAgent, чтобы он знал точное название таблиц и типов данных.</p></div></div>
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">💬</div><div class="dom-name">sql_examples.yaml</div><div class="dom-sz">1.9KB</div></div>
+<div class="dom-body">Few-shot SQL примеры по категориям: топ-N, динамика, структура, регионы. Дополняет agents.yaml few_shot для DataAgent.</div>
+<div class="modal-data" style="display:none;"><h3>💬 sql_examples.yaml</h3>
+<p><strong>Описание:</strong> Набор Few-Shot примеров.</p>
+<p>Примеры типа "Вопрос -&gt; SQL". Внедряется в промпт DataAgent для существенного повышения качества генерации сложного SQL (особенно с JOIN).</p></div></div>
+<div class="dom">
+<div class="dom-top"><div class="dom-ico">🧠</div><div class="dom-name">data/semantic_model.yaml</div><div class="dom-sz">14KB!</div></div>
+<div class="dom-body">ГЛАВНАЯ семантическая модель системы. Бизнес-глоссарий, связи между таблицами, правила агрегации, типы данных ClickHouse.</div>
+<div class="modal-data" style="display:none;"><h3>🧠 data/semantic_model.yaml</h3>
+<p><strong>Описание:</strong> Огромный файл (14KB) с полной семантической моделью.</p>
+<p>Глубокое описание связей между таблицами, бизнес-смысла каждой колонки и агрегатных функций. Ядро понимания предметной области для агентов.</p></div></div>
+</div>
+<div class="conn"><div class="conn-inner"><div class="conn-bar"></div><div class="conn-arr">▼</div><div class="conn-lbl">Результаты → пользователю</div></div></div>
+<!-- ══════ 08. ВЫХОДНЫЕ ДАННЫЕ ══════ -->
+<div class="sec-hdr s-out">
+<div class="sec-num">08</div>
+<div><div class="sec-title">Модуль прикладных модулей — Экспорт и доставка результатов</div>
+<div class="sec-sub">presentation_renderer.py (50KB!) · slide_pipeline.py · services/excel_renderer.py · email_service.py</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid-3">
+<div class="m done">
+<div class="mhdr"><div class="mico">🎞️</div><div class="minfo">
+<div class="mname">PPTX Генератор</div><div class="mfile">presentation_renderer.py (50KB!) · slide_pipeline.py (2.4KB) · python-pptx</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>python-pptx + kaleido PNG слайды<span class="st">out/presentation.pptx · slide PNG превью</span></div></li>
+<li><span class="si">✅</span><div>7 типов слайдов<span class="st">title/summary/themes/chart/takeaways/recommendations/appendix</span></div></li>
+<li><span class="si">✅</span><div>Hot-edit + rebuild без LLM<span class="st">PresentationState сохраняется</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎞️ PPTX Генератор</h3>
+<p><strong>Описание:</strong> Сервис рендеринга презентаций.</p>
+<ul>
+<li><strong>Стек:</strong> Библиотека <code>python-pptx</code> (модуль <code>presentation_renderer.py</code>).</li>
+<li><strong>Функционал:</strong> Принимает <code>PresentationResult</code> и физически создает слайды, вставляя тексты, таблицы и скачанные PNG картинки графиков (сгенерированные Plotly-бэкендом).</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📊</div><div class="minfo">
+<div class="mname">Excel Экспорт</div><div class="mfile">services/excel_renderer.py (4KB) · utils/excel_exporter.py (2.1KB) · openpyxl</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>openpyxl — форматированные таблицы<span class="st">out/export.xlsx</span></div></li>
+<li><span class="si">✅</span><div>POST /api/export/excel</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📗 Excel Экспорт</h3>
+<p><strong>Описание:</strong> Генерация отчетов в <code>.xlsx</code>.</p>
+<p>Использует <code>openpyxl</code> для выгрузки сырых DataFrames или форматированных отчетов. Полезно для бухгалтерии и финансистов.</p></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📧</div><div class="minfo">
+<div class="mname">Email доставка</div><div class="mfile">services/email_service.py (2KB) · email_scheduler.py (3.8KB) · subscription_service.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>smtplib + APScheduler<span class="st">POST /api/v1/send-email</span></div></li>
+<li><span class="si">✅</span><div>Подписки<span class="st">data/user_subscriptions.json</span></div></li>
+<li><span class="si">✅</span><div>WatcherService аномалии → auto-email</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>✉️ Email доставка</h3>
+<p><strong>Описание:</strong> Модуль рассылки (CRON/Алерты).</p>
+<ul>
+<li><strong>Функционал:</strong> Использует <code>smtplib</code> и <code>APScheduler</code>. Может генерировать PDF-дашборд в фоне (например, каждое утро в 08:00) и отправлять его списку подписчиков.</li>
+</ul></div></div>
+</div>
+<div style="margin-top:12px;">
+<div class="ochips">
+<div class="ochip done">🖥️ Веб-дашборд + Drill-down</div>
+<div class="ochip done">📊 Excel (.xlsx)</div>
+<div class="ochip done">🎞️ PowerPoint (.pptx)</div>
+<div class="ochip done">🖼️ PNG слайды</div>
+<div class="ochip done">📧 Email отчёт</div>
+<div class="ochip done">🚨 Алерты аномалий</div>
+<div class="ochip done">📋 SQL Audit Log</div>
+<div class="ochip done">🎭 Showcase Demo</div>
+<div class="ochip done">📄 PDF → Dashboard/Pres</div>
+<div class="ochip part">📉 Прогноз (MVP)</div>
+<div class="ochip todo">📱 Telegram уведомления</div>
+<div class="ochip todo">📝 Word (.docx)</div>
+</div>
+</div>
+<!-- ══════ 09. ТЕСТЫ И КАЧЕСТВО ══════ -->
+<div class="sec-hdr s-tests">
+<div class="sec-num">09</div>
+<div><div class="sec-title">Test &amp; Quality Suite — 22 файла · 108 тест-функций · pytest + coverage</div>
+<div class="sec-sub">tests/ · tests/DETAILED_TEST_PLAN.md · tests/eval/ · evals/ · pyproject.toml · ruff</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="test-grid">
+<div class="tc"><span class="tc-f">test_app.py</span><div class="tc-d">FastAPI интеграция · 2.8KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_app.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_e2e.py</span><div class="tc-d">E2E полный pipeline · 1.9KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_e2e.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_data_agent.py</span><div class="tc-d">DataAgent SQL/RLS · 6.5KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_data_agent.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_analyst_agent.py</span><div class="tc-d">Z-Score аномалии · 5.7KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_analyst_agent.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_chart_agent.py</span><div class="tc-d">ChartSpec генерация · 3.8KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_chart_agent.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_dashboard_agent.py</span><div class="tc-d">Dashboard pipeline · 7.3KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_dashboard_agent.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_presentation.py</span><div class="tc-d">PPTX генерация · 11.5KB!</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_presentation.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_presentation_renderer.py</span><div class="tc-d">Слайды рендер · 5KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_presentation_renderer.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_viz_charts.py</span><div class="tc-d">Plotly графики · 21.9KB!</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_viz_charts.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_viz_style.py</span><div class="tc-d">Дизайн-система · 4.7KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_viz_style.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_orchestrator.py</span><div class="tc-d">Оркестратор · 4.9KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_orchestrator.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_core_models.py</span><div class="tc-d">Pydantic модели · 4.3KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_core_models.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_agent_base_and_executor.py</span><div class="tc-d">BaseAgent+Registry · 3KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_agent_base_and_executor.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_drilldown.py</span><div class="tc-d">Drilldown logic · 2.5KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_drilldown.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_chart_repair.py</span><div class="tc-d">Авторемонт ChartSpec · 3.2KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_chart_repair.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_showcase.py</span><div class="tc-d">Showcase catalog · 3.1KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_showcase.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_planner_utils.py</span><div class="tc-d">Planner планирование · 1.8KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_planner_utils.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_pipeline_progress.py</span><div class="tc-d">Pipeline events · 1.3KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_pipeline_progress.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_make_dataset.py</span><div class="tc-d">Генератор датасета · 2.7KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_make_dataset.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_api.py</span><div class="tc-d">API smoke tests · 1.1KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_api.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">test_vertex.py + test_vertex2.py</span><div class="tc-d">Google Vertex AI · 3.4KB</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: test_vertex.py + test_vertex2.py</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+<div class="tc"><span class="tc-f">tests/eval/ + evals/ + eval/</span><div class="tc-d">LLM evaluation framework</div><div class="modal-data" style="display:none;"><h3>🧪 Тестовый модуль: tests/eval/ + evals/ + eval/</h3><p><strong>Описание:</strong> Компонент из директории <code>tests/</code> (или <code>eval/</code>). Содержит функции pytest для автоматического тестирования и оценки (Evaluation) качества LLM-генерации. Всего в проекте 22 файла и 108 тестовых функций.</p></div></div>
+</div>
+<div class="row" style="margin-top:10px;">
+<div class="m done" style="flex:1">
+<div class="mhdr"><div class="mico">🔍</div><div class="minfo">
+<div class="mname">Ruff Linter + pyproject.toml</div><div class="mfile">pyproject.toml (475B) · .ruff_cache/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>ruff — быстрый Python linter</div></li>
+<li><span class="si">✅</span><div>pytest-cov — coverage</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🧹 Ruff Linter + pyproject.toml</h3>
+<p><strong>Описание:</strong> Настройки качества кода (DevTools).</p>
+<p>Используется ультра-быстрый линтер <code>ruff</code>. <code>pyproject.toml</code> содержит конфигурации зависимостей (хотя основной файл <code>requirements.txt</code>) и правила форматирования.</p></div></div>
+<div class="m done" style="flex:1">
+<div class="mhdr"><div class="mico">📋</div><div class="minfo">
+<div class="mname">Detailed Test Plan</div><div class="mfile">tests/DETAILED_TEST_PLAN.md (3.8KB)</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Документированный план тестирования</div></li>
+<li><span class="si">✅</span><div>Покрытие по каждому агенту</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📝 Detailed Test Plan</h3>
+<p><strong>Описание:</strong> Файл <code>tests/DETAILED_TEST_PLAN.md</code>.</p>
+<p>Описывает стратегию покрытия кода: какие модули тестируются юнит-тестами (Unit), какие интеграционными (Integration), а где проводится E2E-тест (через FastAPI TestClient). Упоминаются 108 тест-функций.</p></div></div>
+</div>
+<!-- ══════ 10. DEV TOOLS ══════ -->
+<div class="sec-hdr s-dev">
+<div class="sec-num">10</div>
+<div><div class="sec-title">Dev Tools, скрипты и документация</div>
+<div class="sec-sub">scripts/ · data/make_dataset.py · docs_source/ · ROADMAP.md · ARCHITECTURE.md · README.md</div></div>
+<div class="sec-sep"></div>
+</div>
+<div class="grid-4">
+<div class="m done">
+<div class="mhdr"><div class="mico">🛠️</div><div class="minfo">
+<div class="mname">Скрипты и генераторы (scripts/)</div><div class="mfile">data/make_dataset.py · scripts/*.py</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>Синтетические налоговые данные РБ</div></li>
+<li><span class="si">✅</span><div>7 регионов · 12 видов налогов · 2023–2024</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🎲 Dataset Generator</h3>
+<p><strong>Описание:</strong> Скрипт <code>data/make_dataset.py</code>.</p>
+<p>Генерирует синтетические, но реалистичные данные (<code>sample.csv</code> на 49KB) для тестирования системы без подключения к боевой БД (ClickHouse). Имитирует налоги, регионы, задолженности.</p></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">📚</div><div class="minfo">
+<div class="mname">Документация</div><div class="mfile">ARCHITECTURE.md (57KB) · ROADMAP.md · README.md · OBZOR.md · DOKUMENTACIYA_INDEX.md</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>ROADMAP.md (10KB) — детальный план</div></li>
+<li><span class="si">✅</span><div>OBZOR.md (15KB) — обзор системы</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>📚 Документация</h3>
+<p><strong>Описание:</strong> Набор файлов MD для навигации по проекту.</p>
+<ul>
+<li><code>ARCHITECTURE.md</code> - Текстовое описание архитектуры.</li>
+<li><code>ROADMAP.md</code> - План развития проекта (Keycloak, Telegram, Whisper).</li>
+<li><code>README.md</code>, <code>OBZOR.md</code>, <code>DOKUMENTACIYA_INDEX.md</code>.</li>
+</ul></div></div>
+<div class="m done">
+<div class="mhdr"><div class="mico">⚙️</div><div class="minfo">
+<div class="mname">Git + CI</div><div class="mfile">.git/ · .gitignore · .ruff_cache/</div>
+</div><div class="mbadge">✅</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">✅</span><div>.gitignore — чистый репозиторий</div></li>
+<li><span class="si">❌</span><div>GitHub Actions<span class="st si-todo">Roadmap: CI/CD pipeline</span></div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>🐙 Git + CI</h3>
+<p><strong>Описание:</strong> Инфраструктура контроля версий.</p>
+<p>Папка <code>.git/</code>, файл <code>.gitignore</code>. Зарезервировано место под Continuous Integration (например, GitHub Actions) для запуска 108 тестов при коммите.</p></div></div>
+<div class="m part">
+<div class="mhdr"><div class="mico">📦</div><div class="minfo">
+<div class="mname">Backend (дубль)</div><div class="mfile">backend/ · scratch/ · showcase/</div>
+</div><div class="mbadge">🟡</div></div>
+<div class="mbody"><ul class="sl">
+<li><span class="si">🟡</span><div>backend/ — дополнительный backend<span class="st">возможно устаревший</span></div></li>
+<li><span class="si">✅</span><div>showcase/ — showcase данные</div></li>
+</ul></div>
+<div class="modal-data" style="display:none;"><h3>⚙️ Backend (дубль)</h3>
+<p><strong>Описание:</strong> Директории <code>backend/</code>, <code>scratch/</code>, <code>showcase/</code>.</p>
+<p>Архивные или экспериментальные папки. В <code>scratch/</code> проводятся разовые генерации или тесты (scratch scripts). <code>showcase/</code> содержит логику для "Демо-каталога".</p></div></div>
+</div>
+</div><!-- /canvas -->
+<!-- FOOTER -->
+<div class="footer">
+<div><strong style="color:var(--text)">prototip BI</strong> · Система генеративного анализа данных · Полный аудит исходного кода · Июнь 2026</div>
+<div style="text-align:right;line-height:1.8;">
+<span style="color:var(--done-c)">✅ ~36 компонентов реализовано</span> ·
+    <span style="color:var(--part-c)">🟡 ~10 частично</span> ·
+    <span style="color:var(--todo-c)">❌ ~9 в roadmap</span><br/>
+<span style="color:var(--muted2)">6 Docker-сервисов · 4 LLM-провайдера · 22 тест-файла · 108 тест-функций · 11 разделов архитектуры</span>
+</div>
+</div>
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; align-items:center; justify-content:center; padding:20px; backdrop-filter:blur(8px);">
+<div class="modal-content" id="modal-content" style="background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:32px; max-width:700px; width:100%; max-height:85vh; overflow-y:auto; position:relative; box-shadow:0 25px 50px -12px rgba(0,0,0,0.6); color:var(--text); line-height:1.6;">
+<button onclick="closeModal()" style="position:absolute; top:16px; right:20px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:28px; transition:color 0.2s;">×</button>
+<div id="modal-body" style="font-size: 14px;"></div>
+</div>
+</div>
+<script>
+function openModal(cardElement) {
+  const data = cardElement.querySelector('.modal-data');
+  if (data) {
+    document.getElementById('modal-body').innerHTML = data.innerHTML;
+    document.getElementById('modal-overlay').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+}
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.m, .svc, .rn, .tc, .dom, .llm').forEach(card => {
+    if (card.querySelector('.modal-data')) {
+      card.style.cursor = 'pointer';
+      // Add hover effect via CSS class or inline
+      card.addEventListener('mouseenter', () => card.style.boxShadow = '0 0 15px rgba(56,189,248,0.3)');
+      card.addEventListener('mouseleave', () => card.style.boxShadow = '');
+      
+      card.addEventListener('click', function(e) {
+        if (e.target.tagName.toLowerCase() === 'a') return;
+        openModal(this);
+      });
+    }
+  });
+});
+</script>
+<style>
+  #modal-body h3 { margin-bottom: 16px; font-size: 20px; color: var(--blue); }
+  #modal-body p { margin-bottom: 12px; }
+  #modal-body ul { margin-left: 20px; margin-bottom: 12px; }
+  #modal-body li { margin-bottom: 8px; }
+  #modal-body code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--green); }
+</style>
+</body>
+</html>

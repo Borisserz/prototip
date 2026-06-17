@@ -1,35 +1,25 @@
-# Semantic layer — целевой формат данных проекта
+# Semantic layer — Целевой формат данных (Фаза 11)
 
-**Статус:** скелеты заполнены под **demo** (`data/sample.csv`). **Не подключены к runtime** — код по-прежнему использует `app/domain/constants.py` и FEW_SHOT в агентах.
+**Статус:** Умный Семантический Движок **подключен к runtime**.
+`data/semantic_model.yaml` активно используется в коде для генерации Pydantic-схем на лету (через `app/semantic/catalog.py`).
 
-**Цель:** при фазе 0 [PLAN_PRODUKTA.md](../PLAN_PRODUKTA.md) заменить содержимое этих файлов согласованными данными заказчика, затем фаза 1 — loader в Python (`app/domain/loader.py`).
+**Цель:** Описать колонки, типы данных, ограничения и связи (аналог Cube.js или WrenAI) для устранения галлюцинаций LLM при написании SQL.
 
-## Файлы
+## Файлы (Перенесены и объединены)
 
-| Файл | Назначение |
-|------|------------|
-| [schema_registry.yaml](schema_registry.yaml) | Таблицы, колонки, типы, grain |
-| [metrics_catalog.yaml](metrics_catalog.yaml) | Бизнес-метрики и формулы SQL |
-| [chart_playbook.yaml](chart_playbook.yaml) | Сценарий вопроса → тип графика |
-| [sql_examples.yaml](sql_examples.yaml) | Эталонные SQL для few-shot DataAgent |
-| [dashboard_templates.yaml](dashboard_templates.yaml) | Шаблоны дашбордов (layout, KPI, графики) |
+Исторически было много файлов, теперь основной источник правды:
+- `data/semantic_model.yaml` — единый каталог всех метрик, колонок, таблиц и правил доступа.
 
-Eval-набор вопросов: [tests/eval/golden_questions.yaml](../tests/eval/golden_questions.yaml).
+## Как работает Умный Семантический Движок (SemanticEngine)
 
-## Как заполнять (фаза 0)
+1. Файл `data/semantic_model.yaml` считывается при старте бэкенда (`app/main.py`).
+2. `SemanticEngine` конвертирует YAML в строгие структуры данных и Pydantic-схемы.
+3. Узел `data_node` в графе **LangGraph** получает промпт, обогащенный метаданными из этого каталога.
+4. LLM видит точный список доступных колонок и фильтров, что предотвращает синтаксические ошибки SQL.
 
-1. Воркшоп с аналитиками заказчика: валидация метрик и SQL.
-2. Перенос из Confluence/Excel в YAML (один источник правды в git).
-3. Подпись аналитика: «10 golden SQL корректны на sandbox».
-4. Версионирование: тег `domain-v1.0` при старте пилота.
+## Взаимодействие с RBAC (Row-Level Security)
 
-## Связь с кодом (фаза 1)
+Помимо описания структуры, семантика тесно связана с контролем доступа. Правила изоляции данных накладываются `sqlglot` парсером, но ограничения диктуются бизнес-сущностями, зафиксированными в каталоге.
 
-```
-domain/*.yaml
-     ↓ loader.py
-prompt_builder.py → промпты Planner / DataAgent / ChartAgent
-sql_guard.py      → валидация таблиц и JOIN
-```
-
-Альтернативы и приоритеты: [PUTI_RAZRABOTKI.md](../PUTI_RAZRABOTKI.md) §2.1–2.2.
+---
+Альтернативы и исторические приоритеты: [PUTI_RAZRABOTKI.md](../PUTI_RAZRABOTKI.md).

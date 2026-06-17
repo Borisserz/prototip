@@ -1,7 +1,7 @@
 # prototip
 
-Локальная мультиагентная BI-платформа (прототип) для налоговой аналитики Республики Беларусь.  
-Вопрос на русском → SQL по демо-датасету → данные → график → выводы → (опционально) дашборд или презентация `.pptx`.
+Локальная мультиагентная BI-платформа (прототип) для налоговой аналитики.  
+Вопрос на русском → SQL по ClickHouse → данные → график → выводы → (опционально) дашборд или презентация `.pptx`.
 
 Полностью офлайн через [Ollama](https://ollama.com). Синтетические данные, не для официальной отчётности.
 
@@ -13,137 +13,94 @@
 
 | Область | Что умеет |
 |--------|-----------|
-| **Агенты** | PlannerAgent оркестрирует Data / Chart / Analyst / Dashboard / Presentation |
-| **Графики** | 12 типов, spec-first: LLM → `ChartSpec`, рендер — `viz/charts.py` |
+| **Оркестрация** | **LangGraph** оркестрирует Data / Chart / Analyst / Dashboard / Presentation. |
+| **Графики** | 12 типов, spec-first: LLM → `ChartSpec`, рендер — `viz/charts.py` + Recharts на фронтенде |
 | **Стиль** | Гос-оформление: Arial, `#003366`, русские подписи, валюта Br, Okabe-Ito |
-| **UI** | 4 вкладки, режимы «Для руководства» / «Для аналитика», drill-down, закрепление графиков |
-| **Showcase** | Офлайн-портфолио: 12 графиков + 4 презентации для демо руководству |
-| **API** | FastAPI: `/health`, `/ask`, `/generate_dashboard`, `/generate_presentation` |
-| **Тесты** | 146 автотестов (`pytest -m "not live"`), live e2e с Ollama |
+| **UI** | React + Vite + TailwindCSS. Быстрые карточки, drill-down, SSE-стриминг |
+| **RBAC** | Row-Level Security через `user_context` и инъекции `WHERE` в AST (sqlglot) |
+| **RAG** | Векторный поиск внутри ClickHouse (`cosineDistance`) |
+| **Semantic** | Парсинг YAML-слоя данных напрямую в Pydantic-схемы |
+| **Аномалии** | Проактивный поиск отклонений в фоне и Email-уведомления (WatcherService) |
+| **Визуализация**| Live-отображение дебатов агентов и анимация LangGraph графа на клиенте |
+| **Analyst Mode**| Human-in-the-loop: прозрачный просмотр сгенерированного SQL прямо в UI чата |
+| **Тесты** | 150+ автотестов (`pytest -m "not live"`), live e2e с Ollama, SQL Eval Pipeline |
 
 ---
 
 ## Быстрый старт
 
-Требования: **Python 3.11+**, **Ollama**, ~8 ГБ RAM для `qwen2.5-coder:7b-instruct`.
+Требования: **Python 3.11+**, **Node.js 18+**, **Ollama**, **ClickHouse** (через Docker), ~8 ГБ RAM для `qwen2.5-coder:7b-instruct`.
 
 ```bash
 git clone https://github.com/Borisserz/prototip.git
 cd prototip
 
+# 1. Запуск ClickHouse
+docker-compose up -d
+
+# 2. Бэкенд
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Демо-датасет (если нужно пересоздать)
-python data/make_dataset.py
-
 # Модель
 ollama pull qwen2.5-coder:7b-instruct
 
-# Проверки
-python -m pytest -m "not live" -q
-ruff check .
-
-# UI (основной способ работы)
-streamlit run ui/streamlit_app.py
-# → http://localhost:8501
-
-# API (опционально)
+# Запуск API
 uvicorn app.main:app --reload
 # → http://127.0.0.1:8000/docs
-```
 
-### Презентация из CLI
-
-```bash
-python -c "
-from app.orchestrator import Orchestrator
-res = Orchestrator().presentation([
-    'Какие регионы имеют наибольшую задолженность по НДС?',
-    'Динамика начислений подоходного налога в г. Минск по месяцам?',
-])
-print('Файл:', res.pptx_path, '| Слайдов:', res.num_slides)
-"
-```
-
-### Leadership showcase (без Ollama)
-
-```bash
-python scripts/generate_leadership_showcase.py
-# → showcase/charts/, showcase/presentations/, showcase/manifest.json
+# 3. Фронтенд (в новом окне терминала)
+cd frontend_web
+npm install
+npm run dev
+# → http://localhost:5173
 ```
 
 ---
 
-## Интерфейс (Streamlit)
+## Интерфейс (React/Vite)
 
-### Вкладки
-
-1. **Аналитический вопрос** — чат с PlannerAgent, карточки сценариев, live-конвейер AI.
-2. **Дашборд** — явный запрос комплексного дашборда (KPI + несколько графиков).
-3. **Презентация** — очередь вопросов или одна тема → `.pptx`.
-4. **Мой дашборд** — закреплённые графики из чата, режим сравнения.
-
-### Режимы (переключатель в шапке)
-
-| Режим | Для кого | Что видно |
-|-------|----------|-----------|
-| **Для руководства** | Совещание, отчёт | График, KPI, выводы; без SQL и trace |
-| **Для аналитика** | Специалист BI | + SQL, таблица данных, trace, редактор графиков |
-
-### Сайдбар
-
-- Глобальные фильтры: регион, вид налога, период
-- Быстрые вопросы и история
-- Сохранение сессии (JSON)
-- Метрики демо-датасета
-
-### Действия на результате
-
-PNG, CSV, «На дашборд», «В презентацию», drill-down по клику на графике.
+- **Чат (Аналитический вопрос)** — диалоговый интерфейс со стримингом через WebSocket (`/ws/chat`). 
+- Потоковая генерация ответа от LangGraph, построение графиков на лету.
+- **Drill-down** — клик по элементу графика (Recharts) → фильтр → уточняющий вопрос с контекстом.
+- **Экспорт** в Excel, PNG.
 
 ---
 
 ## Архитектура
 
 ```
-Streamlit UI / FastAPI / CLI / тесты
+React UI (Vite) / FastAPI / CLI / тесты
               ↓
-         Orchestrator
-    ask() → PlannerAgent (план 1–3 задачи, DAG, trace, честный success)
+         LangGraph (StateGraph)
+    ask_stream() → потоковая передача статусов
     dashboard() → DashboardAgent
-    presentation() → PresentationAgent (slide pipeline, без nested Planner)
+    presentation() → PresentationAgent
               ↓
-    AgentExecutor → data_agent | chart_agent | analyst_agent | …
+    SemanticEngine (парсинг YAML слоя данных)
               ↓
-    DuckDB (SELECT по CSV) → ChartSpec → viz/charts.py → Plotly / PNG
+    Agent Nodes → data_node | chart_node | analyst_node | …
               ↓
-    PresentationRenderer → .pptx
+    ClickHouse (нативный RAG и SELECT) + RBAC (sqlglot AST) → SQL Eval
+              ↓
+    viz/charts.py → Plotly / PNG / Recharts (frontend)
 ```
 
 **Spec-first:** модель не генерирует код графиков — только Pydantic `ChartSpec`. Рендер детерминированный, тестируемый, в едином стиле.
 
-Подробнее: [AGENTS.md](AGENTS.md), [PROJECT_SPEC.md](PROJECT_SPEC.md).
+Подробнее: [AGENTS.md](AGENTS.md), [OBZOR.md](OBZOR.md).
 
 ---
 
-## Данные
+## Данные и Семантика
 
-Синтетический CSV: `data/sample.csv` (420 строк, 2024, 7 регионов РБ, 5 видов налогов).
+Синтетический CSV: `data/sample.csv`. Используется `data/semantic_model.yaml` для конфигурации семантического слоя:
 
-| Колонка | Описание |
-|---------|----------|
-| `period` | Месяц (`2024-01` …) |
-| `region` | Регион РБ |
-| `tax_type` | Вид налога |
-| `accrued` | Начислено, Br |
-| `paid` | Уплачено, Br |
-| `debt` | Задолженность, Br |
-| `taxpayers` | Число плательщиков |
-| `penalties` | Штрафы/пени, Br |
-
-Генератор: `python data/make_dataset.py`
+- `region`: Регион РБ
+- `tax_type`: Вид налога
+- `accrued`: Начислено, Br
+- ...
 
 ---
 
@@ -152,27 +109,21 @@ Streamlit UI / FastAPI / CLI / тесты
 ```
 prototip/
 ├── app/
-│   ├── agents/          # Data, Chart, Analyst, Dashboard, Presentation, Planner
-│   ├── slide_pipeline.py # data→chart→analyst для слайдов презентации
-│   ├── domain/          # Общие константы (колонки, типы графиков)
+│   ├── graph.py         # Главный граф LangGraph
+│   ├── agents/          # Агенты: Data, Chart, Analyst, Dashboard, Presentation
+│   ├── semantic/        # Умный Семантический Движок (catalog.py)
+│   ├── eval/            # SQL Evaluator (защита от галлюцинаций)
 │   ├── orchestrator.py  # Единая точка входа
 │   ├── main.py          # FastAPI
-│   ├── chart_repair.py  # Нормализация и repair ChartSpec
-│   ├── drilldown.py     # Фильтры с графика
-│   └── showcase_*.py    # Офлайн-портфолио
+│   └── utils/           # ClickHouse клиент, RBAC (memory.py)
 ├── core/
 │   ├── models.py        # ChartSpec и контракты
 │   └── llm.py           # Ollama structured output
-├── viz/
-│   ├── charts.py        # build_chart (12 типов)
-│   └── style.py         # RU/Br/Okabe-Ito
-├── ui/
-│   ├── streamlit_app.py # Основной UI (~2500 строк)
-│   └── components/      # pipeline, trace
-├── data/                # sample.csv + make_dataset.py
+├── viz/                 # Рендер графиков (Plotly)
+├── frontend_web/        # React + Vite + Tailwind UI
+├── data/                # sample.csv + semantic_model.yaml
 ├── showcase/            # Демо для руководства (PNG, HTML, PPTX)
-├── scripts/             # generate_leadership_showcase.py
-└── tests/               # 26 файлов, 146 non-live + 8 live тестов
+└── tests/               # 150+ автотестов
 ```
 
 ---
@@ -182,9 +133,9 @@ prototip/
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/health` | Статус сервиса |
-| POST | `/ask` | Универсальный запрос через PlannerAgent |
-| POST | `/generate_dashboard` | Явный дашборд |
-| POST | `/generate_presentation` | Генерация `.pptx` |
+| WS | `/ws/chat` | Основной WebSocket эндпоинт для чата (LangGraph) |
+| POST | `/ask` | REST fallback (без стриминга) |
+| POST | `/search` | RAG поиск по сессиям |
 
 Пример:
 
@@ -205,10 +156,6 @@ curl -X POST http://127.0.0.1:8000/ask \
 | `PROTOTIP_OLLAMA_MODEL` | `qwen2.5-coder:7b-instruct` | Модель Ollama |
 | `PROTOTIP_DATA_PATH` | `data/sample.csv` | Путь к CSV |
 | `PROTOTIP_OUT_DIR` | `out/` | Артефакты (PNG, логи) |
-| `PROTOTIP_PIPELINE_TIMEOUT` | `600` | Таймаут конвейера, с |
-| `PROTOTIP_PLANNER_CACHE_SIZE` | `32` | Кэш планов Planner |
-
-Артефакты сессий UI пишутся в `out/` (в git не попадают).
 
 ---
 
@@ -221,19 +168,9 @@ python -m pytest -m "not live" -q
 # Полный набор
 python -m pytest -q
 
-# Линт
-ruff check . && ruff format --check .
+# E2E
+python test_api.py
 ```
-
-Стратегия и чеклисты: [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md).
-
----
-
-## Типы графиков (12)
-
-`bar`, `grouped_bar`, `stacked_bar`, `line`, `area`, `scatter`, `waterfall`, `treemap`, `horizontal_bar`, `donut`, `kpi`, `heatmap`
-
-Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `highlight_category`.
 
 ---
 
@@ -242,22 +179,14 @@ Data Storytelling-поля в `ChartSpec`: `action_title`, `show_average`, `high
 | Файл | Назначение |
 |------|------------|
 | [README.md](README.md) | Обзор, быстрый старт (этот файл) |
-| **[PAKET_DLYA_RUKOVODSTVA.md](PAKET_DLYA_RUKOVODSTVA.md)** | **Встреча с руководством: демо, решения, FAQ, чеклист** |
 | **[DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md)** | **Индекс: кому что читать, статус, навигация** |
-| **[PUTI_RAZRABOTKI.md](PUTI_RAZRABOTKI.md)** | **Альтернативы и пути развития после прототипа** |
-| **[OBZOR_DLYA_RUKOVODSTVA.md](OBZOR_DLYA_RUKOVODSTVA.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
+| **[OBZOR.md](OBZOR.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
+| **[ROADMAP.md](ROADMAP.md)** | **Детальный план развития (Enterprise Features)** |
 | **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics (таблицы, логика)** |
-| **[PLAN_PRODUKTA.md](PLAN_PRODUKTA.md)** | **План перехода к продукту: что запросить у заказчика, фазы работ** |
-| [templates/](templates/) | Шаблоны для заказчика (вопросник, карточки UC) |
-| [domain/](domain/) | Скелеты semantic layer (YAML, не в runtime) |
 | [AGENTS.md](AGENTS.md) | Правила для разработки и AI-ассистентов |
-| [PROJECT_SPEC.md](PROJECT_SPEC.md) | Техническое задание, фазы, критерии |
-| [tests/DETAILED_TEST_PLAN.md](tests/DETAILED_TEST_PLAN.md) | Детальный план тестирования |
 
 ---
 
 ## Статус
 
-Фазы 0–8 выполнены. Post-Phase 8: DashboardAgent, PlannerAgent v2.5+, gov UX, leadership showcase, drill-down, pinned dashboard. Волны 1–3 оркестрации: честный success, slide pipeline, retry LLM, singleton Planner, LRU-кэш.
-
-**Не production:** нет реальной БД, auth, SLA, ETL. Прототип для демо и внутренней разработки.
+**Фазы 1-22 выполнены.** Проект успешно мигрирован на LangGraph, новый React UI (`frontend_web`), ClickHouse (с RAG), RBAC и Semantic Engine. Внедрена потоковая генерация (Streaming SSE), "Прозрачный мозг" (Live-дебаты агентов и визуализация графа), а также проактивная аналитика (WatcherService) для автоматического поиска аномалий.

@@ -61,7 +61,7 @@ def chart_showcase_entries() -> list[ChartShowcaseEntry]:
             ChartSpec(
                 chart_type="bar",
                 title="Начисленные налоги по регионам",
-                subtitle="Сумма начислений за 2024 год, Br",
+                subtitle="Сумма начислений за 2024 год, бел. руб.",
                 x="region",
                 y="accrued",
                 agg="sum",
@@ -250,7 +250,7 @@ def chart_showcase_entries() -> list[ChartShowcaseEntry]:
                 x="Итого",
                 y="debt",
                 agg="sum",
-                action_title="Совокупная задолженность превышает 15 млрд Br",
+                action_title="Совокупная задолженность превышает 15 млрд бел. руб.",
                 insights=[
                     "Ключевой показатель для мониторинга собираемости",
                     "Требует ежемесячного контроля",

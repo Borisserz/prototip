@@ -157,3 +157,7 @@ run.log
 .skills/
 *.log
 copy_project_to_clipboard.sh
+
+eval/
+evals/
+vertex-creds.json

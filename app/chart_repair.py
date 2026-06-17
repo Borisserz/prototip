@@ -105,7 +105,7 @@ def _fallback_action_title(spec: ChartSpec, data: list[dict], question: str) -> 
         row = g.loc[idx]
         cat = str(row[x])
         val = float(row[y])
-        suffix = "Br" if any(k in str(y).lower() for k in ("debt", "accrued", "paid", "penalties")) else ""
+        suffix = "бел. руб." if any(k in str(y).lower() for k in ("debt", "accrued", "paid", "penalties")) else ""
         return f"{cat} — лидер ({format_number_ru(val, suffix=suffix)})"
     except Exception:
         return None

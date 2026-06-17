@@ -41,6 +41,16 @@ class AgentResult(BaseModel):
         None,
         description="Трассировка PlannerAgent (план, шаги, agent_calls)",
     )
+    confidence_score: float = Field(
+        1.0, 
+        ge=0.0, 
+        le=1.0, 
+        description="Уровень уверенности агента в результате (0.0 - 1.0)"
+    )
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="Список рекомендаций от агента для следующих шагов (CrewAI Flow pattern)"
+    )
 
 
 # =============================================================================
@@ -151,6 +161,10 @@ class DataAgentInput(BaseModel):
 class SqlResult(AgentResult):
     """Результат DataAgent: SQL + данные (для Phase 2/5)."""
 
+    step_by_step_planning: str = Field(
+        ...,
+        description="Пошаговый план: 1. Какие таблицы нужны 2. Какие фильтры 3. Какая группировка (CoT)",
+    )
     sql: str = Field(..., description="Корректный исполняемый SELECT (только чтение)")
     data: list[dict] = Field(..., description="Результат в виде списка записей (records)")
     row_count: int = Field(..., description="Число строк в результате")
@@ -203,7 +217,19 @@ class ChartAgentInput(BaseModel):
 class ChartAgentResult(AgentResult):
     """Выход ChartAgent: готовая спецификация (Phase 4)."""
 
-    spec: ChartSpec
+    specs: list[ChartSpec] = Field(default_factory=list)
+
+
+# =============================================================================
+# Результаты RagAgent
+# =============================================================================
+
+class RagResult(AgentResult):
+    """Результат RagAgent: найденный текстовый контекст и источники (Phase 13)."""
+
+    context: str = Field(..., description="Найденный и объединённый текст из базы знаний")
+    sources: list[str] = Field(default_factory=list, description="Список источников (документов/страниц)")
+    source_snippets: list[dict] = Field(default_factory=list, description="Расширенные метаданные со сниппетами")
 
 
 # =============================================================================
@@ -218,13 +244,43 @@ class AskResult(AgentResult):
     sql: str = ""
     data: list[dict] = Field(default_factory=list)
     analysis: AnalysisResult | None = None
-    chart_spec: ChartSpec | None = None
+    chart_spec: ChartSpec | None = None  # первичный ChartSpec от chart_agent (slide pipeline)
+    charts: list[ChartSpec] = Field(default_factory=list)
+    rag_result: RagResult | None = None
     png_path: str | None = None  # путь к артефакту в out/
+    excel_path: str | None = None
+    pptx_path: str | None = None
 
 
 # =============================================================================
 # Презентации
 # =============================================================================
+
+class SupervisorDecision(BaseModel):
+    """Решение Supervisory Node (Phase 21)."""
+    route: Literal["data", "direct_answer"] = Field(..., description="Маршрут выполнения: 'data' (если нужен SQL) или 'direct_answer' (если просто текст)")
+    direct_response: str | None = Field(None, description="Ответ, если route == direct_answer")
+
+
+class SlideData(BaseModel):
+    """Данные одного слайда для отображения и редактирования в UI."""
+    slide_idx: int
+    slide_type: str = Field(description="'title', 'summary', 'themes', 'chart', 'takeaways', 'recommendations', 'appendix'")
+    title: str
+    content: str | list[str] | None = None
+
+
+class SlideUpdate(BaseModel):
+    """Частичное обновление данных слайда."""
+    title: str | None = None
+    content: str | list[str] | None = None
+    chart_type: str | None = None  # e.g. 'bar', 'line', 'donut', 'pie', 'horizontal_bar'
+
+
+class PresentationUpdateRequest(BaseModel):
+    """Payload для POST /api/v1/presentation/update."""
+    presentation_id: str
+    slide_updates: dict[int, SlideUpdate]
 
 
 class PresentationInput(BaseModel):
@@ -241,6 +297,10 @@ class PresentationResult(AgentResult):
     pptx_path: str = Field(
         ..., description="Путь к созданному файлу презентации (out/presentation.pptx)"
     )
+    excel_path: str | None = Field(
+        default=None,
+        description="Путь к сгенерированному Excel-файлу (если запрашивался)."
+    )
     num_slides: int = Field(..., description="Количество слайдов в презентации")
     slide_png_paths: list[str] = Field(
         default_factory=list,
@@ -250,23 +310,38 @@ class PresentationResult(AgentResult):
         default="",
         description="Уникальный id прогона для изоляции PNG-превью",
     )
+    slides: list[SlideData] = Field(
+        default_factory=list,
+        description="Текстовое содержимое слайдов для редактирования в UI"
+    )
 
+
+class PresentationState(BaseModel):
+    """Сохраненное состояние для перегенерации презентации без LLM."""
+    presentation_id: str
+    questions: list[str]
+    prefs: dict[int, str | None]
+    results: list[AskResult]
+    narrative: DeckNarrative
+    include_title: bool
+    include_recommendations: bool
+    num_slides: int | None
 
 class DeckNarrative(AgentResult):
     """Структурированный нарратив для презентации (Phase 8+)."""
 
     overview: str = Field(
         ...,
-        description="Обзор: цель презентации, охват (период, регионы, виды налогов, объёмы), метод (локальная мультиагентная система Text-to-SQL + анализ + визуализация)",
+        description="Детальный обзор: цель, охват (период, регионы, виды налогов, объёмы в млрд бел. руб.), метод, ключевые числа и аномалии",
     )
     themes: list[str] = Field(
-        ..., min_length=2, max_length=4, description="2-4 ключевые темы/повестки дня"
+        ..., min_length=3, max_length=7, description="5-7 ключевых тем/разделов с конкретными числами"
     )
     key_takeaways: list[str] = Field(
-        ..., min_length=4, max_length=6, description="4-6 главных выводов по всей колоде"
+        ..., min_length=5, max_length=10, description="7-10 детальных выводов с цифрами, %, сравнениями"
     )
     recommendations: list[str] = Field(
-        ..., min_length=2, max_length=4, description="2-4 конкретные рекомендации"
+        ..., min_length=3, max_length=6, description="4-6 конкретных рекомендаций с КПЭ и ожидаемым эффектом"
     )
 
 
@@ -286,9 +361,11 @@ class PresentationRequest(BaseModel):
     mode: str = Field(..., description="По вопросам | Свободная тема | Одним предложением")
     overall_theme: str | None = Field(None)
     questions: list[QuestionBlock] = Field(default_factory=list)
-    num_slides: int = Field(5, ge=3, le=12)
+    num_slides: int = Field(10, ge=3, le=30)
     include_title: bool = True
     include_recommendations: bool = True
+    audience: str | None = Field(None, description="executive | analyst | board")
+    detail_level: str | None = Field(None, description="standard | detailed | comprehensive")
 
 
 # =============================================================================
@@ -301,7 +378,7 @@ class KpiCard(BaseModel):
 
     name: str = Field(..., description="Название метрики на русском, напр. 'Общая задолженность'")
     value: float | str = Field(..., description="Значение: число или уже отформатированная строка")
-    unit: str = Field("", description="Единица измерения, напр. 'Br', '%', 'регионов'")
+    unit: str = Field("", description="Единица измерения, напр. 'бел. руб.', '%', 'регионов'")
     change: float | None = Field(
         None, description="Относительное изменение в % (положительное — рост)"
     )
@@ -357,6 +434,10 @@ class DashboardResult(AgentResult):
     insights: list[str] = Field(
         default_factory=list,
         description="3-6 аналитических инсайтов на русском (высокоуровневые по всему дашборду)",
+    )
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="2-4 практические бизнес-рекомендации на основе данных",
     )
     data: list[dict] = Field(
         default_factory=list,

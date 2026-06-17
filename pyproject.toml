@@ -18,8 +18,8 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["app", "core", "viz", "ui"]
-omit = ["tests/*", "ui/streamlit_app.py"]
+source = ["app", "core", "viz"]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 fail_under = 60

@@ -1,4 +1,4 @@
-"""Thread-safe live pipeline state for Streamlit AI Pipeline Visualizer.
+"""Thread-safe live pipeline state for AI Pipeline Visualizer.
 
 Агенты и Planner пишут этапы сюда; UI опрашивает snapshot() в отдельном потоке.
 Вложенные вызовы (presentation → planner) подавляют emit через suppress_pipeline_emit().
@@ -16,7 +16,7 @@ from typing import Any
 PIPELINE_STAGES: list[dict[str, str]] = [
     {"id": "intent", "label": "Анализ намерения", "icon": ""},
     {"id": "sql", "label": "Генерация SQL", "icon": ""},
-    {"id": "duckdb", "label": "Обработка данных (DuckDB)", "icon": ""},
+    {"id": "clickhouse", "label": "Обработка данных (ClickHouse DWH)", "icon": ""},
     {"id": "synthesis", "label": "Текстовый синтез", "icon": ""},
     {"id": "viz", "label": "Визуализация", "icon": ""},
 ]
@@ -31,7 +31,7 @@ AGENT_START_STAGE: dict[str, str] = {
 }
 
 AGENT_DONE_STAGE: dict[str, str] = {
-    "data_agent": "duckdb",
+    "data_agent": "clickhouse",
     "analyst_agent": "synthesis",
     "chart_agent": "viz",
     "dashboard_agent": "viz",
@@ -182,6 +182,21 @@ def emit_pipeline_stage(
     if not pipeline_emit_enabled():
         return
     pipeline_store.set_stage(stage_id, status, log, agent=agent, error=error)
+    
+    # Audit log
+    try:
+        from app.utils.system_logger import audit_logger
+        audit_logger.log_llm_call_async(
+            agent_name=agent or "orchestrator",
+            model="pipeline",
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
+            error_status=f"[{status}] {log}" + (f" (Error: {error})" if error else ""),
+            user_role="system"
+        )
+    except Exception:
+        pass
 
 
 def emit_agent_started(agent_name: str, detail: str = "") -> None:

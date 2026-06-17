@@ -42,52 +42,7 @@ setup_logging()
 logger = logging.getLogger("DashboardAgent")
 
 
-FEW_SHOT_DASHBOARD = """
-Ты — старший BI-аналитик по налоговым данным Республики Беларусь (синтетический датасет 2024, валюта Br).
-
-Задача: по вопросу пользователя сформировать **комплексный дашборд** (3–5 взаимодополняющих графиков + KPI + insights).
-Все тексты строго на русском, профессионально, без воды, с упоминанием Br / млн Br / млрд Br.
-
-Правила выбора визуализаций (используй точно эти типы):
-- Топ / рейтинг регионов по любой метрике → horizontal_bar (x=region, y=debt/total_debt/accrued, agg=sum)
-- Структура / доли (по налогам, регионам) → donut (x=tax_type или region)
-- Динамика во времени (месяцы, тренды) → line (x=period, color=region или tax_type)
-- Сравнение нескольких категорий → bar или grouped_bar / stacked_bar
-- Ключевой показатель (итог) → kpi (но в дашборде лучше использовать KpiCard снаружи)
-- Матрица (регион × период) → heatmap
-
-Рекомендации по составу дашборда:
-- 1 график "Топ" (горизонтальный бар)
-- 1 график структуры (donut)
-- 1 график динамики (line)
-- Опционально: grouped/stacked для сравнения или heatmap
-
-KPI-карточки (3–5 шт.): общая сумма, топ-регион, % задолженности, число активных регионов/налогов и т.д.
-Изменения (change) указывай только если по данным заметен тренд.
-
-Layout: по умолчанию "kpi_top_grid", columns=2 или 3. Для многих графиков можно "two_column".
-
-Пример хорошего дашборда:
-Q: "Покажи дашборд по задолженности по регионам"
-→ title: "Дашборд задолженности по регионам РБ"
-  summary: "Задолженность сконцентрирована в восточных областях. г. Минск демонстрирует наименьшую относительную задолженность."
-  kpi_cards: [
-    {"name": "Общая задолженность", "value": "15,2 млрд", "unit": "Br"},
-    {"name": "Топ-регион по долгу", "value": "Гомельская область", "unit": ""},
-    {"name": "Доля задолженности от начислений", "value": 14.8, "unit": "%", "change": 1.2, "change_period": "к прошлому кварталу"}
-  ]
-  charts: [
-    {chart_type: "horizontal_bar", title: "Топ-7 регионов по задолженности", x: "region", y: "total_debt", agg: "sum", rationale: "рейтинг → horizontal_bar для наглядности топа", ...},
-    {chart_type: "donut", title: "Структура задолженности по видам налогов", x: "tax_type", y: "debt", agg: "sum", rationale: "доли → donut"},
-    {chart_type: "line", title: "Динамика задолженности по месяцам (топ-регионы)", x: "period", y: "debt", color: "region", agg: "sum", rationale: "время + несколько серий → line"},
-  ]
-  layout: {type: "kpi_top_grid", columns: 2}
-  insights: ["Гомельская и Могилёвская области лидируют по абсолютной задолженности", ...]
-  reasoning: "Выбрали horizontal_bar для топа (самый читаемый для ранжирования), donut для структуры (классика долей), line для тренда. KPI дают быстрый взгляд на масштаб проблемы."
-
-Всегда указывай реалистичные x/y/agg из доступных колонок датасета: period, region, tax_type, accrued, paid, debt, taxpayers.
-"""
-
+from app.agents.config_loader import get_agent_config
 
 # Внутренняя схема для structured-вызова LLM (полный состав дашборда)
 class _DashboardComposition(BaseModel):
@@ -104,6 +59,7 @@ class _DashboardComposition(BaseModel):
     ] = []  # предпочтительно: естественные под-вопросы или "Top debt horizontal_bar"
     layout: DashboardLayout
     insights: list[str] = []
+    recommendations: list[str] = []
     reasoning: str
 
 
@@ -213,6 +169,17 @@ class DashboardAgent(BaseAgent):
             "Компоновка KPI и спецификаций графиков...",
             agent="dashboard_agent",
         )
+        
+        # Phase 20: Pervasive RAG (Dashboard Templates)
+        rag_context = ""
+        try:
+            from app.services.rag_service import search_dashboards
+            docs = search_dashboards(q, k=1)
+            if docs:
+                rag_context = "\n\n[РЕФЕРЕНСНЫЙ ДАШБОРД (RAG)]\nНайден сохраненный дашборд из истории. Используй его как ВДОХНОВЕНИЕ для стилистики и уровня детализации. СТРОГО ЗАПРЕЩЕНО копировать названия графиков (titles) или chart_ideas из референса! Ты обязан придумать свои уникальные chart_ideas, которые на 100% соответствуют текущему вопросу и данным:\n" + docs[0].page_content
+        except Exception as e:
+            logger.info(f"[DashboardAgent] rag_error: {e}")
+
         sample = data[:6]
         total_rows = len(data)
         columns = list(data[0].keys()) if data else []
@@ -220,31 +187,38 @@ class DashboardAgent(BaseAgent):
         # Ограничим max_charts в промпте
         max_c = max(1, min(request.max_charts, 6))
 
-        prompt = f"""Ты — эксперт по построению дашбордов для налоговой аналитики РБ.
+        cfg = get_agent_config("dashboard_agent")
+        
+        prompt = f"""Ты — {cfg.role}. {cfg.goal}
 
-{FEW_SHOT_DASHBOARD}
+{cfg.rules}
+
+=== FEW-SHOT EXAMPLES ===
+{cfg.few_shot}
 
 Пользовательский вопрос: {q}
 Доступные колонки в данных: {columns}
 Всего строк в результате: {total_rows}
 Пример данных (первые строки):
 {sample}
+{rag_context}
 
 Сформируй комплексный дашборд:
-- chart_ideas: 3–{max_c} строк (естественные под-вопросы или описания для ChartAgent, напр. "Топ-7 регионов по задолженности как horizontal_bar" или "Структура по tax_type как donut")
+- chart_ideas: 3–{max_c} строк (естественные аналитические бизнес-вопросы к данным для ChartAgent, напр. "Какова динамика сборов по месяцам?", "Как распределяется задолженность между регионами?", "Топ-5 проблемных инспекций"). НЕ указывай типы графиков (bar/pie и т.д.), ChartAgent выберет их сам из 12 доступных типов.
 - (опционально charts как fallback)
 - KPI-карточки (если include_kpi={request.include_kpi})
 - Подходящий layout
-- 3–6 высокоуровневых insights (используй или дополни уже имеющиеся: {insights[:3] if insights else "нет"})
-- Чёткое reasoning
+- 3–6 глубоких аналитических инсайтов (используй или дополни уже имеющиеся: {insights[:3] if insights else "нет"})
+- 2–4 практические бизнес-рекомендации (recommendations) на основе этих данных (что следует сделать, на что обратить внимание)
+- Чёткое и прозрачное обоснование (reasoning) твоего выбора метрик и графиков
 
-Все заголовки, insights, summary, rationale — на русском языке.
+Все заголовки, insights, summary, recommendations, rationale — на русском языке.
 Используй только реальные колонки из списка выше.
 Верни строго валидный JSON по схеме _DashboardComposition.
 """
 
         system_msg = (
-            "Ты — точный BI-архитектор дашбордов. "
+            f"Ты — {cfg.role}. "
             "Всегда возвращай валидный JSON по указанной схеме. "
             "Тексты на русском, профессиональные, с Br. "
             "Выбирай реалистичные и полезные комбинации графиков."
@@ -255,6 +229,7 @@ class DashboardAgent(BaseAgent):
                 prompt,
                 schema=_DashboardComposition,
                 system=system_msg,
+                agent_name=self.name
             )
             logger.info(
                 f"[DashboardAgent] llm_composition: charts={len(composition.charts)} kpis={len(composition.kpi_cards)} layout={composition.layout.type}"
@@ -266,23 +241,30 @@ class DashboardAgent(BaseAgent):
             # Graceful минимальный дашборд
             return self._fallback_result(q, data, insights, str(e), source_sql=source_sql)
 
-        # 4. Пост-обработка и ограничения + активация реального reuse ChartAgent (LLM даёт идеи -> ChartAgent даёт качественные ChartSpec с его FEW_SHOT/валидацией)
+        # 4. Пост-обработка и ограничения + активация реального reuse ChartAgent (Parallel - Phase 16)
         chart_ideas = getattr(composition, "chart_ideas", None) or []
         if not chart_ideas and composition.charts:
             chart_ideas = [getattr(c, "title", str(c)) for c in composition.charts]
 
         charts: list[ChartSpec] = []
         try:
-            executor = get_executor(include_planner=False)
-            for idea in (chart_ideas or [])[:max_c]:
-                try:
-                    idea_str = idea if isinstance(idea, str) else getattr(idea, "title", str(idea))
-                    cr = executor.run("chart_agent", idea_str, data=data)
-                    if not cr.success:
-                        raise RuntimeError(cr.error or "ChartAgent failed")
-                    charts.append(repair_chart_spec(cr.spec, data, question=idea_str))
-                except Exception as e:
-                    logger.info(f"[DashboardAgent] sub_chart_error for '{idea}': {e}")
+            executor_pipeline = get_executor(include_planner=False)
+            import concurrent.futures
+
+            def _generate_chart(idea):
+                idea_str = idea if isinstance(idea, str) else getattr(idea, "title", str(idea))
+                cr = executor_pipeline.run("chart_agent", idea_str, data=data)
+                if not cr.success or not cr.specs:
+                    raise RuntimeError(cr.error or "ChartAgent failed or returned no specs")
+                return repair_chart_spec(cr.specs[0], data, question=idea_str)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_c) as pool:
+                futures = {pool.submit(_generate_chart, idea): idea for idea in (chart_ideas or [])[:max_c]}
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        charts.append(future.result())
+                    except Exception as e:
+                        logger.info(f"[DashboardAgent] sub_chart_error: {e}")
         except Exception as e:
             logger.info(f"[DashboardAgent] chart_agent_init_error: {e}")
 
@@ -319,6 +301,7 @@ class DashboardAgent(BaseAgent):
             charts=charts,
             layout=composition.layout,
             insights=final_insights,
+            recommendations=composition.recommendations or [],
             data=data,
             source_sql=source_sql,
             reasoning=composition.reasoning,
@@ -390,6 +373,7 @@ class DashboardAgent(BaseAgent):
             charts=[],
             layout=DashboardLayout(type="single_column", columns=1),
             insights=insights or ["Не удалось полностью проанализировать данные."],
+            recommendations=["Обратитесь к администратору для проверки доступности данных."],
             data=data or [],
             source_sql=source_sql,
             reasoning=f"Fallback из-за ошибки LLM: {error[:200]}",

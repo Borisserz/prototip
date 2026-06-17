@@ -39,8 +39,8 @@ def build_slide_ask_result(question: str, executor: Any) -> AskResult:
 
     chart_res = executor.run("chart_agent", q, data=data)
     chart_spec: ChartSpec | None = None
-    if isinstance(chart_res, ChartAgentResult) and chart_res.success and chart_res.spec:
-        chart_spec = repair_chart_spec(chart_res.spec, data, question=q)
+    if isinstance(chart_res, ChartAgentResult) and chart_res.success and chart_res.specs:
+        chart_spec = repair_chart_spec(chart_res.specs[0], data, question=q)
 
     analyst_kwargs: dict[str, Any] = {"data": data, "source_sql": sql_res.sql}
     if chart_spec is not None:

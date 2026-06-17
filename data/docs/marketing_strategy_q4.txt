@@ -1,0 +1,12 @@
+=== MARKETING STRATEGY Q4 ===
+Campaign: Black Friday / Cyber Monday E-commerce Push
+Focus: Электроника (Electronics)
+
+Overview:
+Historical data shows that clothing (Одежда) dips heavily during the summer months (June-August). However, Q4 is our biggest opportunity for high-ticket items, specifically in the "Электроника" category.
+
+Action Plan:
+Starting November 20th, we will apply a blanket `discount_applied = 1` (30% off) across the entire electronics catalogue. 
+Expect a massive 300% multiplier on sales volume in November and a 200% multiplier throughout December due to holiday shopping. 
+
+Stock levels in Minsk and Warsaw distribution centers must be doubled by November 1st.

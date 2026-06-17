@@ -1,9 +1,9 @@
-# План тестирования — prototip
+# План тестирования — prototip (LangGraph / ClickHouse)
 
-Детальная стратегия для графиков, дашбордов, презентаций и PlannerAgent.  
+Детальная стратегия тестирования для графа LangGraph, RAG в ClickHouse, Semantic Engine и React UI.  
 Дополняет `pytest`-набор в `tests/`.
 
-**Статус (июнь 2026):** 154 теста собрано, **146** в быстром прогоне (`pytest -m "not live"`). 8 тестов с маркером `live` требуют Ollama. Live e2e (`test_e2e.py`) — сквозной `Orchestrator.ask()` с реальной моделью (~78 с).
+**Статус (Фазы 11-15):** Более 150 автотестов (`pytest -m "not live"`). 
 
 **Гейты перед коммитом:**
 
@@ -16,131 +16,58 @@ python -m pytest -m "not live" -q
 
 ## Стратегия
 
-- **pytest** + fixtures (`sample_df`, mocked `call_structured`, mocked executor).
-- **Детерминизм:** тяжёлые/LLM-пути мокаются; `@pytest.mark.live` — опционально с реальной Ollama.
-- **Контракты:** Pydantic-модели, data flow через `depends_on`, trace fidelity.
-- **Визуал:** fig traces, RU labels, Br formatting, PNG size, 12 типов графиков.
-- **UI:** smoke через импорт `ui/streamlit_app.py`, проверка строк/хелперов в `test_ui_smoke.py`, `test_ui_helpers.py`.
-- **Негатив:** bad plans, LLM errors, empty data, partial planner failure.
+- **pytest** + fixtures (mocked Semantic Engine, ClickHouse DB connection).
+- **Детерминизм:** LLM-вызовы внутри узлов графа (`data_node`, `chart_node`) мокаются.
+- **SQL Eval:** Особое внимание к тестированию узла `eval_node` (отработка ошибок SQL и Retry в LangGraph).
+- **RBAC (RLS):** Обязательные юнит-тесты для `sqlglot` парсера, чтобы убедиться, что токены/роли инжектят правильные `WHERE` фильтры.
+- **Интеграция:** Сквозное прохождение состояния (State) по узлам графа `StateGraph`.
 
 ---
 
-## Покрытие по файлам
+## Покрытие по компонентам
 
-| Файл | Фокус |
-|------|-------|
-| `test_agent_waves.py` | честный success, skip deps, slide pipeline, degraded, retry |
-| `test_planner_agent.py` | repair, invoke, execute, orchestrated flows |
-| `test_viz_charts.py` | build_chart, exports, 12 типов, penalties |
-| `test_chart_agent.py` | ChartAgent + mock LLM |
-| `test_chart_repair.py` | normalize, repair, aliases |
-| `test_dashboard_agent.py` | KPI, composition, graceful |
-| `test_presentation.py` | .pptx, slides, prefs |
-| `test_orchestrator.py` | ask/dashboard/presentation facade |
-| `test_showcase.py` | offline showcase, manifest paths |
-| `test_ui_smoke.py` | импорт UI, ключевые строки |
-| `test_ui_helpers.py` | хелперы streamlit_app |
-| `test_drilldown.py` | фильтры с графика |
-| `test_e2e.py` | сквозные сценарии (mocked) |
+| Компонент / Узел | Фокус |
+|------------------|-------|
+| `test_graph.py` | Переходы LangGraph: data_node → eval_node → chart_node → analyst_node |
+| `test_sql_eval.py` | Защита от галлюцинаций, валидация синтаксиса AST, retry cycle |
+| `test_semantic.py` | Парсинг `data/semantic_model.yaml` в Pydantic `Catalog` |
+| `test_rbac.py` | Инъекции `user_context` через `sqlglot` |
+| `test_clickhouse_rag.py` | Векторный поиск `cosineDistance` с мок-векторами |
+| `test_viz_charts.py` | build_chart, exports, 12 типов графиков + React Plotly mock |
+| `test_e2e.py` | Полный цикл `/ws/chat` через FastAPI TestClient (WebSockets) |
 
 ---
 
-## 1. Графики (ChartAgent + viz)
+## 1. LangGraph и Состояния (StateGraph)
 
-**Unit:** mock `call_structured` → ChartSpec; правила area/scatter/waterfall; color=region.
+**Unit:** Проверка `State` после каждого узла.
+**Integration:** Отправка вопроса в `graph.invoke()` и проверка полного цикла генерации SQL, графика и текста.
 
-**Integration:** `repair_chart_spec` → `build_chart` на sample с penalties.
+## 2. Безопасность и RBAC (Row-Level Security)
 
-**Нормализация:** `normalize_chart_spec` добавляет `highlight_category` и прочие defaults.
+**Unit:** Подача запроса `SELECT * FROM sales` с контекстом `role=minsk_manager`. Ожидается `SELECT * FROM sales WHERE region='Минск'`.
+Тест падает, если парсер не вставляет фильтр.
 
-**Planner-orchestrated:** data → chart в плане → spec в trace → buildable.
+## 3. SQL Eval (eval_node)
 
-**Ручные сценарии:** «динамика по регионам», «структура налогов (доли)», «корреляция», «водопад».
+**Unit:** Подача синтаксически неверного запроса. Узел должен вернуть `isValid = False` и вернуть State обратно в `data_node` на перегенерацию.
 
----
+## 4. UI / UX (React + WebSocket)
 
-## 2. Дашборды (DashboardAgent)
-
-**Unit:** mock composition → DashboardResult (KPI, charts, layout).
-
-**Integration:** reuse ChartAgent на chart_ideas, graceful sub-errors.
-
-**UI:** вкладка «Дашборд», post-gen editor, region filters (режим аналитика).
-
----
-
-## 3. Презентации (PresentationAgent)
-
-**Unit:** mock ask results → .pptx, exact slide count, prefs override.
-
-**Integration:** visuals из ChartSpec, DeckNarrative, appendix.
-
-**UI:** вкладка «Презентация», очередь, режимы «По вопросам» / «Одной темой».
+**Smoke:**
+- Подключение к WebSocket endpoint `/ws/chat`.
+- Отправка JSON payload.
+- Получение SSE событий со статусами (streaming).
 
 ---
 
-## 4. PlannerAgent
+## Чеклист перед демо
 
-**Unit:** `_repair_plan`, `_invoke_agent`, topo sort, brief results, quality scoring.
-
-**Integration:** diamond (data → chart → analyst), high-level dashboard/pres plans.
-
-**Trace:** `PlannerTrace` в результате, JSON download в UI (режим аналитика).
-
-**Ошибки:** chart_agent fail → graceful, UI «Нет данных» без ложного анализа.
-
----
-
-## 5. UI / UX (smoke + manual)
-
-**Автоматически (smoke):**
-- импорт `streamlit_app` без ошибок;
-- наличие `GOV_DISCLAIMER`, `Мой дашборд`, `_render_unified_action_bar`;
-- режимы `ui_mode`, глобальные фильтры.
-
-**Ручная проверка:**
-- переключатель «Для руководства» / «Для аналитика»;
-- сворачивание/раскрытие сайдбара;
-- drill-down по клику на графике;
-- pin на «Мой дашборд»;
-- сохранение сессии JSON.
-
----
-
-## 6. Showcase
-
-```bash
-python scripts/generate_leadership_showcase.py
-python -m pytest tests/test_showcase.py -q
-```
-
-- 12 chart types в каталоге;
-- 4 presentation bundles;
-- `manifest.json` — только относительные пути, без `slide_pngs` из `/tmp`.
-
----
-
-## Live-тесты (опционально)
-
-```bash
-# Требует: ollama serve + qwen2.5-coder:7b-instruct
-python -m pytest -m live -q
-```
-
-Использовать для проверки после смены модели или промптов.
-
----
-
-## Чеклист перед демо руководству
-
-Документ для совещания: [OBZOR_DLYA_RUKOVODSTVA.md](../OBZOR_DLYA_RUKOVODSTVA.md).
-
-1. `ollama list` — модель на месте.
-2. `streamlit run ui/streamlit_app.py` — UI открывается, Ollama: ok.
-3. Режим «Для руководства».
-4. Happy-path запросы (30–90 с каждый):
-   - «Какая задолженность по регионам?»
-   - «Структура налогов по видам (доли)»
-   - «Динамика начислений в г. Минск за год»
-5. Showcase офлайн: открыть `showcase/presentations/01_obzor_nalogov_RB.pptx`.
-6. При ошибке chart — карточка «Нет данных», не trace в режиме руководства.
+1. `docker-compose up -d` (запуск ClickHouse).
+2. `ollama list` — проверить наличие `qwen2.5-coder:7b-instruct`.
+3. Запуск бэкенда: `uvicorn app.main:app`.
+4. Запуск фронтенда: `npm run dev` в папке `frontend_web`.
+5. Тестовые вопросы с Drill-down:
+   - Кликнуть по городу Минск на графике. Убедиться, что отправляется новый запрос с фильтром.
+   - Выгрузить график в PNG.
+   - Скачать данные в Excel.

@@ -17,6 +17,7 @@ from pptx.util import Inches
 
 from app.agents.models import AnalysisResult, AskResult, DeckNarrative
 from app.chart_repair import repair_chart_spec
+from app.presentation_renderer import PresentationRenderer, PresentationTheme
 from app.showcase_catalog import (
     ChartShowcaseEntry,
     PresentationBundle,
@@ -24,7 +25,6 @@ from app.showcase_catalog import (
     presentation_bundles,
     waterfall_demo_df,
 )
-from app.presentation_renderer import PresentationRenderer, PresentationTheme
 from core.models import ChartSpec
 from viz.charts import build_chart, export_html, export_png
 

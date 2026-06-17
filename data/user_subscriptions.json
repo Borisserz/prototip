@@ -1,0 +1,20 @@
+[
+  {
+    "email": "boss@tax.gov.by",
+    "role": "admin",
+    "question": "Составь подробный отчет: динамика начислений и задолженностей по налогам за последний год по всей стране.",
+    "schedule": {"day_of_week": "mon", "hour": 9, "minute": 0}
+  },
+  {
+    "email": "grodno_head@tax.gov.by",
+    "role": "grodno_manager",
+    "question": "Составь отчет по динамике начислений и топ-плательщикам по задолженности.",
+    "schedule": {"day_of_week": "mon", "hour": 9, "minute": 0}
+  },
+  {
+    "email": "minsk_head@tax.gov.by",
+    "role": "minsk_manager",
+    "question": "Динамика начислений и топ-плательщикам по задолженности.",
+    "schedule": {"day_of_week": "mon", "hour": 9, "minute": 0}
+  }
+]
