@@ -31,7 +31,7 @@ const C_BORDER  = '#1e2a4a';
 // ─── Inline styles helpers ─────────────────────────────────────────────────
 const flex = (gap = 0) => `display:flex;gap:${gap}px;`;
 const card = (bg = BG_CARD, border = C_BORDER) =>
-  `background:${bg};border:1px solid ${border};border-radius:12px;padding:18px;`;
+  `background:${bg};border:1px solid ${border};border-radius:12px;padding:18px;box-sizing:border-box;`;
 
 /** Format large numbers compactly: 13_140_000_000 → 13.1B */
 function fmt(val: number): string {
@@ -41,6 +41,13 @@ function fmt(val: number): string {
   if (abs >= 1e6)  return (val / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
   if (abs >= 1e3)  return (val / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
   return val % 1 === 0 ? String(val) : val.toFixed(1);
+}
+
+/** KPI value: compact-format raw numbers, keep already-formatted strings as-is. */
+function kpiVal(v: any): string {
+  if (v == null) return '—';
+  if (typeof v === 'number' && Number.isFinite(v)) return fmt(v);
+  return String(v);
 }
 
 // ─── Build chart mini-SVG (bar) ─────────────────────────────────────────────
@@ -57,8 +64,8 @@ function buildBarSVG(
   const maxVal = Math.max(...values, 1);
   const PAD_L = horizontal ? 80 : 20;
   const PAD_B = horizontal ? 10 : 28;
-  const PAD_T = 10;
-  const PAD_R = 10;
+  const PAD_T = horizontal ? 10 : 18;
+  const PAD_R = horizontal ? 14 : 10;
   const cW = w - PAD_L - PAD_R;
   const cH = h - PAD_T - PAD_B;
   const n = rawData.length;
@@ -76,9 +83,14 @@ function buildBarSVG(
       bars += `<rect x="${PAD_L}" y="${by}" width="${bw}" height="${bh}" rx="3" fill="${color}" opacity="0.85"/>`;
       const label = String(d[xKey] || '').slice(0, 16);
       labels += `<text x="${PAD_L - 4}" y="${by + bh / 2 + 4}" text-anchor="end" font-size="9" fill="${C_SLATE3}" font-family="Arial">${label}</text>`;
-      // value label at end of bar
+      // value label at end of bar — keep inside the canvas to avoid clipping
       const valLabel = fmt(val);
-      labels += `<text x="${PAD_L + bw + 3}" y="${by + bh / 2 + 4}" text-anchor="start" font-size="8.5" font-weight="bold" fill="${C_WHITE}" font-family="Arial">${valLabel}</text>`;
+      const estW = valLabel.length * 5.2 + 6;
+      const endX = PAD_L + bw + 3;
+      const overflow = endX + estW > w - 2;
+      const vlX = overflow ? Math.max(PAD_L + bw - 4, PAD_L + 4) : endX;
+      const vlAnchor = overflow ? 'end' : 'start';
+      labels += `<text x="${vlX}" y="${by + bh / 2 + 4}" text-anchor="${vlAnchor}" font-size="8.5" font-weight="bold" fill="${C_WHITE}" font-family="Arial">${valLabel}</text>`;
     });
   } else {
     const colW = cW / n;
@@ -91,9 +103,10 @@ function buildBarSVG(
       bars += `<rect x="${bx}" y="${by}" width="${barW}" height="${bh}" rx="3" fill="${color}" opacity="0.85"/>`;
       const label = String(d[xKey] || '').slice(0, 8);
       labels += `<text x="${bx + barW / 2}" y="${PAD_T + cH + 14}" text-anchor="middle" font-size="8" fill="${C_SLATE3}" font-family="Arial">${label}</text>`;
-      // value label above bar
+      // value label above bar — clamp so a full-height bar's label is not clipped at the top
       const valLabel = fmt(val);
-      labels += `<text x="${bx + barW / 2}" y="${by - 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="${C_WHITE}" font-family="Arial">${valLabel}</text>`;
+      const vlY = Math.max(by - 3, 9);
+      labels += `<text x="${bx + barW / 2}" y="${vlY}" text-anchor="middle" font-size="8" font-weight="bold" fill="${C_WHITE}" font-family="Arial">${valLabel}</text>`;
     });
   }
 
@@ -125,7 +138,7 @@ function buildLineSVG(rawData: any[], xKey: string, yKey: string, w = 380, h = 1
 
   const pts = rawData.map((d, i) => ({
     x: PAD.l + (i / (n - 1)) * cW,
-    y: PAD.t + cH - ((Number(d[yKey]) || 0 - minV) / range) * cH,
+    y: PAD.t + cH - (((Number(d[yKey]) || 0) - minV) / range) * cH,
   }));
 
   const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
@@ -268,11 +281,11 @@ function buildExportHTML(data: any): string {
       <div style="font-size:10px;font-weight:700;color:${C_SLATE5};letter-spacing:1px;margin-bottom:12px;text-transform:uppercase;">Ключевые показатели</div>
       <div style="${flex(12)}flex-wrap:wrap;">
         ${kpiCards.slice(0, 4).map((k: any) => `
-          <div style="${card()}flex:1;min-width:160px;">
-            <div style="font-size:11px;color:${C_SLATE3};margin-bottom:8px;line-height:1.3;">${k.name || ''}</div>
-            <div style="${flex(6)}align-items:baseline;">
-              <span style="font-size:24px;font-weight:800;color:${C_WHITE};">${k.value ?? '—'}</span>
-              ${k.unit ? `<span style="font-size:11px;color:${C_SLATE5};margin-left:4px;">${k.unit}</span>` : ''}
+          <div style="${card()}flex:1 1 160px;min-width:0;max-width:260px;overflow:hidden;">
+            <div style="font-size:11px;color:${C_SLATE3};margin-bottom:8px;line-height:1.3;overflow-wrap:anywhere;">${k.name || ''}</div>
+            <div style="${flex(6)}align-items:baseline;flex-wrap:wrap;min-width:0;">
+              <span style="font-size:24px;font-weight:800;color:${C_WHITE};line-height:1.15;overflow-wrap:anywhere;word-break:break-word;">${kpiVal(k.value)}</span>
+              ${k.unit ? `<span style="font-size:11px;color:${C_SLATE5};margin-left:4px;white-space:nowrap;">${k.unit}</span>` : ''}
             </div>
             ${k.change != null ? `
               <div style="font-size:10px;color:${k.change > 0 ? C_EMERALD : C_ROSE};margin-top:6px;">
@@ -303,7 +316,7 @@ function buildExportHTML(data: any): string {
         ${charts.map((c: any) => `
           <div style="${card()}grid-column:${charts.length === 1 ? 'span 2' : 'span 1'};">
             <div style="font-size:12px;font-weight:700;color:${C_WHITE};margin-bottom:10px;">${c.title || ''}</div>
-            <div style="overflow:hidden;">${buildChartSVG(c, 340)}</div>
+            <div style="overflow:visible;">${buildChartSVG(c, 340)}</div>
           </div>`).join('')}
       </div>
     </div>` : '';
@@ -338,6 +351,7 @@ function buildExportHTML(data: any): string {
   return `
     <div style="
       width: 900px;
+      box-sizing: border-box;
       background: ${BG_PAGE};
       font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
       color: ${C_WHITE};

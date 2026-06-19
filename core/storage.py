@@ -159,6 +159,49 @@ def presigned_url(object_name: str, bucket: str | None = None, expires_days: int
         return None
 
 
+def download_to_path(
+    object_name: str,
+    dest_path: str | Path,
+    bucket: str | None = None,
+) -> str | None:
+    """Скачивает объект из MinIO в локальный файл. Возвращает путь или None (никогда не падает)."""
+    if not is_enabled():
+        return None
+    bucket = bucket or MINIO_BUCKET
+    dest = Path(dest_path)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        client = get_client()
+        client.fget_object(bucket, object_name, str(dest))
+        logger.info("MinIO: скачан %s/%s -> %s", bucket, object_name, dest)
+        return str(dest)
+    except Exception as e:
+        logger.warning("MinIO: ошибка fget_object %s: %s", object_name, e)
+        return None
+
+
+def fetch_bytes(object_name: str, bucket: str | None = None) -> bytes | None:
+    """Читает объект из MinIO в память. Возвращает bytes или None."""
+    if not is_enabled():
+        return None
+    bucket = bucket or MINIO_BUCKET
+    resp = None
+    try:
+        client = get_client()
+        resp = client.get_object(bucket, object_name)
+        return resp.read()
+    except Exception as e:
+        logger.warning("MinIO: ошибка get_object %s: %s", object_name, e)
+        return None
+    finally:
+        try:
+            if resp is not None:
+                resp.close()
+                resp.release_conn()
+        except Exception:
+            pass
+
+
 def mirror_artifact(local_path: str | Path, prefix: str = "") -> str:
     """Удобный хелпер для кода-генераторов.
 

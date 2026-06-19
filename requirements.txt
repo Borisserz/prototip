@@ -38,3 +38,4 @@ sqlglot
 openai
 google-genai
 minio
+python-docx

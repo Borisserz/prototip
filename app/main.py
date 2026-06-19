@@ -560,6 +560,46 @@ def export_custom_excel(payload: ExportRequest):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+class ReportDocxRequest(BaseModel):
+    """Запрос на сборку отчёта в формате Word (.docx) — Phase 2."""
+    markdown: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    question: str | None = None
+    data: list[dict] | None = None
+    charts: list[dict] | None = None
+
+
+@app.post("/api/v1/export/report-docx", tags=["export"])
+def export_report_docx(payload: ReportDocxRequest):
+    """Сборка отчёта в .docx из размеченного Markdown (или question+data).
+
+    Графики (charts) рендерятся через viz/charts и вставляются в документ;
+    готовый .docx зеркалится в MinIO (бакет documents). Возвращает файл на скачивание,
+    а presigned URL (если MinIO включён) — в заголовке X-MinIO-URL.
+    """
+    from app.agents.report_docx_agent import ReportChart, ReportDocxAgent, ReportDocxInput
+
+    charts = [ReportChart(**c) for c in (payload.charts or [])]
+    inp = ReportDocxInput(
+        markdown=payload.markdown,
+        title=payload.title,
+        subtitle=payload.subtitle,
+        question=payload.question,
+        data=payload.data,
+        charts=charts,
+    )
+    result = ReportDocxAgent().run(inp)
+    if not result.success:
+        raise HTTPException(500, result.error or "Не удалось собрать .docx")
+    return FileResponse(
+        result.docx_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=os.path.basename(result.docx_path),
+        headers={"X-MinIO-URL": result.url or ""},
+    )
+
+
 class EmailRequest(BaseModel):
     to: str | None = "chief@tax.gov.by"
     subject: str = "Отчет: Аналитика"
