@@ -72,6 +72,7 @@ class Orchestrator:
         graph_thread_id = str(uuid.uuid4())
         
         user_role = user.get("role", "manager") if user else "manager"
+        user_id = (user.get("username") or user.get("id")) if user else None
         with user_context(user_role):
             # Запуск графа LangGraph
             config_data = {"configurable": {"thread_id": graph_thread_id}}
@@ -79,6 +80,7 @@ class Orchestrator:
                 "question": question,
                 "drilldown": drilldown,
                 "user_role": user_role,
+                "user_id": user_id,
                 "messages": [],
                 "tasks_completed": [],
                 "agent_results": {}
@@ -104,6 +106,14 @@ class Orchestrator:
             excel_path=getattr(res, "excel_path", ""),
             pptx_path=getattr(res, "pptx_path", "")
         )
+
+        # Phase 4: запись в долгосрочную память (профиль/RAG по истории).
+        # Внутри полностью защищено try/except — не влияет на ответ пользователю.
+        try:
+            from core.memory_store import memory_store
+            memory_store.log_interaction(user_id, question, brief)
+        except Exception as mem_err:  # noqa: BLE001
+            logger.warning(f"[Orchestrator] memory log skipped: {mem_err}")
         
         run_logger.log_event(
             "ask_end",
@@ -133,6 +143,7 @@ class Orchestrator:
             "question": question,
             "drilldown": drilldown,
             "user_role": user.get("role", "manager") if user else "manager",
+            "user_id": (user.get("username") or user.get("id")) if user else None,
             "messages": [],
         }
         

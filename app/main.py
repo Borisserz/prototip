@@ -68,6 +68,13 @@ async def lifespan(app: FastAPI):
         initialize_dashboard_rag()
     except Exception as e:
         print(f"Schema Knowledge RAG Error: {e}")
+
+    # Phase 4: таблицы долгосрочной памяти (профили + история чата)
+    try:
+        from core.memory_store import memory_store
+        memory_store.init_tables()
+    except Exception as e:
+        print(f"Memory Store Init Error: {e}")
     
     yield
     # При остановке приложения здесь можно корректно завершить шедулер
@@ -645,6 +652,71 @@ def forecast_endpoint(payload: ForecastRequest):
         "y": y_col,
         "title": result.chart_spec.title if result.chart_spec else f"Прогноз: {y_col}",
         "reasoning": result.reasoning,
+    }
+
+
+# ─── Долгосрочная память пользователя (Phase 4) ────────────────────────────────
+class UserProfileRequest(BaseModel):
+    """Описание пользователя для долгосрочной памяти."""
+
+    profile: str = Field("", description="Текстовое описание пользователя (кто он, чем занимается)")
+    role: str = Field("", description="Роль/должность (опционально)")
+
+
+@app.get("/api/v1/memory/profile", tags=["memory"])
+def get_memory_profile(user: dict = Depends(get_current_user)):
+    """Профиль текущего пользователя из долгосрочной памяти."""
+    from core.memory_store import memory_store
+
+    user_id = user.get("username") or user.get("id")
+    profile = memory_store.get_profile(user_id) if user_id else None
+    return {
+        "user_id": user_id,
+        "profile": (profile or {}).get("profile", ""),
+        "role": (profile or {}).get("role", "") or user.get("role", ""),
+        "exists": profile is not None,
+    }
+
+
+@app.put("/api/v1/memory/profile", tags=["memory"])
+def update_memory_profile(payload: UserProfileRequest, user: dict = Depends(get_current_user)):
+    """Создаёт/обновляет профиль пользователя (используется Memory Node в System Prompt)."""
+    from core.memory_store import memory_store
+
+    user_id = user.get("username") or user.get("id")
+    if not user_id:
+        raise HTTPException(400, "Не удалось определить пользователя")
+    role = payload.role or user.get("role", "")
+    ok = memory_store.upsert_profile(user_id, payload.profile, role)
+    if not ok:
+        raise HTTPException(500, "Не удалось сохранить профиль")
+    return {"success": True, "user_id": user_id, "profile": payload.profile, "role": role}
+
+
+@app.get("/api/v1/memory/history", tags=["memory"])
+def get_memory_history(limit: int = 20, user: dict = Depends(get_current_user)):
+    """Последние записи истории чата текущего пользователя."""
+    from core.memory_store import memory_store
+
+    user_id = user.get("username") or user.get("id")
+    history = memory_store.recent_history(user_id, limit=max(1, min(limit, 200))) if user_id else []
+    return {"user_id": user_id, "count": len(history), "history": history}
+
+
+@app.get("/api/v1/memory/recall", tags=["memory"])
+def recall_memory(q: str, days: int = 7, k: int = 5, user: dict = Depends(get_current_user)):
+    """Семантический поиск по прошлым запросам пользователя (отладка Memory Node)."""
+    from core.memory_store import memory_store
+
+    user_id = user.get("username") or user.get("id")
+    if not user_id:
+        return {"user_id": None, "hits": [], "context": ""}
+    hits = memory_store.search_recent(user_id, q, days=days, k=k)
+    context = memory_store.build_memory_context(user_id, q, days=days, k=k)
+    return {
+        "user_id": user_id,
+        "hits": [{"prompt": h["prompt"], "ts": str(h["ts"]), "dist": h["dist"]} for h in hits],
+        "context": context,
     }
 
 

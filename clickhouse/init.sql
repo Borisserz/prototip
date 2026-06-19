@@ -32,3 +32,29 @@ AS SELECT
     sum(penalties) AS total_penalties
 FROM default.tax_data
 GROUP BY period, region;
+
+
+-- ===================== Phase 4: Долгосрочная память =====================
+-- Профили пользователей (описание: кто пользователь, чем занимается)
+CREATE TABLE IF NOT EXISTS default.user_profiles
+(
+    user_id    String COMMENT 'Идентификатор пользователя (username из JWT)',
+    profile    String COMMENT 'Текстовое описание пользователя',
+    role       String DEFAULT '' COMMENT 'Роль/должность',
+    updated_at DateTime DEFAULT now() COMMENT 'Время последнего обновления'
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY user_id;
+
+-- Журнал истории чата + эмбеддинг запроса (RAG по прошлым запросам пользователя)
+CREATE TABLE IF NOT EXISTS default.chat_history_logs
+(
+    id        String COMMENT 'UUID записи',
+    user_id   String COMMENT 'Идентификатор пользователя',
+    prompt    String COMMENT 'Запрос пользователя',
+    response  String COMMENT 'Ответ системы',
+    ts        DateTime DEFAULT now() COMMENT 'Временная метка',
+    embedding Array(Float32) COMMENT 'Эмбеддинг запроса (all-MiniLM-L6-v2, 384d)'
+)
+ENGINE = MergeTree()
+ORDER BY (user_id, ts);
