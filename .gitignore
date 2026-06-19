@@ -161,3 +161,7 @@ copy_project_to_clipboard.sh
 eval/
 evals/
 vertex-creds.json
+
+# GCP / Vertex ключи сервис-аккаунта (НЕ коммитить!)
+secrets/*
+!secrets/README.md
