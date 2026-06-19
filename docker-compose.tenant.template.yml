@@ -1,0 +1,32 @@
+# Шаблон ПЕРСОНАЛЬНОГО ClickHouse-контейнера клиента (Phase 6, multi-tenant).
+#
+# Файл генерируется автоматически скриптом scripts/build_tenant.py
+# (там подставляются client_id, порты, пароль). Этот файл — образец для ручной
+# сборки/он-прем развёртывания изолированного клиента.
+#
+# Запуск:  docker compose -f docker-compose.tenant.template.yml up -d
+#
+# Плейсхолдеры: ${CLIENT_ID}, ${CH_HTTP_PORT}, ${CH_NATIVE_PORT}, ${CH_PASSWORD}
+
+services:
+  clickhouse_${CLIENT_ID}:
+    image: clickhouse/clickhouse-server:latest
+    container_name: ch_${CLIENT_ID}
+    ports:
+      - "${CH_HTTP_PORT}:8123"     # HTTP API клиента
+      - "${CH_NATIVE_PORT}:9000"   # Native protocol
+    environment:
+      - CLICKHOUSE_DB=tenant_${CLIENT_ID}
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CH_PASSWORD}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - ch_${CLIENT_ID}_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ch_${CLIENT_ID}_data:

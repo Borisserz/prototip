@@ -83,38 +83,53 @@ class DataAgent(BaseAgent):
         # Заменяем обращения к таблице df на enterprise_taxes если нужно (совместимость со старыми few-shot)
         ch_sql = re.sub(r'(?i)\bFROM df\b', 'FROM default.enterprise_taxes', sql)
         
-        from app.agent_context import get_user_role
-        import sqlglot
-        from sqlglot import exp
-        
+        from app.agent_context import get_current_tenant, get_user_role
+
         role = get_user_role()
         region_filter = None
         if role == "grodno_manager":
             region_filter = "г. Гродно"
         elif role == "minsk_manager":
             region_filter = "г. Минск"
-            
-        if region_filter:
+
+        # Phase 6: жёсткая валидация + изоляция клиента (allowed tables + WHERE client_id)
+        tenant = get_current_tenant()
+        extra_filters = {"region": region_filter} if region_filter else None
+        from core.sql_guard import SqlSecurityError, secure_sql
+        try:
+            ch_sql = secure_sql(ch_sql, tenant=tenant, extra_filters=extra_filters)
+        except SqlSecurityError as sec_e:
+            logger.warning(f"[DataAgent] SQL заблокирован политикой безопасности: {sec_e}")
+            raise ValueError(f"Запрос отклонён политикой безопасности: {sec_e}")
+
+        # Маршрутизация: персональный ClickHouse клиента (multi-tenant) или общий DWH
+        run_client = ch_client
+        if tenant is not None and getattr(tenant, "clickhouse", None):
             try:
-                parsed = sqlglot.parse_one(ch_sql, read="clickhouse")
-                where_clause = exp.condition(f"region = '{region_filter}'")
-                parsed = parsed.where(where_clause)
-                ch_sql = parsed.sql(dialect="clickhouse")
-                logger.info(f"RLS Applied to DataAgent. Modified Query: {ch_sql}")
-            except Exception as parse_e:
-                logger.warning(f"Failed to parse query for RLS in DataAgent: {parse_e}")
-        
+                from core.tenant import tenant_store
+                _raw = tenant_store.get_clickhouse_client(tenant)
+
+                class _TenantCH:
+                    def execute_df(self, q):
+                        return _raw.query_df(q)
+
+                run_client = _TenantCH()
+                logger.info(f"[DataAgent] Маршрут в ClickHouse клиента '{tenant.client_id}'")
+            except Exception as route_e:
+                logger.error(f"[DataAgent] Не удалось подключиться к ClickHouse клиента: {route_e}")
+                raise ValueError(f"Ошибка подключения к БД клиента: {route_e}")
+
         # Eval: Проверка синтаксиса перед выполнением (SQL-Eval Pattern)
         try:
             explain_query = f"EXPLAIN SYNTAX {ch_sql}"
-            ch_client.execute_df(explain_query)
+            run_client.execute_df(explain_query)
             logger.info("[DataAgent] SQL Eval пройден (EXPLAIN SYNTAX)")
         except Exception as eval_e:
             logger.error(f"[DataAgent] SQL Eval (EXPLAIN) провалился: {eval_e}")
             raise ValueError(f"Ошибка в синтаксисе SQL или названиях таблиц/колонок: {eval_e}. Проверь семантическую модель.")
-        
+
         try:
-            df_result = ch_client.execute_df(ch_sql)
+            df_result = run_client.execute_df(ch_sql)
             logger.info("[DataAgent] Запрос успешно выполнен в ClickHouse")
             # Convert pandas timestamp / dates to strings to avoid JSON serialization issues
             for col in df_result.select_dtypes(include=['datetime64', 'datetimetz']).columns:

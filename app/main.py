@@ -720,6 +720,80 @@ def recall_memory(q: str, days: int = 7, k: int = 5, user: dict = Depends(get_cu
     }
 
 
+# ─── Управление клиентами (Phase 6: Multi-tenant B2B) ──────────────────────────
+class TenantCreateRequest(BaseModel):
+    """Создание клиента: личный ClickHouse + коллекция семантики + JWT."""
+
+    client_id: str
+    name: str
+    ch_host: str = "localhost"
+    ch_port: int = 8123
+    ch_database: str = "default"
+    ch_user: str = "default"
+    ch_password: str = ""
+    vector_collection: str | None = None
+    allowed_tables: list[str] = Field(default_factory=list)
+    enforce_client_id: bool = False
+    client_id_value: str | None = None
+
+
+@app.get("/api/v1/admin/tenants", tags=["admin"])
+def list_tenants_endpoint():
+    """Список клиентов (без секретов)."""
+    from core.tenant import tenant_store
+
+    return {"tenants": [t.to_public() for t in tenant_store.list_tenants()]}
+
+
+@app.post("/api/v1/admin/tenants", tags=["admin"])
+def create_tenant_endpoint(payload: TenantCreateRequest):
+    """Создаёт клиента, возвращает его конфиг + уникальный JWT-токен и API-ключ."""
+    from core.tenant import tenant_store
+
+    try:
+        t = tenant_store.create_tenant(
+            client_id=payload.client_id,
+            name=payload.name,
+            ch_host=payload.ch_host,
+            ch_port=payload.ch_port,
+            ch_database=payload.ch_database,
+            ch_user=payload.ch_user,
+            ch_password=payload.ch_password,
+            vector_collection=payload.vector_collection,
+            allowed_tables=payload.allowed_tables,
+            enforce_client_id=payload.enforce_client_id,
+            client_id_value=payload.client_id_value,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    out = t.to_public()
+    out["jwt_token"] = t.jwt_token
+    out["api_key"] = t.api_key
+    return out
+
+
+@app.post("/api/v1/admin/tenants/{client_id}/rotate-token", tags=["admin"])
+def rotate_tenant_token(client_id: str):
+    """Перевыпускает JWT-токен и API-ключ клиента."""
+    from core.tenant import tenant_store
+
+    t = tenant_store.rotate_token(client_id)
+    if not t:
+        raise HTTPException(404, "Клиент не найден")
+    return {"client_id": client_id, "jwt_token": t.jwt_token, "api_key": t.api_key}
+
+
+@app.delete("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+def delete_tenant_endpoint(client_id: str):
+    """Удаляет клиента из реестра."""
+    from core.tenant import tenant_store
+
+    ok = tenant_store.delete_tenant(client_id)
+    if not ok:
+        raise HTTPException(404, "Клиент не найден")
+    return {"success": True, "client_id": client_id}
+
+
 class PromptUpdateRequest(BaseModel):
     role: str
     goal: str
