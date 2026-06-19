@@ -10,6 +10,7 @@ from pypdf import PdfReader
 
 from app.presentation_renderer import PresentationRenderer, PresentationTheme
 from core.llm import call_structured
+from core import storage
 
 logger = logging.getLogger("PdfPresentation")
 
@@ -98,6 +99,8 @@ def generate_presentation_from_pdf(pdf_path: str) -> str:
     renderer.create_takeaways_slide(prs.slides.add_slide(blank), spec.takeaways)
     
     prs.save(str(pptx_path))
+    # Phase 1: зеркалим .pptx в MinIO (неломающе)
+    storage.mirror_artifact(pptx_path, "presentations")
     elapsed = int((time.time() - start_time) * 1000)
     logger.info(f"PDF Presentation готова: {pptx_path} ({elapsed}ms)")
     

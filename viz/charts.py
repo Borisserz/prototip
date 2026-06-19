@@ -17,6 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from core.models import ChartSpec
+from core import storage
 
 from .style import (
     CHART_HEIGHT,
@@ -501,6 +502,8 @@ def export_png(
     w = width or CHART_WIDTH
     h = height or CHART_HEIGHT
     fig.write_image(str(p), width=w, height=h, scale=scale)
+    # Phase 1: зеркалим PNG в MinIO (неломающе; при отключённом MinIO — no-op)
+    storage.mirror_artifact(p, "charts")
     return p
 
 
@@ -509,4 +512,6 @@ def export_html(fig: go.Figure, path: str | Path, include_plotlyjs: str = "cdn")
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(p), include_plotlyjs=include_plotlyjs, full_html=True)
+    # Phase 1: зеркалим HTML в MinIO (неломающе)
+    storage.mirror_artifact(p, "charts")
     return p
