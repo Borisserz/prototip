@@ -138,6 +138,10 @@ services:
       - MINIO_SECURE=false
       - MINIO_BUCKET=artifacts
       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9100}
+      # Долгосрочная память (Phase 4) — хранилище в ClickHouse, эмбеддинги all-MiniLM-L6-v2
+      - MEMORY_ENABLED=${MEMORY_ENABLED:-true}
+      - MEMORY_RAG_DAYS=${MEMORY_RAG_DAYS:-7}
+      - MEMORY_RAG_TOPK=${MEMORY_RAG_TOPK:-5}
     volumes:
       - backend_out:/app/out
       # Ключ сервис-аккаунта GCP для Vertex (положите secrets/gcp.json; read-only)

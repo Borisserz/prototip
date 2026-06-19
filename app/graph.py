@@ -25,9 +25,11 @@ class GraphState(TypedDict):
     question: str
     drilldown: Optional[DrilldownContext]
     user_role: Optional[str]
-    
+    user_id: Optional[str]
+
     # State accumulated
     business_context: Optional[str]
+    memory_context: Optional[str]
     sub_questions: Optional[list[str]]
     raw_data: Optional[list]
     sql: Optional[str]
@@ -43,6 +45,34 @@ class GraphState(TypedDict):
     raw_analysis_dict: Optional[dict]
     eval_feedback: Optional[str]
     eval_retry_count: Optional[int]
+
+def memory_node(state: GraphState) -> dict:
+    """Phase 4: узел долгосрочной памяти.
+
+    Перед генерацией SQL делает RAG-поиск по запросам пользователя за последнюю
+    неделю и собирает фрагмент для обогащения System Prompt (профиль + недавние
+    запросы). Полностью устойчив: при любой ошибке возвращает пустой контекст.
+    """
+    from app.agent_context import emit_node_event
+    emit_node_event("Память (RAG)")
+
+    user_id = state.get("user_id")
+    if not user_id:
+        return {"memory_context": ""}
+
+    try:
+        from core.memory_store import memory_store
+
+        ctx = memory_store.build_memory_context(user_id, state["question"])
+        if ctx:
+            logger.info("[Memory Node] Контекст памяти собран для user_id=%s (%d симв.)", user_id, len(ctx))
+        else:
+            logger.info("[Memory Node] Памяти по user_id=%s пока нет.", user_id)
+        return {"memory_context": ctx}
+    except Exception as e:  # noqa: BLE001
+        logger.error("[Memory Node] Ошибка сборки памяти (игнорирую): %s", e)
+        return {"memory_context": ""}
+
 
 def planner_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
@@ -138,13 +168,15 @@ def data_node(state: GraphState) -> dict:
     
     from app.agent_context import user_context
     from app.agents.models import DataAgentInput
+    memory_context = state.get("memory_context") or ""
+    memory_block = f"{memory_context}\n" if memory_context else ""
     with user_context(user_role):
         for idx, task in enumerate(sub_questions):
             logger.info(f"[Data Node] Running sub-task {idx+1}/{len(sub_questions)}: {task}")
             
             # Build DataAgentInput with drilldown filters
             inp = DataAgentInput(
-                question=f"Контекст: {state.get('business_context', '')}\nВопрос: {task}\nРоль пользователя (RBAC): {user_role}",
+                question=f"{memory_block}Контекст: {state.get('business_context', '')}\nВопрос: {task}\nРоль пользователя (RBAC): {user_role}",
                 drilldown_filters=drilldown_filters
             )
             res = agent.run(inp)
@@ -512,6 +544,7 @@ def forecast_node(state: GraphState) -> dict:
 def build_graph() -> StateGraph:
     workflow = StateGraph(GraphState)
     
+    workflow.add_node("memory", memory_node)
     workflow.add_node("search", search_node)
     workflow.add_node("planner", planner_node)
     workflow.add_node("supervisor", supervisor_node)
@@ -522,7 +555,8 @@ def build_graph() -> StateGraph:
     workflow.add_node("forecast", forecast_node)
 
     
-    workflow.add_edge(START, "search")
+    workflow.add_edge(START, "memory")
+    workflow.add_edge("memory", "search")
     
     workflow.add_conditional_edges(
         "search",
