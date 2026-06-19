@@ -600,6 +600,66 @@ def export_report_docx(payload: ReportDocxRequest):
     )
 
 
+# ─── Центр управления промптами (Phase 3) ───────────────────────────────────
+class PromptUpdateRequest(BaseModel):
+    role: str
+    goal: str
+    rules: str
+    few_shot: str = ""
+
+
+class RawYamlRequest(BaseModel):
+    raw_yaml: str
+
+
+@app.get("/api/v1/admin/prompts", tags=["admin"])
+def get_all_prompts():
+    """Все конфигурации агентов (промпты) + сырой YAML для редактора."""
+    from core.prompt_store import prompt_store
+    try:
+        return {"agents": prompt_store.load_all(force=True), "raw": prompt_store.get_raw()}
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось прочитать промпты: {e}")
+
+
+@app.get("/api/v1/admin/prompts/{agent_name}", tags=["admin"])
+def get_prompt(agent_name: str):
+    from core.prompt_store import prompt_store
+    try:
+        return prompt_store.get_agent(agent_name)
+    except KeyError:
+        raise HTTPException(404, f"Агент '{agent_name}' не найден")
+
+
+@app.put("/api/v1/admin/prompts/{agent_name}", tags=["admin"])
+def update_prompt(agent_name: str, payload: PromptUpdateRequest):
+    """Обновить промпт одного агента на лету (без рестарта). Подхватится графом."""
+    from core.prompt_store import prompt_store
+    try:
+        updated = prompt_store.update_agent(agent_name, payload.model_dump())
+        return {"status": "ok", "agent": agent_name, "config": updated}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/v1/admin/prompts", tags=["admin"])
+def replace_prompts(payload: RawYamlRequest):
+    """Заменить весь YAML промптов целиком (с валидацией всех агентов)."""
+    from core.prompt_store import prompt_store
+    try:
+        parsed = prompt_store.set_raw(payload.raw_yaml)
+        return {"status": "ok", "agents": list(parsed.keys())}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/v1/admin/prompts/reload", tags=["admin"])
+def reload_prompts():
+    """Принудительно перечитать YAML с диска."""
+    from core.prompt_store import prompt_store
+    return {"status": "ok", "agents": list(prompt_store.reload().keys())}
+
+
 class EmailRequest(BaseModel):
     to: str | None = "chief@tax.gov.by"
     subject: str = "Отчет: Аналитика"

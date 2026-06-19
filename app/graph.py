@@ -473,7 +473,41 @@ from langgraph.checkpoint.memory import MemorySaver
 def route_after_reviewer(state: GraphState) -> str:
     if state.get("eval_feedback"):
         return "analyst"
+    q = (state.get("question") or "").lower()
+    if any(k in q for k in ("прогноз", "экстрапол", "predict", "forecast")):
+        return "forecast"
     return "presenter"
+
+def forecast_node(state: GraphState) -> dict:
+    """Phase 3: узел предиктивной аналитики (numpy/scipy/statsmodels + LLM-резюме)."""
+    from app.agent_context import emit_node_event
+    emit_node_event("Прогнозирование")
+    logger.info("[Forecast Node] Building forecast via ForecastAnalystAgent.")
+    from app.agents.forecast_analyst_agent import ForecastAnalystAgent
+
+    agent = ForecastAnalystAgent()
+    res = agent.run(state["question"], data=state.get("raw_data", []))
+    if not res.success:
+        return {"final_result": AskResult(
+            question=state["question"], success=False,
+            reasoning=f"Не удалось построить прогноз: {res.error}", charts=[],
+        )}
+
+    chart_specs = [res.chart_spec] if res.chart_spec else []
+    final_reasoning = res.narrative
+    if res.chart_spec:
+        cd = {
+            "chart_type": res.chart_spec.chart_type,
+            "title": res.chart_spec.title,
+            "data": res.data,
+        }
+        final_reasoning += "\n\n```json\n" + json.dumps(cd, ensure_ascii=False) + "\n```"
+
+    return {"final_result": AskResult(
+        question=state["question"], success=True,
+        reasoning=final_reasoning, charts=chart_specs, sql=state.get("sql", ""),
+    )}
+
 
 def build_graph() -> StateGraph:
     workflow = StateGraph(GraphState)
@@ -485,6 +519,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("analyst", analyst_node)
     workflow.add_node("reviewer", reviewer_node)
     workflow.add_node("presenter", presenter_node)
+    workflow.add_node("forecast", forecast_node)
 
     
     workflow.add_edge(START, "search")
@@ -516,10 +551,12 @@ def build_graph() -> StateGraph:
         route_after_reviewer,
         {
             "analyst": "analyst",
-            "presenter": "presenter"
+            "presenter": "presenter",
+            "forecast": "forecast"
         }
     )
     workflow.add_edge("presenter", END)
+    workflow.add_edge("forecast", END)
     
     memory = MemorySaver()
     

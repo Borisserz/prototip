@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, X, Users, Shield, Activity, Database, Check, AlertCircle, BookOpen, FileDown, UploadCloud, Zap } from 'lucide-react';
+import { Settings, X, Users, Shield, Activity, Database, Check, AlertCircle, BookOpen, FileDown, UploadCloud, Zap, Bot } from 'lucide-react';
+import { PromptsAdmin } from './PromptsAdmin';
 import { Button } from '@/components/ui/button';
 
 interface AdminModalProps {
@@ -9,7 +10,7 @@ interface AdminModalProps {
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'rbac' | 'users' | 'logs' | 'knowledge' | 'subscriptions' | 'schema' | 'dropzone'>('rbac');
+  const [activeTab, setActiveTab] = useState<'rbac' | 'users' | 'logs' | 'knowledge' | 'subscriptions' | 'schema' | 'dropzone' | 'prompts'>('rbac');
   const [sessions, setSessions] = useState<any[]>([]);
   const [sqlLogs, setSqlLogs] = useState<any[]>([]);
   const [kbDocs, setKbDocs] = useState<any[]>([]);
@@ -160,11 +161,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                 >
                   <FileDown className="w-4 h-4 mr-3" /> ETL Dropzone
                 </Button>
+                <Button 
+                  variant={activeTab === 'prompts' ? 'secondary' : 'ghost'} 
+                  className={`w-full justify-start ${activeTab === 'prompts' ? 'bg-primary/20 text-primary' : 'text-slate-400 hover:text-white'}`}
+                  onClick={() => setActiveTab('prompts')}
+                >
+                  <Bot className="w-4 h-4 mr-3" /> Промпты агентов
+                </Button>
               </div>
 
 
               {/* Content Area */}
               <div className="flex-1 overflow-y-auto p-6 bg-slate-900/50">
+                {activeTab === 'prompts' && <PromptsAdmin />}
                 {activeTab === 'rbac' && (
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                     <div>
