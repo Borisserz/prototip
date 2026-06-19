@@ -5,6 +5,7 @@ import { DynamicChart } from '../chat/DynamicChart';
 import { Lightbulb, Info, TrendingUp, TrendingDown, Minus, CheckCircle2, BrainCircuit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportDashboardToPDF } from '../../utils/dashboardPdfExport';
+import { exportDashboardToWord } from '../../utils/dashboardWordExport';
 
 interface AIDashboardViewProps {
   onBackToChat: () => void;
@@ -82,10 +83,15 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ onBackToChat }
     }
   };
 
+  const handleExportWord = async () => {
+    if (!dashboardData) return;
+    await exportDashboardToWord(dashboardData);
+  };
+
   if (!dashboardData || dashboardData.charts.length === 0) {
     return (
       <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full pb-10">
-        <DashboardToolbar hasCharts={false} onClear={handleClear} onBackToChat={onBackToChat} onExport={handleExportDashboard} />
+        <DashboardToolbar hasCharts={false} onClear={handleClear} onBackToChat={onBackToChat} onExport={handleExportDashboard} onExportWord={handleExportWord} />
         <div className="flex-1 flex items-center justify-center border border-dashed border-white/10 rounded-2xl bg-white/5">
           <p className="text-slate-400">Нет сгенерированных данных.</p>
         </div>
@@ -101,6 +107,7 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ onBackToChat }
         onClear={handleClear}
         onBackToChat={onBackToChat}
         onExport={handleExportDashboard}
+        onExportWord={handleExportWord}
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar rounded-xl">

@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { Download, Trash2, LayoutDashboard, Check, Loader2 } from 'lucide-react';
+import { Download, Trash2, LayoutDashboard, Check, Loader2, FileText } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
 interface DashboardToolbarProps {
   onClear: () => void;
   onBackToChat: () => void;
   onExport: () => void;
+  onExportWord: () => void;
   hasCharts: boolean;
   title?: string;
 }
 
-export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, hasCharts, title }) => {
+export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, onExportWord, hasCharts, title }) => {
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [wordState, setWordState] = useState<'idle' | 'loading' | 'done'>('idle');
 
   const handleExport = async () => {
     setExportState('loading');
@@ -22,6 +24,18 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
       setExportState('idle');
     } finally {
       setTimeout(() => setExportState('idle'), 3000);
+    }
+  };
+
+  const handleExportWord = async () => {
+    setWordState('loading');
+    try {
+      await onExportWord();
+      setWordState('done');
+    } catch {
+      setWordState('idle');
+    } finally {
+      setTimeout(() => setWordState('idle'), 3000);
     }
   };
 
@@ -71,6 +85,23 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
           {exportState === 'done'    && <Check className="w-4 h-4 mr-2 text-emerald-400" />}
           {exportState === 'idle'    && <Download className="w-4 h-4 mr-2" />}
           {exportState === 'loading' ? 'Создание PDF…' : exportState === 'done' ? 'Готово!' : 'PDF'}
+        </Button>
+
+        <Button 
+          variant="outline"
+          onClick={handleExportWord}
+          disabled={wordState !== 'idle' || !hasCharts}
+          className={`min-w-[110px] border-slate-700/50 transition-all duration-300 ${
+            wordState === 'done' 
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+              : 'bg-slate-800/50 hover:bg-slate-700/50 text-slate-300'
+          }`}
+          title="Экспорт в Word (.docx)"
+        >
+          {wordState === 'loading' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {wordState === 'done'    && <Check className="w-4 h-4 mr-2 text-emerald-400" />}
+          {wordState === 'idle'    && <FileText className="w-4 h-4 mr-2" />}
+          {wordState === 'loading' ? 'Создание Word…' : wordState === 'done' ? 'Готово!' : 'Word'}
         </Button>
 
         <Button 
