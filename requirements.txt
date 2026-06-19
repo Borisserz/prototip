@@ -37,3 +37,4 @@ pdfplumber
 sqlglot
 openai
 google-genai
+minio

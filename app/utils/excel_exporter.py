@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from core import storage
+
 logger = logging.getLogger("ExcelExporter")
 
 def export_to_excel(data: list[dict], filename: str = "export.xlsx") -> str:
@@ -39,6 +41,8 @@ def export_to_excel(data: list[dict], filename: str = "export.xlsx") -> str:
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 
         logger.info(f"Excel экспорт успешно создан: {file_path}")
+        # Phase 1: зеркалим в MinIO (неломающе)
+        storage.mirror_artifact(file_path, "exports")
         return str(file_path)
     except Exception as e:
         logger.error(f"Ошибка генерации Excel: {e}")
