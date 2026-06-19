@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { Download, Trash2, LayoutDashboard, Check, Loader2 } from 'lucide-react';
+import { Download, Trash2, LayoutDashboard, Check, Loader2, FileText, TrendingUp } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
 interface DashboardToolbarProps {
   onClear: () => void;
   onBackToChat: () => void;
   onExport: () => void;
+  onExportWord: () => void;
+  onForecast?: () => void | Promise<void>;
   hasCharts: boolean;
+  canForecast?: boolean;
   title?: string;
 }
 
-export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, hasCharts, title }) => {
+export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, onExportWord, onForecast, hasCharts, canForecast = false, title }) => {
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [wordState, setWordState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [forecastState, setForecastState] = useState<'idle' | 'loading' | 'done'>('idle');
 
   const handleExport = async () => {
     setExportState('loading');
@@ -22,6 +27,31 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
       setExportState('idle');
     } finally {
       setTimeout(() => setExportState('idle'), 3000);
+    }
+  };
+
+  const handleExportWord = async () => {
+    setWordState('loading');
+    try {
+      await onExportWord();
+      setWordState('done');
+    } catch {
+      setWordState('idle');
+    } finally {
+      setTimeout(() => setWordState('idle'), 3000);
+    }
+  };
+
+  const handleForecast = async () => {
+    if (!onForecast) return;
+    setForecastState('loading');
+    try {
+      await onForecast();
+      setForecastState('done');
+    } catch {
+      setForecastState('idle');
+    } finally {
+      setTimeout(() => setForecastState('idle'), 3000);
     }
   };
 
@@ -57,6 +87,25 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
           Вернуться к чату
         </Button>
 
+        {onForecast && (
+          <Button
+            variant="outline"
+            onClick={handleForecast}
+            disabled={forecastState !== 'idle' || !canForecast}
+            className={`min-w-[120px] border-violet-500/30 transition-all duration-300 ${
+              forecastState === 'done'
+                ? 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+                : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-200'
+            }`}
+            title={canForecast ? 'Построить прогноз по временному ряду' : 'Нет подходящего временного ряда для прогноза'}
+          >
+            {forecastState === 'loading' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {forecastState === 'done'    && <Check className="w-4 h-4 mr-2 text-violet-300" />}
+            {forecastState === 'idle'    && <TrendingUp className="w-4 h-4 mr-2" />}
+            {forecastState === 'loading' ? 'Считаю…' : forecastState === 'done' ? 'Готово!' : 'Прогноз'}
+          </Button>
+        )}
+
         <Button 
           variant="outline"
           onClick={handleExport}
@@ -71,6 +120,23 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
           {exportState === 'done'    && <Check className="w-4 h-4 mr-2 text-emerald-400" />}
           {exportState === 'idle'    && <Download className="w-4 h-4 mr-2" />}
           {exportState === 'loading' ? 'Создание PDF…' : exportState === 'done' ? 'Готово!' : 'PDF'}
+        </Button>
+
+        <Button 
+          variant="outline"
+          onClick={handleExportWord}
+          disabled={wordState !== 'idle' || !hasCharts}
+          className={`min-w-[110px] border-slate-700/50 transition-all duration-300 ${
+            wordState === 'done' 
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+              : 'bg-slate-800/50 hover:bg-slate-700/50 text-slate-300'
+          }`}
+          title="Экспорт в Word (.docx)"
+        >
+          {wordState === 'loading' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          {wordState === 'done'    && <Check className="w-4 h-4 mr-2 text-emerald-400" />}
+          {wordState === 'idle'    && <FileText className="w-4 h-4 mr-2" />}
+          {wordState === 'loading' ? 'Создание Word…' : wordState === 'done' ? 'Готово!' : 'Word'}
         </Button>
 
         <Button 

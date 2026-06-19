@@ -39,3 +39,5 @@ openai
 google-genai
 minio
 python-docx
+scipy
+statsmodels
