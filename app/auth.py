@@ -82,8 +82,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
     username: str = payload.get("sub", payload.get("preferred_username"))
     role: str = payload.get("role", "manager")
-    
+    client_id: str | None = payload.get("client_id")
+
     if username is None:
         raise credentials_exception
         
-    return {"username": username, "role": role}
+    return {"username": username, "role": role, "client_id": client_id}

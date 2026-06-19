@@ -73,7 +73,16 @@ class Orchestrator:
         
         user_role = user.get("role", "manager") if user else "manager"
         user_id = (user.get("username") or user.get("id")) if user else None
-        with user_context(user_role):
+
+        # Phase 6: разрешаем клиента (tenant) по claim client_id из JWT
+        client_id = user.get("client_id") if user else None
+        from app.agent_context import tenant_context
+        from core.tenant import tenant_store
+        tenant = tenant_store.get_tenant(client_id) if client_id else None
+        if tenant is not None:
+            logger.info(f"[Orchestrator] Запрос в контексте клиента '{tenant.client_id}'")
+
+        with user_context(user_role), tenant_context(tenant):
             # Запуск графа LangGraph
             config_data = {"configurable": {"thread_id": graph_thread_id}}
             initial_state = {

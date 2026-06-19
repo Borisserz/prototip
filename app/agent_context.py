@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import queue
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 _subplan_depth: ContextVar[int] = ContextVar("subplan_depth", default=0)
 _user_role: ContextVar[str] = ContextVar("user_role", default="manager")
+_current_tenant: ContextVar[object | None] = ContextVar("current_tenant", default=None)
 
 
 def in_subplan() -> bool:
@@ -15,6 +17,21 @@ def in_subplan() -> bool:
 
 def get_user_role() -> str:
     return _user_role.get()
+
+
+def get_current_tenant():
+    """Активный клиент (Tenant) текущего запроса или None (single-tenant режим)."""
+    return _current_tenant.get()
+
+
+@contextmanager
+def tenant_context(tenant):
+    """Маркер: активный клиент (Phase 6, multi-tenant изоляция)."""
+    token = _current_tenant.set(tenant)
+    try:
+        yield
+    finally:
+        _current_tenant.reset(token)
 
 
 @contextmanager
@@ -36,7 +53,6 @@ def user_context(role: str):
     finally:
         _user_role.reset(token)
 
-import queue
 _debate_queue: ContextVar[queue.Queue | None] = ContextVar("debate_queue", default=None)
 
 @contextmanager
