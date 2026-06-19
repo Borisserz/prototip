@@ -54,6 +54,7 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
     from app.agents.data_agent import DataAgent
     from app.agents.presentation_agent import PresentationAgent
     from app.agents.rag_agent import RagAgent
+    from app.agents.report_docx_agent import ReportDocxAgent
 
     executor.register(DataAgent())
     executor.register(AnalystAgent())
@@ -61,6 +62,7 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
     executor.register(DashboardAgent())
     executor.register(PresentationAgent())
     executor.register(RagAgent())
+    executor.register(ReportDocxAgent())
 
     if include_planner:
         _register_planner_on_executor(executor)
