@@ -1,9 +1,3 @@
-# 🧠 PROTOTIP BI — Полная Архитектурная Документация
-
-> **Версия:** 1.0 · **Дата:** Июнь 2026 · **Статус:** Production-ready Prototype  
-> Мультиагентная BI-платформа с поддержкой естественного языка, ClickHouse и LangGraph
-
----
 
 ## Содержание
 
@@ -917,45 +911,7 @@ AgentResult (base)
 | Executive Summary | `ExecutiveSummary.tsx` | ✅ |
 | Auto Insights | `AutoInsights.tsx` | ✅ |
 
----
 
-## 15. Анализ: что готово к демонстрации
-
-### 15.1 Чек-лист по требованиям из встречи
-
-| Требование (из записи встречи) | Реализовано | Где |
-|-------------------------------|-------------|-----|
-| Чат-интерфейс с AI-аналитиком | ✅ | ChatContainer + WebSocket |
-| Графики (динамика, регионы, налоги) | ✅ | DynamicChart (13 типов) |
-| Drill-down по клику на бар | ✅ | handleChartClick + DrilldownContext |
-| Drill-down → другой тип (таблица/детали) | ✅ | DashboardAgent выбирает тип |
-| Скачать данные в Excel | ✅ | /api/export/excel |
-| Генерация презентации | ✅ | PresentationAgent + PresentationView |
-| Отправка на почту (кнопка) | ✅ | /api/v1/send-email |
-| История запросов (сессии) | ✅ | /api/v1/sessions |
-| ClickHouse как основная база | ✅ | DataAgent → ClickHouse |
-| RLS / ролевая безопасность | ✅ | JWT + SQLGlot AST-инъекция |
-| Семантический слой (описания полей) | ✅ | data/semantic_model.yaml + SemanticCatalog |
-| RAG (документы + схема) | ✅ | ChromaDB + rag_service.py |
-| Дашборд (КПИ + графики) | ✅ | DashboardAgent + AIDashboardView |
-| Проваливание в данные (drill-down из дашборда) | ✅ | DrilldownContext сквозная |
-| PDF → презентация | ✅ | /api/v1/pdf/analyze |
-| Загрузка своих данных (CSV/XLSX) | ✅ | WorkspaceDBView + /workspace/upload |
-| Прозрачность работы агентов | ✅ | AgentGraph + debate events |
-| Prometheus метрики | ✅ | /metrics |
-
-### 15.2 Статус реализации по слоям
-
-```
-✅ БЭКЕНД:       100% — все агенты, граф, API, сервисы
-✅ ФРОНТЕНД:     100% — все вьюхи, компоненты, взаимодействия
-✅ БЕЗОПАСНОСТЬ: 100% — JWT, RBAC, RLS через SQLGlot
-✅ ДАННЫЕ:        95% — ClickHouse, семантика, RAG
-✅ НАБЛЮДАЕМОСТЬ: 90% — Prometheus, логи, pipeline stg
-✅ ДОКУМЕНТАЦИЯ:  Этот файл — полная актуализация
-```
-
----
 
 ## 16. Пути развития и глубокой модернизации (Roadmap)
 

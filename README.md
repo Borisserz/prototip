@@ -183,10 +183,5 @@ python test_api.py
 | **[OBZOR.md](OBZOR.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
 | **[ROADMAP.md](ROADMAP.md)** | **Детальный план развития (Enterprise Features)** |
 | **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics (таблицы, логика)** |
-| [AGENTS.md](AGENTS.md) | Правила для разработки и AI-ассистентов |
 
 ---
-
-## Статус
-
-**Фазы 1-22 выполнены.** Проект успешно мигрирован на LangGraph, новый React UI (`frontend_web`), ClickHouse (с RAG), RBAC и Semantic Engine. Внедрена потоковая генерация (Streaming SSE), "Прозрачный мозг" (Live-дебаты агентов и визуализация графа), а также проактивная аналитика (WatcherService) для автоматического поиска аномалий.

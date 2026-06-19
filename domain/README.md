@@ -1,4 +1,4 @@
-# Semantic layer — Целевой формат данных (Фаза 11)
+
 
 **Статус:** Умный Семантический Движок **подключен к runtime**.
 `data/semantic_model.yaml` активно используется в коде для генерации Pydantic-схем на лету (через `app/semantic/catalog.py`).

@@ -153,7 +153,6 @@ class PresentationRenderer:
     def __init__(self, *, theme: type[T] = T) -> None:
         self.t = theme
 
-    # ──────────────────────────────────────────────────────────── utils ──────
     @staticmethod
     def choose_layout(chart_type: str | None) -> LayoutKind:
         ct = chart_type or "bar"
@@ -188,7 +187,6 @@ class PresentationRenderer:
             return self.truncate_text(spec.title, 80), question
         return self.truncate_text(question, 80), None
 
-    # ──────────────────────────────────────────────────── low-level draw ─────
     def _bg(self, slide: Any) -> None:
         fill = slide.background.fill
         fill.solid()
@@ -244,7 +242,7 @@ class PresentationRenderer:
         self._textbox(
             slide, left, top, size, size,
             symbol,
-            font_size=int(size * 55),   # scale roughly with size in inches
+            font_size=int(size * 55), 
             bold=True,
             color=color or self.t.WHITE,
             align=PP_ALIGN.CENTER,
@@ -330,7 +328,6 @@ class PresentationRenderer:
             return True
         return False
 
-    # ──────────────────────────────────────────────────── TABLE helpers ──────
     def _style_table_cell(
         self, cell: Any, text: str, *,
         bold: bool = False, font_size: int = 11,
@@ -388,7 +385,6 @@ class PresentationRenderer:
                                    fill=fill, font_color=self.t.TEXT_PRIMARY)
             self._style_table_cell(tbl.cell(i, 1), val, fill=fill, font_color=self.t.TEXT_PRIMARY)
 
-    # ──────────────────────────────────── RIGHT ANALYSIS PANEL ──────────────
     def _render_right_analysis_panel(
         self, slide: Any, res: AskResult,
         left: float, top: float, width: float, height: float,
@@ -399,7 +395,6 @@ class PresentationRenderer:
         y = top
         pad = 0.12
 
-        # ── Key conclusion card ─────────────────────────────────────────────
         conclusion = ""
         if res.analysis and res.analysis.key_conclusion:
             conclusion = self.truncate_text(res.analysis.key_conclusion, 300)
@@ -415,7 +410,6 @@ class PresentationRenderer:
                       conclusion, font_size=10, color=self.t.TEXT_SECONDARY, wrap=True)
         y += card_h + 0.10
 
-        # ── 3 metric chips ──────────────────────────────────────────────────
         chips = [
             ("ТРЕНД",         "↑ Рост",    self.t.ICONS["trend_up"], self.t.ACCENTS[2]),  # emerald
             ("АНОМАЛИИ",      "Выявлены",  self.t.ICONS["alert"],    self.t.ACCENTS[3]),  # amber
@@ -432,7 +426,6 @@ class PresentationRenderer:
                           value, font_size=11, bold=True, color=ac["light"])
             y += chip_h + 0.08
 
-        # ── Source card ─────────────────────────────────────────────────────
         remaining = max(0.42, (top + height) - y)
         self._card(slide, left, y, width, remaining, fill=self.t.CARD_DARK)
         self._textbox(slide, left + pad, y + 0.06, width - pad * 2, 0.20,
@@ -441,7 +434,6 @@ class PresentationRenderer:
                       "Министерство по налогам и сборам РБ",
                       font_size=9.5, bold=True, color=self.t.TEXT_SECONDARY, wrap=True)
 
-    # ──────────────────────────────────────── LAYOUTS ────────────────────────
     def render_slide_header(self, slide: Any, title: str, subtitle: str | None = None) -> None:
         """Draw gradient bar + DATA badge + title + optional subtitle."""
         self._bg(slide)
@@ -528,7 +520,6 @@ class PresentationRenderer:
         self._render_right_analysis_panel(slide, res, right_left, self.t.CONTENT_TOP,
                                           right_w, self.t.CONTENT_H, chart_pref)
 
-    # ──────────────────────────────────────── DECK SLIDES ────────────────────
 
     def create_title_slide(self, slide: Any, *, date_str: str | None = None) -> None:
         """Title slide — mirrors TitleSlide React component."""
@@ -540,7 +531,6 @@ class PresentationRenderer:
 
         m = self.t.M
 
-        # ── Header row ──────────────────────────────────────────────────────
         # Prototip BI logo icon
         self._icon_box(slide, m, 0.18, 0.40, self.t.ICONS["bar_chart"],
                        self.t.VIOLET_BG, self.t.VIOLET_L)

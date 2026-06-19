@@ -44,23 +44,23 @@ models:
     description: Нет описания.
   - name: category
     type: String
-    description: 'Нет описания. Возможные значения: Одежда, Продукты, Спорттовары,
-      Электроника.'
+    description: 'Нет описания. Возможные значения: Продукты, Спорттовары, Электроника,
+      Одежда.'
     enum_values:
-    - Одежда
     - Продукты
     - Спорттовары
     - Электроника
+    - Одежда
   - name: amount
     type: Float32
     description: Нет описания.
   - name: region
     type: String
-    description: 'Нет описания. Возможные значения: Минск, Алматы, Вильнюс, Варшава.'
+    description: 'Нет описания. Возможные значения: Вильнюс, Минск, Алматы, Варшава.'
     enum_values:
+    - Вильнюс
     - Минск
     - Алматы
-    - Вильнюс
     - Варшава
   - name: discount_applied
     type: UInt8
@@ -210,30 +210,30 @@ models:
     description: Нет описания.
   - name: name
     type: String
-    description: 'Нет описания. Возможные значения: system_audit_logs, tax_data, dashboard_knowledge,
-      schema_knowledge, enterprise_taxes, saas_metrics, ecommerce_sales.'
+    description: 'Нет описания. Возможные значения: system_audit_logs, schema_knowledge,
+      tax_data, ecommerce_sales, dashboard_knowledge, saas_metrics, enterprise_taxes.'
     enum_values:
     - system_audit_logs
-    - tax_data
-    - dashboard_knowledge
     - schema_knowledge
-    - enterprise_taxes
-    - saas_metrics
+    - tax_data
     - ecommerce_sales
+    - dashboard_knowledge
+    - saas_metrics
+    - enterprise_taxes
   - name: description
     type: String
     description: 'Нет описания. Возможные значения: Таблица system_audit_logs. Авто-генерация.,
-      Таблица tax_data. Авто-генерация., Таблица dashboard_knowledge. Авто-генерация.,
-      Таблица schema_knowledge. Авто-генерация., Таблица enterprise_taxes. Авто-генерация.,
-      Таблица saas_metrics. Авто-генерация., Таблица ecommerce_sales. Авто-генерация..'
+      Таблица schema_knowledge. Авто-генерация., Таблица tax_data. Авто-генерация.,
+      Таблица ecommerce_sales. Авто-генерация., Таблица dashboard_knowledge. Авто-генерация.,
+      Таблица saas_metrics. Авто-генерация., Таблица enterprise_taxes. Авто-генерация..'
     enum_values:
     - Таблица system_audit_logs. Авто-генерация.
-    - Таблица tax_data. Авто-генерация.
-    - Таблица dashboard_knowledge. Авто-генерация.
     - Таблица schema_knowledge. Авто-генерация.
-    - Таблица enterprise_taxes. Авто-генерация.
-    - Таблица saas_metrics. Авто-генерация.
+    - Таблица tax_data. Авто-генерация.
     - Таблица ecommerce_sales. Авто-генерация.
+    - Таблица dashboard_knowledge. Авто-генерация.
+    - Таблица saas_metrics. Авто-генерация.
+    - Таблица enterprise_taxes. Авто-генерация.
   - name: content
     type: String
     description: Нет описания.
@@ -248,11 +248,10 @@ models:
     description: Нет описания.
   - name: agent_name
     type: String
-    description: 'Нет описания. Возможные значения: insights_agent, data_agent, dashboard_agent,
-      planner_agent, sql_evaluator, analyst_agent, chart_agent, supervisor_node, TaskDecompositionAgent,
-      presentation_agent.'
+    description: 'Нет описания. Возможные значения: data_agent, dashboard_agent, planner_agent,
+      sql_evaluator, analyst_agent, chart_agent, supervisor_node, TaskDecompositionAgent,
+      presentation_agent, reviewer_agent.'
     enum_values:
-    - insights_agent
     - data_agent
     - dashboard_agent
     - planner_agent
@@ -262,13 +261,15 @@ models:
     - supervisor_node
     - TaskDecompositionAgent
     - presentation_agent
+    - reviewer_agent
   - name: model
     type: String
-    description: 'Нет описания. Возможные значения: gemini-3.5-flash, pipeline, qwen2.5-coder:7b-instruct.'
+    description: 'Нет описания. Возможные значения: pipeline, qwen2.5-coder:7b-instruct,
+      gemini-3.5-flash.'
     enum_values:
-    - gemini-3.5-flash
     - pipeline
     - qwen2.5-coder:7b-instruct
+    - gemini-3.5-flash
   - name: prompt_tokens
     type: Int32
     description: Нет описания.
@@ -303,10 +304,10 @@ models:
       \ information visit https://errors.pydantic.dev/2.12/v/missing)"
   - name: user_role
     type: String
-    description: 'Нет описания. Возможные значения: manager, system.'
+    description: 'Нет описания. Возможные значения: system, manager.'
     enum_values:
-    - manager
     - system
+    - manager
 - name: tax_data
   description: Таблица tax_data. Авто-генерация.
   columns:
