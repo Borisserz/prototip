@@ -122,6 +122,11 @@ services:
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:7b-instruct}
       - USE_VERTEX=${USE_VERTEX:-false}
+      # Vertex / Gemini (используется при USE_VERTEX=true)
+      - AI_MODEL=${AI_MODEL:-gemini-3.5-flash}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/app/secrets/gcp.json}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global}
       # Векторное хранилище
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -135,6 +140,8 @@ services:
       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9100}
     volumes:
       - backend_out:/app/out
+      # Ключ сервис-аккаунта GCP для Vertex (положите secrets/gcp.json; read-only)
+      - ./secrets:/app/secrets:ro
 
   # ===================== FRONTEND (React + Vite + nginx) =====================
   frontend:
