@@ -6,10 +6,41 @@ import { Lightbulb, Info, TrendingUp, TrendingDown, Minus, CheckCircle2, BrainCi
 import { motion, AnimatePresence } from 'framer-motion';
 import { exportDashboardToPDF } from '../../utils/dashboardPdfExport';
 import { exportDashboardToWord } from '../../utils/dashboardWordExport';
+import { ForecastPanel } from './ForecastPanel';
+import { requestForecast, type ForecastResponse } from '../../utils/forecastApi';
+import { AlertTriangle } from 'lucide-react';
 
 interface AIDashboardViewProps {
   onBackToChat: () => void;
 }
+
+const TIME_KEYWORDS = ['period', 'date', 'month', 'year', 'quarter', 'день', 'дата', 'месяц', 'год', 'период', 'time'];
+
+/** Является ли значение числовым (число или числовая строка). */
+const isNumericValue = (v: any): boolean => {
+  if (typeof v === 'number') return isFinite(v);
+  if (typeof v === 'string') {
+    const cleaned = v.replace(/\s/g, '').replace(',', '.');
+    return cleaned !== '' && !isNaN(Number(cleaned));
+  }
+  return false;
+};
+
+/** Выбирает первый график-временной ряд (есть колонка периода + числовые значения, ≥3 точек). */
+const pickTimeSeries = (charts: any[]): { rows: any[]; title: string } | null => {
+  if (!Array.isArray(charts)) return null;
+  for (const chart of charts) {
+    const rows: any[] = chart?.data || [];
+    if (rows.length < 3 || typeof rows[0] !== 'object') continue;
+    const keys = Object.keys(rows[0]);
+    const hasTimeCol = keys.some((k) => TIME_KEYWORDS.some((kw) => k.toLowerCase().includes(kw)));
+    const hasNumericCol = keys.some((k) => rows.some((r) => isNumericValue(r[k])));
+    if (hasTimeCol && hasNumericCol) {
+      return { rows, title: chart.title || 'Временной ряд' };
+    }
+  }
+  return null;
+};
 
 const KPICard = ({ name, value, unit, change, change_period }: any) => {
   const isPositive = change > 0;
@@ -37,6 +68,8 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ onBackToChat }
   const activeDashboardId = useChatStore((state) => state.activeDashboardId);
   const deleteDashboard = useChatStore((state) => state.deleteDashboard);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
 
   const dashboardData = useMemo(() => {
     if (!activeDashboardId) return null;
@@ -88,6 +121,32 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ onBackToChat }
     await exportDashboardToWord(dashboardData);
   };
 
+  const timeSeries = useMemo(
+    () => pickTimeSeries(dashboardData?.charts || []),
+    [dashboardData],
+  );
+
+  const handleForecast = async () => {
+    if (!timeSeries) {
+      setForecastError('Не найден временной ряд для прогноза (нужна колонка периода и ≥3 точек).');
+      setForecast(null);
+      return;
+    }
+    setForecastError(null);
+    try {
+      const res = await requestForecast(
+        timeSeries.rows,
+        `Построй прогноз по показателю «${timeSeries.title}».`,
+      );
+      setForecast(res);
+    } catch (e: any) {
+      console.error('Forecast failed:', e);
+      setForecastError(e?.message || 'Не удалось построить прогноз.');
+      setForecast(null);
+      throw e;
+    }
+  };
+
   if (!dashboardData || dashboardData.charts.length === 0) {
     return (
       <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto h-full pb-10">
@@ -108,10 +167,23 @@ export const AIDashboardView: React.FC<AIDashboardViewProps> = ({ onBackToChat }
         onBackToChat={onBackToChat}
         onExport={handleExportDashboard}
         onExportWord={handleExportWord}
+        onForecast={handleForecast}
+        canForecast={!!timeSeries}
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar rounded-xl">
         <div className="space-y-8 p-6 bg-[#0f172a] min-h-max border border-white/5 shadow-2xl">
+          {/* Forecast Section (Phase 3) */}
+          {forecastError && (
+            <div className="flex items-center gap-3 p-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-300">
+              <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+              <p className="text-sm">{forecastError}</p>
+            </div>
+          )}
+          {forecast && (
+            <ForecastPanel forecast={forecast} onClose={() => setForecast(null)} />
+          )}
+
           {/* Summary Section */}
         {dashboardData.summary && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="premium-glass p-6 rounded-2xl border border-primary/20 bg-primary/5">

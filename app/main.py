@@ -601,6 +601,53 @@ def export_report_docx(payload: ReportDocxRequest):
 
 
 # ─── Центр управления промптами (Phase 3) ───────────────────────────────────
+class ForecastRequest(BaseModel):
+    """Запрос на прогноз временного ряда из данных дашборда (Phase 3)."""
+
+    data: list[dict] = Field(default_factory=list, description="Строки временного ряда (история)")
+    question: str = Field("", description="Вопрос/контекст для текстового резюме прогноза")
+    horizon: int = Field(6, description="Сколько периодов прогнозировать вперёд")
+
+
+@app.post("/api/v1/forecast", tags=["dashboard"])
+def forecast_endpoint(payload: ForecastRequest):
+    """Строит прогноз по переданному временному ряду дашборда.
+
+    Прогон через ForecastAnalystAgent (numpy/scipy + опц. statsmodels) и
+    LLM-резюме (промпт из центра управления, с fallback). Возвращает числовой
+    прогноз, доверительные интервалы, метрики, нарратив и объединённые данные
+    (история + прогноз) для отрисовки зоны ДИ на фронтенде.
+    """
+    from app.agents.forecast_analyst_agent import ForecastAnalystAgent
+    from domain import forecasting as fc
+
+    rows = payload.data or []
+    if not rows:
+        raise HTTPException(400, "Нет данных для прогноза")
+
+    horizon = max(1, min(int(payload.horizon or 6), 24))
+    question = payload.question or "Построй прогноз по историческим данным дашборда."
+
+    result = ForecastAnalystAgent().run(question, data=rows, horizon=horizon)
+    if not result.success:
+        raise HTTPException(422, result.error or "Не удалось построить прогноз")
+
+    x_col, y_col = fc.detect_time_value_columns(rows)
+    return {
+        "success": True,
+        "narrative": result.narrative,
+        "method": result.method,
+        "horizon": result.horizon,
+        "forecast": result.forecast,
+        "metrics": result.metrics,
+        "data": result.data,
+        "x": x_col,
+        "y": y_col,
+        "title": result.chart_spec.title if result.chart_spec else f"Прогноз: {y_col}",
+        "reasoning": result.reasoning,
+    }
+
+
 class PromptUpdateRequest(BaseModel):
     role: str
     goal: str

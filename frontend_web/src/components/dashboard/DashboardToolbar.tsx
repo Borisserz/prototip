@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Trash2, LayoutDashboard, Check, Loader2, FileText } from 'lucide-react';
+import { Download, Trash2, LayoutDashboard, Check, Loader2, FileText, TrendingUp } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
 interface DashboardToolbarProps {
@@ -7,13 +7,16 @@ interface DashboardToolbarProps {
   onBackToChat: () => void;
   onExport: () => void;
   onExportWord: () => void;
+  onForecast?: () => void | Promise<void>;
   hasCharts: boolean;
+  canForecast?: boolean;
   title?: string;
 }
 
-export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, onExportWord, hasCharts, title }) => {
+export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onBackToChat, onExport, onExportWord, onForecast, hasCharts, canForecast = false, title }) => {
   const [exportState, setExportState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [wordState, setWordState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [forecastState, setForecastState] = useState<'idle' | 'loading' | 'done'>('idle');
 
   const handleExport = async () => {
     setExportState('loading');
@@ -36,6 +39,19 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
       setWordState('idle');
     } finally {
       setTimeout(() => setWordState('idle'), 3000);
+    }
+  };
+
+  const handleForecast = async () => {
+    if (!onForecast) return;
+    setForecastState('loading');
+    try {
+      await onForecast();
+      setForecastState('done');
+    } catch {
+      setForecastState('idle');
+    } finally {
+      setTimeout(() => setForecastState('idle'), 3000);
     }
   };
 
@@ -70,6 +86,25 @@ export const DashboardToolbar: React.FC<DashboardToolbarProps> = ({ onClear, onB
         >
           Вернуться к чату
         </Button>
+
+        {onForecast && (
+          <Button
+            variant="outline"
+            onClick={handleForecast}
+            disabled={forecastState !== 'idle' || !canForecast}
+            className={`min-w-[120px] border-violet-500/30 transition-all duration-300 ${
+              forecastState === 'done'
+                ? 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+                : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-200'
+            }`}
+            title={canForecast ? 'Построить прогноз по временному ряду' : 'Нет подходящего временного ряда для прогноза'}
+          >
+            {forecastState === 'loading' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {forecastState === 'done'    && <Check className="w-4 h-4 mr-2 text-violet-300" />}
+            {forecastState === 'idle'    && <TrendingUp className="w-4 h-4 mr-2" />}
+            {forecastState === 'loading' ? 'Считаю…' : forecastState === 'done' ? 'Готово!' : 'Прогноз'}
+          </Button>
+        )}
 
         <Button 
           variant="outline"
