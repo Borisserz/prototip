@@ -1,21 +1,22 @@
 import logging
 import time
-from prometheus_client import Histogram
+
 from crewai import Crew, Process
 from langchain_openai import ChatOpenAI
+from prometheus_client import Histogram
 
 from app.crew.agents import (
+    create_data_analyst_agent,
+    create_manager_agent,
+    create_presenter_agent,
     create_rag_consultant_agent,
-    create_manager_agent, 
-    create_sql_specialist_agent, 
-    create_data_analyst_agent, 
-    create_presenter_agent
+    create_sql_specialist_agent,
 )
 from app.crew.tasks import (
+    create_analysis_task,
+    create_presentation_task,
     create_rag_consultation_task,
-    create_sql_task, 
-    create_analysis_task, 
-    create_presentation_task
+    create_sql_task,
 )
 
 logger = logging.getLogger("crew_orchestrator")
@@ -38,7 +39,7 @@ def run_analytical_crew(user_question: str) -> str:
     try:
         # Инициализация агентов
         rag_agent = create_rag_consultant_agent(llm)
-        manager = create_manager_agent(llm)
+        create_manager_agent(llm)
         sql_agent = create_sql_specialist_agent(llm)
         analyst_agent = create_data_analyst_agent(llm)
         presenter_agent = create_presenter_agent(llm)

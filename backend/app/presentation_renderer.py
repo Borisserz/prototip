@@ -14,7 +14,6 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 from app.agents.models import AskResult
-from app.kpi_utils import compute_overview_kpis
 from core.models import ChartSpec
 from viz.style import format_number_ru, get_russian_label
 

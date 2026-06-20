@@ -81,10 +81,11 @@ def _chat_once(
     use_vertex = os.getenv("USE_VERTEX", "").lower() == "true"
 
     if use_vertex:
+        import json
+        import time
+
         from google import genai
         from google.genai import types
-        import time
-        import json
         
         # Extract system instruction
         system_instruction = None
@@ -103,7 +104,7 @@ def _chat_once(
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         if creds_path and os.path.exists(creds_path):
             try:
-                with open(creds_path, "r") as f:
+                with open(creds_path) as f:
                     project_id = json.load(f).get("project_id")
             except Exception:
                 pass
@@ -134,8 +135,8 @@ def _chat_once(
             completion_tokens = 0
             
         try:
-            from app.utils.system_logger import audit_logger
             from app.agent_context import get_user_role
+            from app.utils.system_logger import audit_logger
             user_role = get_user_role() if get_user_role else "system"
             audit_logger.log_llm_call_async(
                 agent_name=agent_name,
@@ -182,8 +183,8 @@ def _chat_once(
             
     # Логируем в ClickHouse
     try:
-        from app.utils.system_logger import audit_logger
         from app.agent_context import get_user_role
+        from app.utils.system_logger import audit_logger
         user_role = get_user_role() if get_user_role else "system"
         
         audit_logger.log_llm_call_async(

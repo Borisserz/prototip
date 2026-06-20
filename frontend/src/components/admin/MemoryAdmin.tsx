@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Brain, Save, Check, Loader2, History, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from "@/lib/config";
 
 interface HistoryItem {
   prompt: string;

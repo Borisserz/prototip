@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mail, Send, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { API_BASE } from "@/lib/config";
 
 interface EmailSubModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ export const EmailSubModal: React.FC<EmailSubModalProps> = ({ isOpen, onClose })
     setStatus('idle');
     
     try {
-      const res = await fetch('http://localhost:8000/api/v1/send-email', {
+      const res = await fetch(`${API_BASE}/api/v1/send-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

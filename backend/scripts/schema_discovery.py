@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import clickhouse_connect
-import yaml
 import json
 import logging
 from pathlib import Path
+
+import clickhouse_connect
+import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("SchemaDiscovery")

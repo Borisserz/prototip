@@ -1,7 +1,9 @@
-import clickhouse_connect
 import random
 import uuid
 from datetime import datetime, timedelta
+
+import clickhouse_connect
+
 
 def generate_enterprise_data():
     client = clickhouse_connect.get_client(host='localhost', port=8123)

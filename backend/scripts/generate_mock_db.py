@@ -1,6 +1,6 @@
+import csv
 import os
 import random
-import csv
 from datetime import datetime, timedelta
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")

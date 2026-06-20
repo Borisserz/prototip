@@ -1,7 +1,10 @@
 import logging
+
 from pydantic import BaseModel, Field
-from core.llm import call_structured
+
 from app.agents.config_loader import get_agent_config
+from core.llm import call_structured
+
 logger = logging.getLogger(__name__)
 
 class DecompositionResult(BaseModel):

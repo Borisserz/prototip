@@ -1,5 +1,6 @@
 from crewai import Task
 
+
 def create_rag_consultation_task(agent, user_question: str):
     return Task(
         description=f"""Пользователь задал вопрос: '{user_question}'.

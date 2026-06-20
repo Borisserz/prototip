@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Users, Database, Zap, Settings2, X, CheckCircle2 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, YAxis } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import { API_BASE } from "@/lib/config";
 
 const dummySparklineData1 = Array.from({ length: 15 }, () => ({ value: Math.random() * 100 + 50 }));
 const dummySparklineData2 = Array.from({ length: 15 }, () => ({ value: Math.random() * 100 + 20 }));
@@ -99,7 +100,7 @@ export const ExecutiveSummary: React.FC = () => {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/v1/kpi')
+    fetch(`${API_BASE}/api/v1/kpi`)
       .then(res => res.json())
       .then(data => {
         if (data.kpi) {

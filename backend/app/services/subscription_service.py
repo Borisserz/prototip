@@ -1,8 +1,8 @@
 import json
 import os
-from pydantic import BaseModel
-from typing import List
 import uuid
+
+from pydantic import BaseModel
 
 SUBSCRIPTION_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'subscriptions.json')
 
@@ -13,18 +13,18 @@ class Subscription(BaseModel):
     schedule: str     # e.g., 'daily', 'weekly'
     active: bool
 
-def _load_subscriptions() -> List[dict]:
+def _load_subscriptions() -> list[dict]:
     if not os.path.exists(SUBSCRIPTION_FILE):
         return []
-    with open(SUBSCRIPTION_FILE, 'r', encoding='utf-8') as f:
+    with open(SUBSCRIPTION_FILE, encoding='utf-8') as f:
         return json.load(f)
 
-def _save_subscriptions(subs: List[dict]):
+def _save_subscriptions(subs: list[dict]):
     os.makedirs(os.path.dirname(SUBSCRIPTION_FILE), exist_ok=True)
     with open(SUBSCRIPTION_FILE, 'w', encoding='utf-8') as f:
         json.dump(subs, f, ensure_ascii=False, indent=2)
 
-def get_subscriptions() -> List[dict]:
+def get_subscriptions() -> list[dict]:
     return _load_subscriptions()
 
 def add_subscription(sub: dict) -> dict:

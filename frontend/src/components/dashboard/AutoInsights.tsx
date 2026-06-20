@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, TrendingUp, TrendingDown, AlertTriangle, Lightbulb } from 'lucide-react';
+import { API_BASE } from "@/lib/config";
 
 interface Insight {
   type: 'positive' | 'negative' | 'warning';
@@ -12,7 +13,7 @@ export const AutoInsights: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/v1/insights')
+    fetch(`${API_BASE}/api/v1/insights`)
       .then(res => res.json())
       .then(data => {
         if (data.insights) setInsights(data.insights);

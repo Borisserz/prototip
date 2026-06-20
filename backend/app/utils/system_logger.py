@@ -1,5 +1,6 @@
 import logging
 import threading
+
 from app.utils.clickhouse_client import ch_client
 
 logger = logging.getLogger("SystemAudit")

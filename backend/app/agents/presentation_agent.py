@@ -18,8 +18,8 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from app.agent_context import presentation_subplan
-
 from app.agents.base import BaseAgent
+from app.agents.config_loader import get_agent_config
 from app.agents.factory import get_executor
 from app.agents.models import (
     AskResult,
@@ -35,7 +35,6 @@ from app.pipeline_progress import emit_pipeline_stage, suppress_pipeline_emit
 from app.presentation_renderer import PresentationRenderer, PresentationTheme
 from app.slide_pipeline import build_slide_ask_result
 from core.llm import call_structured, setup_logging
-from app.agents.config_loader import get_agent_config
 from viz.charts import build_chart, export_png
 
 setup_logging()
@@ -183,6 +182,7 @@ class PresentationAgent(BaseAgent):
         """Create a premium dark-themed slide PNG using Pillow with slide-type-specific layouts."""
         try:
             import textwrap
+
             from PIL import Image, ImageDraw, ImageFont
 
             W, H = 1920, 1080
@@ -191,7 +191,6 @@ class PresentationAgent(BaseAgent):
             BG      = (8, 13, 26)
             SURFACE = (15, 23, 42)
             CARD    = (22, 33, 60)
-            BORDER  = (30, 45, 80)
             VIOLET  = (124, 58, 237)
             BLUE    = (59, 130, 246)
             EMERALD = (16, 185, 129)
@@ -610,7 +609,7 @@ class PresentationAgent(BaseAgent):
         if not state_file.exists():
             raise FileNotFoundError(f"State file not found for presentation {presentation_id}")
         
-        with open(state_file, "r", encoding="utf-8") as f:
+        with open(state_file, encoding="utf-8") as f:
             state = PresentationState.model_validate_json(f.read())
         
         # Determine mapping of slide index to sections (like in _build_pptx)

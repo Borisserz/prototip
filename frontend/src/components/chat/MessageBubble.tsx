@@ -6,6 +6,7 @@ import { cn } from "@/App"; // Ensure cn is exported
 import { DynamicChart } from "./DynamicChart";
 import { Message, useChatStore } from "../../store/useChatStore";
 import { FilterWidget } from './widgets/FilterWidget';
+import { API_BASE } from "@/lib/config";
 
 interface MessageBubbleProps {
   msg: Message;
@@ -115,7 +116,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, isLastLoading
                           size="sm"
                           onClick={() => {
                             const link = document.createElement('a');
-                            link.href = `http://localhost:8000/api/v1/download?file=${encodeURIComponent(msg.pptx_path!)}`;
+                            link.href = `${API_BASE}/api/v1/download?file=${encodeURIComponent(msg.pptx_path!)}`;
                             link.download = msg.pptx_path!.split('/').pop() || 'presentation.pptx';
                             document.body.appendChild(link);
                             link.click();
@@ -150,7 +151,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, isLastLoading
                           size="sm"
                           onClick={() => {
                             const link = document.createElement('a');
-                            link.href = `http://localhost:8000/api/v1/download?file=${encodeURIComponent(msg.excel_path!)}`;
+                            link.href = `${API_BASE}/api/v1/download?file=${encodeURIComponent(msg.excel_path!)}`;
                             link.download = msg.excel_path!.split('/').pop() || 'report.xlsx';
                             document.body.appendChild(link);
                             link.click();

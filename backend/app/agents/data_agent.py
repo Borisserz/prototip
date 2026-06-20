@@ -22,7 +22,6 @@ from core.llm import call_structured, setup_logging
 setup_logging()
 logger = logging.getLogger("DataAgent")
 
-from app.agents.db_schema_extractor import get_schema_prompt
 
 # Колонки для drilldown (базовый белый список для UI, хотя SQL агент теперь всеяден)
 ALLOWED_COLUMNS = {
@@ -38,6 +37,7 @@ ALLOWED_COLUMNS = {
 
 
 from app.agents.config_loader import get_agent_config
+
 
 class _SqlOnly(BaseModel):
     """Внутренняя схема для LLM: SQL строка и пошаговые рассуждения."""

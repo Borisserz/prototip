@@ -16,8 +16,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from core.models import ChartSpec
 from core import storage
+from core.models import ChartSpec
 
 from .style import (
     CHART_HEIGHT,

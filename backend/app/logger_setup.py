@@ -1,6 +1,9 @@
 import logging
+
 from pythonjsonlogger import jsonlogger
+
 from app.logging_utils import get_correlation_id
+
 
 class CorrelationIdFilter(logging.Filter):
     """Добавляет correlation_id во все логи."""

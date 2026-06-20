@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/config";
 /**
  * Forecast API client (Phase 3 — предиктивная аналитика).
  *
@@ -5,8 +6,6 @@
  * Бэкенд прогоняет ForecastAnalystAgent (numpy/scipy/опц. statsmodels) и
  * возвращает числовой прогноз, доверительные интервалы, метрики и нарратив.
  */
-
-const API_BASE = 'http://localhost:8000';
 
 export interface ForecastPoint {
   period: string;

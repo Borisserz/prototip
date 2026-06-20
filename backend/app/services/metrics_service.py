@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.utils.clickhouse_client import ch_client
 
@@ -170,7 +170,7 @@ def compute_metrics(hours: int = 24) -> dict:
         "source": "live",
         "window_hours": hours,
         "bucket_minutes": step,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "summary": summary,
         "timeseries": timeseries,
         "by_agent": by_agent,
@@ -191,7 +191,7 @@ def _demo(hours: int, step: int) -> dict:
     rnd = random.Random(42)
     agents = ["planner", "data", "analyst", "reviewer", "presenter", "forecast", "rag"]
     models = ["qwen2.5-coder:7b-instruct", "gemini-3.5-flash"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     n_buckets = max(6, min(int(hours * 60 / step), 200))
     timeseries = []

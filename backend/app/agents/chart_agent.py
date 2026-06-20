@@ -23,6 +23,7 @@ logger = logging.getLogger("ChartAgent")
 
 from app.agents.config_loader import get_agent_config
 
+
 class ChartAgent(BaseAgent):
     """Агент выбора и заполнения ChartSpec по вопросу и данным."""
 

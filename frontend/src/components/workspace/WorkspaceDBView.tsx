@@ -8,8 +8,9 @@ import {
   ChevronUp, ChevronDown, Download, ClipboardCopy
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { API_BASE } from "@/lib/config";
 
-const BASE = 'http://localhost:8000';
+const BASE = `${API_BASE}`;
 
 interface WorkspaceDBViewProps {
   onBackToChat: () => void;

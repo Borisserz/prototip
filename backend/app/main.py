@@ -3,28 +3,38 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Body
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
-from app.auth import create_access_token, get_current_user
+from app.auth import create_access_token, get_current_user, require_admin
 from app.config import config
-import logging
+
 logger = logging.getLogger(__name__)
 
 from app.logger_setup import setup_json_logger
 from app.logging_utils import new_correlation_id
 from app.middleware.logging import log_requests_middleware
 from app.orchestrator import Orchestrator
-from app.routers import auth
 from app.schemas import (
     DashboardRequest,
     DashboardResult,
@@ -56,10 +66,12 @@ except Exception as _obs_exc:  # pragma: no cover
     logger.warning(f"Observability metrics not loaded: {_obs_exc}")
 
 from contextlib import asynccontextmanager
+
 from app.services.email_scheduler import start_scheduler
-from app.utils.schema_crawler import generate_semantic_model
-from app.utils.init_schema_knowledge import init_schema_knowledge
 from app.services.rag_service import initialize_dashboard_rag
+from app.utils.init_schema_knowledge import init_schema_knowledge
+from app.utils.schema_crawler import generate_semantic_model
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,26 +86,29 @@ async def lifespan(app: FastAPI):
         init_schema_knowledge()
         initialize_dashboard_rag()
     except Exception as e:
-        print(f"Schema Knowledge RAG Error: {e}")
+        logger.error(f"Schema Knowledge RAG Error: {e}")
 
     # Phase 4: таблицы долгосрочной памяти (профили + история чата)
     try:
         from core.memory_store import memory_store
         memory_store.init_tables()
     except Exception as e:
-        print(f"Memory Store Init Error: {e}")
+        logger.error(f"Memory Store Init Error: {e}")
     
     yield
     # При остановке приложения здесь можно корректно завершить шедулер
 
 app.router.lifespan_context = lifespan
 
+# CORS: явный список origins из окружения (CORS_ORIGINS, через запятую).
+# Wildcard "*" вместе с allow_credentials=True невалиден и небезопасен.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.middleware("http")(log_requests_middleware)
@@ -140,30 +155,34 @@ def root() -> dict[str, str]:
 
 from datetime import timedelta
 
+
 class LoginRequest(BaseModel):
     username: str
     password: str
 
 @app.post("/auth/login", tags=["auth"])
 def login(form_data: LoginRequest):
-    # Mock auth check
-    role = "manager"
-    if "admin" in form_data.username.lower():
-        role = "admin"
-    elif "grodno" in form_data.username.lower():
-        role = "grodno_manager"
-    elif "minsk" in form_data.username.lower():
-        role = "minsk_manager"
-        
+    # Реальная проверка логина/пароля по bcrypt-хешам (без угадывания роли по имени).
+    from app.auth import authenticate_user
+
+    user = authenticate_user(form_data.username, form_data.password)
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Неверный логин или пароль",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    role = user["role"]
     access_token = create_access_token(
-        data={"sub": form_data.username, "role": role},
-        expires_delta=timedelta(minutes=1440)
+        data={"sub": user["username"], "role": role},
+        expires_delta=timedelta(minutes=1440),
     )
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "role": role,
-        "username": form_data.username,
+        "username": user["username"],
         "is_admin": role == "admin",
     }
 
@@ -197,8 +216,10 @@ async def ask_stream_endpoint(payload: AskRequest, user: dict = Depends(get_curr
     )
 
 import asyncio
-import pandas as pd
 from io import BytesIO
+
+import pandas as pd
+
 
 class ExportRequest(BaseModel):
     data: list[dict[str, Any]]
@@ -233,7 +254,7 @@ def get_user_dashboard():
     """Получает сохраненный дашборд пользователя."""
     if os.path.exists(DASHBOARD_FILE):
         try:
-            with open(DASHBOARD_FILE, "r") as f:
+            with open(DASHBOARD_FILE) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -283,7 +304,7 @@ async def chat_websocket(websocket: WebSocket):
                         dimension=sql_key,
                         segment_label=value,
                     )
-                    print(f"[WS] Drilldown context: {sql_key}={value}, action={action}")
+                    logger.debug(f"[WS] Drilldown context: {sql_key}={value}, action={action}")
                 
             await websocket.send_text(json.dumps({"type": "status", "content": "Изучаем ваш запрос..."}))
             await asyncio.sleep(0.5)
@@ -363,9 +384,9 @@ async def chat_websocket(websocket: WebSocket):
             await websocket.send_text(json.dumps(response_data))
             
     except WebSocketDisconnect:
-        print("WebSocket Client disconnected")
+        logger.info("WebSocket Client disconnected")
     except Exception as e:
-        print(f"WebSocket Error: {str(e)}")
+        logger.error(f"WebSocket Error: {str(e)}")
         await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
 
 @app.post("/api/v1/upload_data")
@@ -410,8 +431,9 @@ def generate_dashboard(payload: DashboardRequest, user: dict = Depends(get_curre
 @app.post("/generate_presentation", tags=["presentation"])
 def generate_presentation(payload: PresentationRequest, user: dict = Depends(get_current_user)):
     """Генерация презентации через Orchestrator.presentation()."""
-    from core.llm import call_structured
     from fastapi.responses import JSONResponse
+
+    from core.llm import call_structured
 
     cid = new_correlation_id()
     questions = [q.text for q in payload.questions]
@@ -568,12 +590,12 @@ def get_kpi_summary():
     except Exception as e:
         return {"error": f"ClickHouse error: {str(e)}"}
 
-class ExportRequest(BaseModel):
+class CustomExportRequest(BaseModel):
     data: list[dict]
     filename: str = "analytics_export.xlsx"
 
 @app.post("/api/v1/export-excel", tags=["dashboard"])
-def export_custom_excel(payload: ExportRequest):
+def export_custom_excel(payload: CustomExportRequest):
     """Экспорт текущей выборки данных в красивый Excel (Phase 16)."""
     import os
 
@@ -762,7 +784,7 @@ class TenantCreateRequest(BaseModel):
     max_users: int = 0
 
 
-@app.get("/api/v1/admin/tenants", tags=["admin"])
+@app.get("/api/v1/admin/tenants", dependencies=[Depends(require_admin)], tags=["admin"])
 def list_tenants_endpoint():
     """Список клиентов (без секретов)."""
     from core.tenant import tenant_store
@@ -770,7 +792,7 @@ def list_tenants_endpoint():
     return {"tenants": [t.to_public() for t in tenant_store.list_tenants()]}
 
 
-@app.post("/api/v1/admin/tenants", tags=["admin"])
+@app.post("/api/v1/admin/tenants", dependencies=[Depends(require_admin)], tags=["admin"])
 def create_tenant_endpoint(payload: TenantCreateRequest):
     """Создаёт клиента, возвращает его конфиг + уникальный JWT-токен и API-ключ."""
     from core.tenant import tenant_store
@@ -802,7 +824,7 @@ def create_tenant_endpoint(payload: TenantCreateRequest):
     return out
 
 
-@app.post("/api/v1/admin/tenants/{client_id}/rotate-token", tags=["admin"])
+@app.post("/api/v1/admin/tenants/{client_id}/rotate-token", dependencies=[Depends(require_admin)], tags=["admin"])
 def rotate_tenant_token(client_id: str):
     """Перевыпускает JWT-токен и API-ключ клиента."""
     from core.tenant import tenant_store
@@ -813,7 +835,7 @@ def rotate_tenant_token(client_id: str):
     return {"client_id": client_id, "jwt_token": t.jwt_token, "api_key": t.api_key}
 
 
-@app.delete("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+@app.delete("/api/v1/admin/tenants/{client_id}", dependencies=[Depends(require_admin)], tags=["admin"])
 def delete_tenant_endpoint(client_id: str):
     """Удаляет клиента из реестра."""
     from core.tenant import tenant_store
@@ -824,14 +846,14 @@ def delete_tenant_endpoint(client_id: str):
     return {"success": True, "client_id": client_id}
 
 
-@app.get("/api/v1/admin/overview", tags=["admin"])
+@app.get("/api/v1/admin/overview", dependencies=[Depends(require_admin)], tags=["admin"])
 def admin_overview_endpoint(days: int = 30):
     """Сводные KPI по всем клиентам + лёгкая статистика на каждую карточку.
 
     Используется лендингом админ-консоли («Мои блоки»).
     """
-    from core.tenant import tenant_store
     from app.services.tenant_stats import compute_overview
+    from core.tenant import tenant_store
 
     tenants = tenant_store.list_tenants()
     overview = compute_overview(tenants, days=days)
@@ -842,7 +864,7 @@ def admin_overview_endpoint(days: int = 30):
     return overview
 
 
-@app.get("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+@app.get("/api/v1/admin/tenants/{client_id}", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_tenant_endpoint(client_id: str):
     """Публичная конфигурация одного клиента."""
     from core.tenant import tenant_store
@@ -853,15 +875,15 @@ def get_tenant_endpoint(client_id: str):
     return t.to_public()
 
 
-@app.get("/api/v1/admin/tenants/{client_id}/stats", tags=["admin"])
+@app.get("/api/v1/admin/tenants/{client_id}/stats", dependencies=[Depends(require_admin)], tags=["admin"])
 def tenant_stats_endpoint(client_id: str, days: int = 30):
     """Развёрнутая аналитика использования по клиенту.
 
     Live-метрики из личного ClickHouse при доступности, иначе детерминированные
     представительные данные (помечены полем ``source``).
     """
-    from core.tenant import tenant_store
     from app.services.tenant_stats import compute_tenant_stats
+    from core.tenant import tenant_store
 
     t = tenant_store.get_tenant(client_id)
     if not t:
@@ -871,7 +893,7 @@ def tenant_stats_endpoint(client_id: str, days: int = 30):
     return stats
 
 
-@app.get("/api/v1/admin/tenants/{client_id}/impersonate", tags=["admin"])
+@app.get("/api/v1/admin/tenants/{client_id}/impersonate", dependencies=[Depends(require_admin)], tags=["admin"])
 def impersonate_tenant_endpoint(client_id: str):
     """Выдаёт админу scoped JWT клиента для входа «от лица заказчика»."""
     from core.tenant import tenant_store
@@ -904,7 +926,7 @@ class TenantUpdateRequest(BaseModel):
     max_users: int | None = None
 
 
-@app.patch("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+@app.patch("/api/v1/admin/tenants/{client_id}", dependencies=[Depends(require_admin)], tags=["admin"])
 def update_tenant_endpoint(client_id: str, payload: TenantUpdateRequest):
     """Обновляет настройки клиента (название, доступы, изоляцию, статус, ClickHouse)."""
     from core.tenant import tenant_store
@@ -944,7 +966,8 @@ def client_login_endpoint(payload: ClientLoginRequest):
         # JWT клиента уже несёт claim client_id и role=client.
         try:
             from jose import jwt as _jwt
-            from app.auth import SECRET_KEY, ALGORITHM
+
+            from app.auth import ALGORITHM, SECRET_KEY
 
             claims = _jwt.decode(payload.token.strip(), SECRET_KEY, algorithms=[ALGORITHM])
             tenant = tenant_store.get_tenant(claims.get("client_id"))
@@ -980,7 +1003,7 @@ class RawYamlRequest(BaseModel):
     raw_yaml: str
 
 
-@app.get("/api/v1/admin/prompts", tags=["admin"])
+@app.get("/api/v1/admin/prompts", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_all_prompts():
     """Все конфигурации агентов (промпты) + сырой YAML для редактора."""
     from core.prompt_store import prompt_store
@@ -990,7 +1013,7 @@ def get_all_prompts():
         raise HTTPException(500, f"Не удалось прочитать промпты: {e}")
 
 
-@app.get("/api/v1/admin/prompts/{agent_name}", tags=["admin"])
+@app.get("/api/v1/admin/prompts/{agent_name}", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_prompt(agent_name: str):
     from core.prompt_store import prompt_store
     try:
@@ -999,7 +1022,7 @@ def get_prompt(agent_name: str):
         raise HTTPException(404, f"Агент '{agent_name}' не найден")
 
 
-@app.put("/api/v1/admin/prompts/{agent_name}", tags=["admin"])
+@app.put("/api/v1/admin/prompts/{agent_name}", dependencies=[Depends(require_admin)], tags=["admin"])
 def update_prompt(agent_name: str, payload: PromptUpdateRequest):
     """Обновить промпт одного агента на лету (без рестарта). Подхватится графом."""
     from core.prompt_store import prompt_store
@@ -1010,7 +1033,7 @@ def update_prompt(agent_name: str, payload: PromptUpdateRequest):
         raise HTTPException(400, str(e))
 
 
-@app.put("/api/v1/admin/prompts", tags=["admin"])
+@app.put("/api/v1/admin/prompts", dependencies=[Depends(require_admin)], tags=["admin"])
 def replace_prompts(payload: RawYamlRequest):
     """Заменить весь YAML промптов целиком (с валидацией всех агентов)."""
     from core.prompt_store import prompt_store
@@ -1021,7 +1044,7 @@ def replace_prompts(payload: RawYamlRequest):
         raise HTTPException(400, str(e))
 
 
-@app.post("/api/v1/admin/prompts/reload", tags=["admin"])
+@app.post("/api/v1/admin/prompts/reload", dependencies=[Depends(require_admin)], tags=["admin"])
 def reload_prompts():
     """Принудительно перечитать YAML с диска."""
     from core.prompt_store import prompt_store
@@ -1063,7 +1086,7 @@ def get_session_history(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session_id": session_id, "messages": sessions[session_id]}
 
-@app.get("/api/v1/sql-logs", tags=["admin"])
+@app.get("/api/v1/sql-logs", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_sql_logs():
     """Возвращает последние SQL запросы из system.query_log."""
     try:
@@ -1113,6 +1136,7 @@ def download_file(file: str, inline: bool = False):
     """
     import os
     from urllib.parse import quote as _url_quote
+
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
 
@@ -1162,7 +1186,9 @@ async def upload_workspace_file(file: UploadFile = File(...), user: dict = Depen
     """Phase 14: Загрузка файлов в персональный Workspace."""
     import os
     import shutil
+
     import pandas as pd
+
     from app.utils.clickhouse_client import ch_client
     
     if not file.filename.lower().endswith(('.csv', '.xlsx')):
@@ -1220,8 +1246,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
         
     try:
-        from app.utils.pdf_presentation import generate_presentation_from_pdf
         from app.services.rag_service import ingest_document
+        from app.utils.pdf_presentation import generate_presentation_from_pdf
         
         ingest_document(file_path)
         pptx_path = generate_presentation_from_pdf(file_path)
@@ -1251,7 +1277,8 @@ async def pdf_analyze(
     """
     import os
     import shutil
-    import fitz # PyMuPDF
+
+    import fitz  # PyMuPDF
     
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(400, "Только PDF файлы")
@@ -1292,8 +1319,10 @@ async def pdf_analyze(
 
     # Step 3: Extract document metadata via LLM
     try:
+        from pydantic import BaseModel as PydanticBaseModel
+        from pydantic import Field as PydanticField
+
         from core.llm import call_structured
-        from pydantic import BaseModel as PydanticBaseModel, Field as PydanticField
         
         class PDFMeta(PydanticBaseModel):
             title: str = PydanticField(..., description="Название документа (на русском)")
@@ -1362,7 +1391,6 @@ async def pdf_analyze(
     
     else:  # presentation
         try:
-            detail_map = {'standard': '5-7', 'detailed': '7-9', 'comprehensive': '9-12'}
             num_slides_map = {'standard': 10, 'detailed': 14, 'comprehensive': 20}
             num_slides = num_slides_map.get(detail_level, 14)
             
@@ -1403,15 +1431,16 @@ async def pdf_analyze(
 # Phase 4: Knowledge Base & Subscriptions
 # ==========================================
 
-@app.get("/api/v1/knowledge", tags=["admin"])
+@app.get("/api/v1/knowledge", dependencies=[Depends(require_admin)], tags=["admin"])
 def list_knowledge_base():
     from app.services.rag_service import get_knowledge_documents
     return {"status": "ok", "documents": get_knowledge_documents()}
 
-@app.delete("/api/v1/knowledge", tags=["admin"])
+@app.delete("/api/v1/knowledge", dependencies=[Depends(require_admin)], tags=["admin"])
 def delete_knowledge_doc(source: str):
-    from app.services.rag_service import delete_knowledge_document
     import base64
+
+    from app.services.rag_service import delete_knowledge_document
     try:
         decoded_source = base64.b64decode(source).decode("utf-8")
         if delete_knowledge_document(decoded_source):
@@ -1452,24 +1481,24 @@ def rag_search(payload: dict = Body(...)):
         logger.error(f"RAG search error: {e}")
         return {"status": "error", "context": "", "sources": [], "chunks": [], "error": str(e)}
 
-@app.get("/api/v1/subscriptions", tags=["admin"])
+@app.get("/api/v1/subscriptions", dependencies=[Depends(require_admin)], tags=["admin"])
 def list_subscriptions():
     from app.services.subscription_service import get_subscriptions
     return {"status": "ok", "subscriptions": get_subscriptions()}
 
-@app.post("/api/v1/subscriptions", tags=["admin"])
+@app.post("/api/v1/subscriptions", dependencies=[Depends(require_admin)], tags=["admin"])
 def create_subscription(sub: dict = Body(...)):
     from app.services.subscription_service import add_subscription
     return {"status": "ok", "subscription": add_subscription(sub)}
 
-@app.delete("/api/v1/subscriptions/{sub_id}", tags=["admin"])
+@app.delete("/api/v1/subscriptions/{sub_id}", dependencies=[Depends(require_admin)], tags=["admin"])
 def remove_subscription(sub_id: str):
     from app.services.subscription_service import delete_subscription
     if delete_subscription(sub_id):
         return {"status": "ok"}
     raise HTTPException(404, "Подписка не найдена")
 
-@app.post("/api/v1/subscriptions/{sub_id}/toggle", tags=["admin"])
+@app.post("/api/v1/subscriptions/{sub_id}/toggle", dependencies=[Depends(require_admin)], tags=["admin"])
 def toggle_sub(sub_id: str):
     from app.services.subscription_service import toggle_subscription
     if toggle_subscription(sub_id):
@@ -1480,23 +1509,23 @@ def toggle_sub(sub_id: str):
 # Phase 5: Schema, Semantic Rules & Dropzone
 # ==========================================
 
-@app.get("/api/v1/schema", tags=["admin"])
+@app.get("/api/v1/schema", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_db_schema():
     from app.services.schema_scanner import scan_clickhouse_schema
     return {"status": "ok", "schema": scan_clickhouse_schema()}
 
-@app.get("/api/v1/semantic-rules", tags=["admin"])
+@app.get("/api/v1/semantic-rules", dependencies=[Depends(require_admin)], tags=["admin"])
 def get_semantic_rules():
     from app.services.wrenai_client import wren_client
     return {"status": "ok", "rules": wren_client.get_rules()}
 
-@app.post("/api/v1/semantic-rules", tags=["admin"])
+@app.post("/api/v1/semantic-rules", dependencies=[Depends(require_admin)], tags=["admin"])
 def update_semantic_rules(rules: list = Body(...)):
     from app.services.wrenai_client import wren_client
     wren_client.save_rules(rules)
     return {"status": "ok"}
 
-@app.get("/api/v1/dropzone", tags=["admin"])
+@app.get("/api/v1/dropzone", dependencies=[Depends(require_admin)], tags=["admin"])
 def list_dropzone():
     import os
     dropzone_dir = os.path.join(os.path.dirname(__file__), "..", "data", "dropzone")
@@ -1515,7 +1544,7 @@ def list_dropzone():
             })
     return {"status": "ok", "files": files}
 
-@app.delete("/api/v1/dropzone/{filename}", tags=["admin"])
+@app.delete("/api/v1/dropzone/{filename}", dependencies=[Depends(require_admin)], tags=["admin"])
 def delete_dropzone_file(filename: str):
     import os
     dropzone_dir = os.path.join(os.path.dirname(__file__), "..", "data", "dropzone")
@@ -1531,8 +1560,9 @@ def delete_dropzone_file(filename: str):
 @app.get("/api/v1/insights", tags=["dashboard"])
 def get_auto_insights():
     """Generates 3 fast insights based on database queries and LLM."""
-    from core.llm import call_structured
     from pydantic import BaseModel, Field
+
+    from core.llm import call_structured
     
     class Insight(BaseModel):
         type: str = Field(..., description="'positive', 'negative', or 'warning'")
@@ -1558,7 +1588,7 @@ def get_auto_insights():
         
         return {"status": "ok", "insights": [i.model_dump() for i in result.insights]}
     except Exception as e:
-        print(f"Insights Error: {e}")
+        logger.error(f"Insights Error: {e}")
         return {"status": "error", "insights": [
             {"type": "warning", "text": "Система аналитики временно недоступна."}
         ]}
@@ -1570,11 +1600,12 @@ def get_auto_insights():
 
 from pydantic import BaseModel
 
+
 class RowUpdateRequest(BaseModel):
     old_row: dict
     new_row: dict
 
-@app.put("/api/v1/db/tables/{table}/row", tags=["workspace"])
+@app.put("/api/v1/db/tables/{table}/row", dependencies=[Depends(require_admin)], tags=["workspace"])
 def update_table_row(table: str, payload: RowUpdateRequest):
     """Updates a row in ClickHouse using ALTER TABLE UPDATE."""
     from app.utils.clickhouse_client import ch_client
@@ -1584,44 +1615,58 @@ def update_table_row(table: str, payload: RowUpdateRequest):
         raise HTTPException(400, f"Table '{table}' is not accessible")
         
     try:
+        # Сверяем имена колонок с реальной схемой таблицы (защита от инъекции
+        # через идентификаторы: значения экранируются, а имена колонок — нет).
+        desc = ch_client.get_client().query(f"DESCRIBE TABLE default.{table}")
+        valid_columns = {row[0] for row in desc.result_rows}
+
+        def _check_col(name: str) -> str:
+            if name not in valid_columns:
+                raise HTTPException(400, f"Unknown column '{name}' for table '{table}'")
+            return name
+
         conditions = []
         for k, v in payload.old_row.items():
             if v is None or (isinstance(v, str) and v.startswith("[vector:")):
                 continue
+            col = _check_col(k)
             if isinstance(v, (int, float)):
-                conditions.append(f"`{k}` = {v}")
+                conditions.append(f"`{col}` = {v}")
             else:
                 safe_val = str(v).replace("'", "''")
-                conditions.append(f"`{k}` = '{safe_val}'")
-                
+                conditions.append(f"`{col}` = '{safe_val}'")
+
         if not conditions:
             raise HTTPException(400, "Cannot update row without identifying values")
-            
+
         where_clause = " AND ".join(conditions)
-        
+
         sets = []
         for k, v in payload.new_row.items():
             if payload.old_row.get(k) == v:
                 continue
             if v is None or (isinstance(v, str) and v.startswith("[vector:")):
                 continue
+            col = _check_col(k)
             safe_val = str(v).replace("'", "''")
-            sets.append(f"`{k}` = '{safe_val}'")
-                
+            sets.append(f"`{col}` = '{safe_val}'")
+
         if not sets:
             return {"status": "ok", "message": "No changes detected"}
-            
+
         set_clause = ", ".join(sets)
         sql = f"ALTER TABLE default.{table} UPDATE {set_clause} WHERE {where_clause}"
-        
+
         ch_client.get_client().command(sql)
-        
+
         return {"status": "ok", "message": "Row update scheduled"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Row Update Error: {e}")
         raise HTTPException(500, str(e))
 
-@app.get("/api/v1/db/tables/{table}/data", tags=["workspace"])
+@app.get("/api/v1/db/tables/{table}/data", dependencies=[Depends(require_admin)], tags=["workspace"])
 def get_table_data(table: str, page: int = 1, limit: int = 50, search: str = ""):
     """Paginated data from a ClickHouse table with optional text search."""
     from app.utils.clickhouse_client import ch_client
@@ -1683,7 +1728,7 @@ def get_table_data(table: str, page: int = 1, limit: int = 50, search: str = "")
         raise HTTPException(500, str(e))
 
 
-@app.get("/api/v1/db/tables/{table}/stats", tags=["workspace"])
+@app.get("/api/v1/db/tables/{table}/stats", dependencies=[Depends(require_admin)], tags=["workspace"])
 def get_table_stats(table: str):
     """Get statistics for a specific table."""
     from app.utils.clickhouse_client import ch_client
@@ -1710,13 +1755,13 @@ def get_table_stats(table: str):
 # Workspace DB: Semantic Schema Endpoints
 # ==========================================
 
-@app.get("/api/v1/semantic-schema", tags=["workspace"])
+@app.get("/api/v1/semantic-schema", dependencies=[Depends(require_admin)], tags=["workspace"])
 def get_semantic_schema_json():
     """Return the semantic_schema.json content."""
     import json
     schema_path = os.path.join(os.path.dirname(__file__), "semantic_schema.json")
     try:
-        with open(schema_path, "r", encoding="utf-8") as f:
+        with open(schema_path, encoding="utf-8") as f:
             schema = json.load(f)
         return {"status": "ok", "schema": schema}
     except FileNotFoundError:
@@ -1725,7 +1770,7 @@ def get_semantic_schema_json():
         raise HTTPException(500, str(e))
 
 
-@app.put("/api/v1/semantic-schema", tags=["workspace"])
+@app.put("/api/v1/semantic-schema", dependencies=[Depends(require_admin)], tags=["workspace"])
 def update_semantic_schema_json(payload: dict = Body(...)):
     """Update the semantic_schema.json file."""
     import json
@@ -1742,7 +1787,7 @@ def update_semantic_schema_json(payload: dict = Body(...)):
 # Workspace DB: Knowledge Document Endpoints
 # ==========================================
 
-@app.get("/api/v1/knowledge/chunks", tags=["workspace"])
+@app.get("/api/v1/knowledge/chunks", dependencies=[Depends(require_admin)], tags=["workspace"])
 def get_knowledge_chunks(source: str, limit: int = 5):
     """Get text chunks for a specific document source."""
     from app.utils.clickhouse_client import ch_client
@@ -1757,12 +1802,13 @@ def get_knowledge_chunks(source: str, limit: int = 5):
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/v1/knowledge/upload-text", tags=["workspace"])
+@app.post("/api/v1/knowledge/upload-text", dependencies=[Depends(require_admin)], tags=["workspace"])
 async def upload_text_document(payload: dict = Body(...)):
     """Ingest a raw text/markdown document into the knowledge base."""
-    from app.services.rag_service import init_tables, get_embeddings_model
-    from app.utils.clickhouse_client import ch_client
     import uuid
+
+    from app.services.rag_service import get_embeddings_model, init_tables
+    from app.utils.clickhouse_client import ch_client
     
     content = payload.get("content", "").strip()
     source_name = payload.get("source", "manual_upload.md")
@@ -1792,7 +1838,7 @@ async def upload_text_document(payload: dict = Body(...)):
 
 
 # ───────────────────────── Phase 8: Observability UI ───────────────────────
-@app.get("/api/v1/admin/metrics", tags=["admin"])
+@app.get("/api/v1/admin/metrics", dependencies=[Depends(require_admin)], tags=["admin"])
 def admin_metrics_endpoint(hours: int = 24):
     """Живые агрегаты системных метрик для страницы «Мониторинг» в админке.
 

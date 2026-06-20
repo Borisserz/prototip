@@ -22,12 +22,12 @@ import hashlib
 import logging
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger("TenantStats")
 
-UTC = timezone.utc
+UTC = UTC
 
 # Канонический набор «разрезов» — используется и для live, и для demo.
 _QUERY_TYPES = ["SELECT", "AGGREGATE", "JOIN", "GROUP BY", "WINDOW", "SUBQUERY"]

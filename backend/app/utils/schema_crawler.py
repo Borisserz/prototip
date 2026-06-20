@@ -1,7 +1,8 @@
+import logging
+import os
+
 import clickhouse_connect
 import yaml
-import os
-import logging
 
 logger = logging.getLogger("SchemaCrawler")
 

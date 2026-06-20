@@ -1,5 +1,6 @@
 import re
 
+
 def anonymize_text(text: str) -> str:
     """
     Маскирует чувствительные данные (PII) в тексте.

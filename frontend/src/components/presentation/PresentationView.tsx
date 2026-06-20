@@ -9,9 +9,9 @@ import {
 import { useChatStore, PresentationHistoryItem } from '../../store/useChatStore';
 import { Button } from '../ui/button';
 import { SlideRenderer, SlideThumbnail, SlideData, toLines } from './SlideRenderer';
+import { API_BASE } from "@/lib/config";
 
-const API = 'http://localhost:8000';
-
+const API = API_BASE;
 function getSlideUrl(pngPaths: string[], i: number): string | null {
   const path = pngPaths?.[i];
   if (!path) return null;

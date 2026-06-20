@@ -23,7 +23,6 @@ def export_to_excel(data: list[dict], filename: str = "export.xlsx") -> str:
         with pd.ExcelWriter(str(file_path), engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Аналитика')
             
-            workbook = writer.book
             worksheet = writer.sheets['Аналитика']
             
             # Автоширина колонок

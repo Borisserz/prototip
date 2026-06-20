@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ class JsonRunLogger:
     def log_event(self, event: str, **payload: Any) -> None:
         cid = get_correlation_id() or "unknown"
         record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "correlation_id": cid,
             "event": event,
             **payload,

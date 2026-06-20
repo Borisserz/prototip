@@ -1,4 +1,5 @@
 import logging
+
 from app.crew.tools import EmailDeliveryTool
 
 logger = logging.getLogger("WatcherService")

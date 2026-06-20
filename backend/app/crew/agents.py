@@ -1,13 +1,15 @@
-import yaml
-from crewai import Agent
-from app.crew.tools import QueryClickhouseTool, FetchWrenContextTool
 import os
+
+from crewai import Agent
+
+from app.crew.tools import FetchWrenContextTool, QueryClickhouseTool
+
 
 # Загружаем MDL (Semantic Layer)
 def load_mdl():
     path = os.path.join(os.path.dirname(__file__), '../../data/semantic_model.yaml')
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             return f.read()
     except Exception:
         return "Семантическая модель недоступна."

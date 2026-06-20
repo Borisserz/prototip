@@ -1,10 +1,11 @@
-import os
 import glob
 import logging
+import os
+
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +46,7 @@ def main():
     # Инициализация Qdrant и Embedding
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-    client = QdrantClient("localhost", port=6333)
+    QdrantClient("localhost", port=6333)
     
     # Создаем/пересоздаем коллекцию
     collection_name = "knowledge_base"

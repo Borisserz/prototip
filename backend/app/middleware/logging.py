@@ -3,6 +3,7 @@ import time
 import uuid
 
 from fastapi import Request
+
 from app.logging_utils import set_correlation_id
 
 logger = logging.getLogger(__name__)

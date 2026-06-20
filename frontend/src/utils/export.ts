@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/config";
 export const exportCSV = (data: any[], filename: string) => {
   if (!data || !data.length) return;
   const header = Object.keys(data[0]).join(",");
@@ -17,7 +18,7 @@ export const exportCSV = (data: any[], filename: string) => {
 export const exportExcel = async (data: any[], filename: string) => {
   if (!data || !data.length) return;
   try {
-    const response = await fetch('http://localhost:8000/api/export/excel', {
+    const response = await fetch(`${API_BASE}/api/export/excel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

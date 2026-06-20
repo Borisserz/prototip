@@ -21,11 +21,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.models.param import Param
 from airflow.operators.python import PythonOperator
-
 from etl_common import alert_on_failure, load_tenants, run_tenant_etl_task
+
+from airflow import DAG
 
 # ─── базовые параметры надёжности для всех ETL-задач ───────────────────────────
 DEFAULT_ARGS = {

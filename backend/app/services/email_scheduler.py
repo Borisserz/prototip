@@ -1,13 +1,14 @@
+import json
 import logging
+import os
 import smtplib
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-import pytz
-import os
-import time
-import json
 
 from app.orchestrator import Orchestrator
 
@@ -55,7 +56,7 @@ def generate_and_send_weekly_report(recipient_email: str, role: str, question: s
 def load_subscriptions():
     path = os.path.join(os.path.dirname(__file__), '../../data/user_subscriptions.json')
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to load subscriptions: {e}")

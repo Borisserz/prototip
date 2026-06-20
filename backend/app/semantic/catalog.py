@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
+
 import yaml
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("SemanticCatalog")
 
@@ -34,7 +35,7 @@ class SemanticCatalog(BaseModel):
             return cls()
             
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             if not data:
                 return cls()

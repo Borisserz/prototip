@@ -1,7 +1,9 @@
-import clickhouse_connect
 import random
 import uuid
 from datetime import datetime, timedelta
+
+import clickhouse_connect
+
 
 def generate_saas_metrics(client, start_date, end_date):
     print("Generating B2B SaaS metrics...")

@@ -1,6 +1,7 @@
-import os
-import clickhouse_connect
 import logging
+import os
+
+import clickhouse_connect
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ClickhouseOptimizer")

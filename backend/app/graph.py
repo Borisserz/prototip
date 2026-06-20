@@ -1,50 +1,47 @@
 import logging
-from typing import Any, Annotated, TypedDict, Optional
-from langgraph.graph import StateGraph, START, END, MessagesState
+from typing import Annotated, Any, TypedDict
 
-from app.agents.factory import get_executor
-from app.agents.models import AskResult, DashboardResult, PresentationResult, DrilldownContext
-from app.config import config
+from langgraph.graph import END, START, StateGraph
+
+from app.agents.models import AskResult, DrilldownContext
 
 logger = logging.getLogger("LangGraph")
 
 import json
-from langchain_core.messages import HumanMessage, AIMessage, AnyMessage
+
+from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
-from app.agents.rag_agent import RagAgent
-from app.agents.data_agent import DataAgent
 from app.agents.analyst_agent import AnalystAgent
-from app.agents.chart_agent import ChartAgent
-from app.agents.models import AskResult, DashboardResult, PresentationResult, DrilldownContext
-from app.config import config
+from app.agents.data_agent import DataAgent
+from app.agents.rag_agent import RagAgent
 
 logger = logging.getLogger("LangGraph")
 
 class GraphState(TypedDict):
     question: str
-    drilldown: Optional[DrilldownContext]
-    user_role: Optional[str]
-    user_id: Optional[str]
+    drilldown: DrilldownContext | None
+    user_role: str | None
+    user_id: str | None
 
     # State accumulated
-    business_context: Optional[str]
-    memory_context: Optional[str]
-    sub_questions: Optional[list[str]]
-    raw_data: Optional[list]
-    sql: Optional[str]
-    analysis: Optional[str]
-    chart_spec: Optional[dict]
+    business_context: str | None
+    memory_context: str | None
+    sub_questions: list[str] | None
+    raw_data: list | None
+    sql: str | None
+    analysis: str | None
+    chart_spec: dict | None
     
-    final_result: Optional[Any]
-    error: Optional[str]
+    final_result: Any | None
+    error: str | None
     
     messages: Annotated[list[AnyMessage], add_messages]
     
     # Reviewer flow
-    raw_analysis_dict: Optional[dict]
-    eval_feedback: Optional[str]
-    eval_retry_count: Optional[int]
+    raw_analysis_dict: dict | None
+    eval_feedback: str | None
+    eval_retry_count: int | None
 
 def memory_node(state: GraphState) -> dict:
     """Phase 4: узел долгосрочной памяти.
@@ -108,8 +105,8 @@ def supervisor_node(state: GraphState) -> dict:
         # short-circuit to END.
         return {"route": "data", "final_result": None}
     
-    from core.llm import call_structured
     from app.agents.models import SupervisorDecision
+    from core.llm import call_structured
     
     prompt = f"""
 Ты — Supervisor Node аналитической системы.
@@ -145,7 +142,7 @@ def supervisor_node(state: GraphState) -> dict:
 def data_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
     emit_node_event("Data Agent (SQL)")
-    logger.info(f"[Data Node] Fetching data...")
+    logger.info("[Data Node] Fetching data...")
     agent = DataAgent()
     user_role = state.get("user_role", "manager")
     
@@ -201,7 +198,7 @@ def data_node(state: GraphState) -> dict:
 def analyst_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
     emit_node_event("Аналитик")
-    logger.info(f"[Analyst Node] Analyzing data...")
+    logger.info("[Analyst Node] Analyzing data...")
     if state.get("error"):
         return {}
     
@@ -213,8 +210,8 @@ def analyst_node(state: GraphState) -> dict:
     drilldown = state.get("drilldown")
     if drilldown:
         filters = getattr(drilldown, 'filters', {}) if hasattr(drilldown, 'filters') else drilldown.get('filters', {})
-        dimension = getattr(drilldown, 'dimension', '') if hasattr(drilldown, 'dimension') else drilldown.get('dimension', '')
-        segment = getattr(drilldown, 'segment_label', '') if hasattr(drilldown, 'segment_label') else drilldown.get('segment_label', '')
+        getattr(drilldown, 'dimension', '') if hasattr(drilldown, 'dimension') else drilldown.get('dimension', '')
+        getattr(drilldown, 'segment_label', '') if hasattr(drilldown, 'segment_label') else drilldown.get('segment_label', '')
         if filters:
             filter_str = ", ".join(f"{k}={v}" for k, v in filters.items())
             effective_question = f"{state['question']} [DRILL-DOWN: Сфокусируй анализ на: {filter_str}. Предоставь детальный разбор именно по этому сегменту.]"
@@ -246,7 +243,7 @@ def analyst_node(state: GraphState) -> dict:
 def reviewer_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
     emit_node_event("Критик (CDO)")
-    logger.info(f"[Reviewer Node] Critiquing analysis...")
+    logger.info("[Reviewer Node] Critiquing analysis...")
     if state.get("error"):
         return {}
         
@@ -283,7 +280,7 @@ def reviewer_node(state: GraphState) -> dict:
 def presenter_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
     emit_node_event("Презентация")
-    logger.info(f"[Presenter Node] Formatting output...")
+    logger.info("[Presenter Node] Formatting output...")
     q_lower = state["question"].lower()
     
     if "презентац" in q_lower or "слайд" in q_lower:
@@ -408,9 +405,10 @@ def presenter_node(state: GraphState) -> dict:
         if state.get("raw_data"):
             logger.info("[Presenter Node] Excel export requested.")
             try:
-                from app.services.excel_renderer import ExcelRenderer
-                from pathlib import Path
                 import uuid
+                from pathlib import Path
+
+                from app.services.excel_renderer import ExcelRenderer
                 excel_bytes = ExcelRenderer.render_json_to_excel(json.dumps(state["raw_data"]))
                 out_dir = Path("out")
                 out_dir.mkdir(exist_ok=True)
@@ -443,7 +441,7 @@ def search_node(state: GraphState) -> dict:
     
     from app.agent_context import emit_node_event
     emit_node_event("Глобальный Поиск")
-    logger.info(f"[Search Node] Checking for existing reports...")
+    logger.info("[Search Node] Checking for existing reports...")
     from app.crew.tools import SearchPastReportsTool
     tool = SearchPastReportsTool()
     res = tool._run(state["question"])
@@ -472,7 +470,7 @@ def search_node(state: GraphState) -> dict:
 def doc_search_node(state: GraphState) -> dict:
     from app.agent_context import emit_node_event
     emit_node_event("RAG Поиск")
-    logger.info(f"[Doc Search Node] Searching RAG context concurrently...")
+    logger.info("[Doc Search Node] Searching RAG context concurrently...")
     try:
         from app.services.rag_service import get_rag_context
         ctx = get_rag_context(state["question"])
@@ -501,6 +499,7 @@ def route_after_supervisor(state: GraphState) -> str:
 
 
 from langgraph.checkpoint.memory import MemorySaver
+
 
 def route_after_reviewer(state: GraphState) -> str:
     if state.get("eval_feedback"):
