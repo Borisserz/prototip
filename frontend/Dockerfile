@@ -5,6 +5,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# VITE_API_BASE прокидывается из docker-compose как build-arg и встраивается
+# в бандл на этапе сборки (Vite читает только переменные с префиксом VITE_).
+ARG VITE_API_BASE=http://localhost:8000
+ENV VITE_API_BASE=$VITE_API_BASE
 RUN npm run build
 
 # Stage 2: serve
