@@ -1,3 +1,4 @@
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,12 @@ def scan_clickhouse_schema() -> str:
     logger.info("Сканирование схемы базы данных ClickHouse...")
     try:
         import clickhouse_connect
-        client = clickhouse_connect.get_client(host='localhost', port=8123)
+        client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        )
         res_tables = client.query("SHOW TABLES")
         tables = [row[0] for row in res_tables.result_rows if row[0] in ('enterprise_taxes', 'saas_metrics', 'ecommerce_sales')]
         

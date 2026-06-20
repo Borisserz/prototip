@@ -48,6 +48,13 @@ setup_json_logger()
 # Phase 19: Observability (Prometheus)
 Instrumentator().instrument(app).expose(app)
 
+# Phase 8: регистрируем кастомные бизнес-метрики (LLM, SQL, узлы LangGraph),
+# чтобы они присутствовали в /metrics ещё до первого запроса.
+try:
+    import app.observability  # noqa: F401
+except Exception as _obs_exc:  # pragma: no cover
+    logger.warning(f"Observability metrics not loaded: {_obs_exc}")
+
 from contextlib import asynccontextmanager
 from app.services.email_scheduler import start_scheduler
 from app.utils.schema_crawler import generate_semantic_model
@@ -1758,4 +1765,22 @@ async def upload_text_document(payload: dict = Body(...)):
         return {"status": "ok", "chunks_added": len(data), "source": source_name}
     except Exception as e:
         logger.error(f"Text upload error: {e}")
+        raise HTTPException(500, str(e))
+
+
+# ───────────────────────── Phase 8: Observability UI ───────────────────────
+@app.get("/api/v1/admin/metrics", tags=["admin"])
+def admin_metrics_endpoint(hours: int = 24):
+    """Живые агрегаты системных метрик для страницы «Мониторинг» в админке.
+
+    Считает RPS, латентность LLM, error-rate, расход токенов и разбивку по
+    агентам/моделям из таблицы аудита ClickHouse. При отсутствии данных
+    возвращает демонстрационный набор (source = "demo").
+    """
+    from app.services.metrics_service import compute_metrics
+
+    try:
+        return compute_metrics(hours=hours)
+    except Exception as e:  # pragma: no cover
+        logger.error(f"admin metrics error: {e}")
         raise HTTPException(500, str(e))

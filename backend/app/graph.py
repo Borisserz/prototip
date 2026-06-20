@@ -541,18 +541,37 @@ def forecast_node(state: GraphState) -> dict:
     )}
 
 
+def _instrument_node(name, fn):
+    """Phase 8: оборачивает узел графа замером длительности (Prometheus)."""
+    try:
+        from app.observability.metrics import node_timer
+    except Exception:  # pragma: no cover — метрики не должны ломать граф
+        return fn
+
+    def _wrapped(state):
+        with node_timer(name):
+            return fn(state)
+
+    _wrapped.__name__ = getattr(fn, "__name__", name)
+    return _wrapped
+
+
 def build_graph() -> StateGraph:
     workflow = StateGraph(GraphState)
-    
-    workflow.add_node("memory", memory_node)
-    workflow.add_node("search", search_node)
-    workflow.add_node("planner", planner_node)
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("data", data_node)
-    workflow.add_node("analyst", analyst_node)
-    workflow.add_node("reviewer", reviewer_node)
-    workflow.add_node("presenter", presenter_node)
-    workflow.add_node("forecast", forecast_node)
+
+    _nodes = {
+        "memory": memory_node,
+        "search": search_node,
+        "planner": planner_node,
+        "supervisor": supervisor_node,
+        "data": data_node,
+        "analyst": analyst_node,
+        "reviewer": reviewer_node,
+        "presenter": presenter_node,
+        "forecast": forecast_node,
+    }
+    for _name, _fn in _nodes.items():
+        workflow.add_node(_name, _instrument_node(_name, _fn))
 
     
     workflow.add_edge(START, "memory")

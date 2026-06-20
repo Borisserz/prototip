@@ -290,7 +290,7 @@ export const DynamicChart: React.FC<DynamicChartProps> = ({ content, onPin, isPi
                   aspectRatio={4 / 3}
                   stroke="#fff"
                   fill="#8884d8"
-                  onClick={showInteractions ? (data: any, _: number, e: any) => handleChartElementClick(xKey, data.name || data[xKey], e) : undefined}
+                  onClick={showInteractions ? ((node: any) => handleChartElementClick(xKey, node?.name || node?.[xKey], node)) : undefined}
                 >
                   {showInteractions && <Tooltip content={<CustomTooltip />} />}
                 </Treemap>

@@ -41,3 +41,7 @@ minio
 python-docx
 scipy
 statsmodels
+# --- Явно зафиксированные зависимости (использовались в коде, но отсутствовали) ---
+prometheus-client          # кастомные метрики (Histogram/Counter) — core/llm.py, app/crew, app/agents
+langchain-openai           # ChatOpenAI в app/crew/crew_orchestrator.py
+qdrant-client              # векторное хранилище — scripts/*, app RAG/memory

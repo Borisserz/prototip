@@ -10,8 +10,11 @@
 #    docker compose up -d --build
 #
 #  Опциональные профили:
-#    docker compose --profile auth up -d     # Keycloak
-#    docker compose --profile etl  up -d     # Postgres + Airflow (ETL)
+#    docker compose --profile auth up -d            # Keycloak
+#    docker compose --profile etl  up -d            # Postgres + Airflow (ETL)
+#    docker compose --profile observability up -d   # Prometheus + Grafana (Phase 8)
+#       Grafana   → http://localhost:3001  (admin/admin, см. GRAFANA_* в .env)
+#       Prometheus→ http://localhost:9090
 #
 #  Каждый сервис можно поднять отдельно, напр.:
 #    docker compose up -d clickhouse qdrant minio
@@ -227,6 +230,46 @@ services:
       - ./backend/airflow/plugins:/opt/airflow/plugins
     command: scheduler
 
+  # ===================== OBSERVABILITY: Prometheus + Grafana (Phase 8) =====
+  # Запуск: docker compose --profile observability up -d
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: genbi_prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: genbi_grafana
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true            # для iframe-встраивания в админке
+      - GF_AUTH_ANONYMOUS_ENABLED=true              # просмотр дашбордов без логина (iframe)
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   clickhouse_data:
   qdrant_data:
@@ -234,3 +277,5 @@ volumes:
   minio_data:
   ollama_data:
   backend_out:
+  prometheus_data:
+  grafana_data:

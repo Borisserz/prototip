@@ -55,6 +55,13 @@ def setup_logging() -> None:
 
 setup_logging()
 
+# Phase 8: бизнес-метрики Prometheus (импорт защищён — не должен ломать LLM-слой)
+try:
+    from app.observability.metrics import observe_llm_call
+except Exception:  # pragma: no cover
+    def observe_llm_call(**_kwargs):  # type: ignore
+        return None
+
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b-instruct")
@@ -141,7 +148,16 @@ def _chat_once(
             )
         except Exception as e:
             _llm_logger.warning(f"Failed to log LLM metrics: {e}")
-            
+
+        observe_llm_call(
+            agent=agent_name,
+            model=vertex_model,
+            status="ok",
+            duration_s=duration_ms / 1000.0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
         return schema.model_validate_json(resp.text)
 
     else:
@@ -181,6 +197,15 @@ def _chat_once(
         )
     except Exception as e:
         _llm_logger.warning(f"Failed to log LLM metrics: {e}")
+
+    observe_llm_call(
+        agent=agent_name,
+        model=model,
+        status="ok",
+        duration_s=duration_ms / 1000.0,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
 
     return schema.model_validate_json(content)
 
@@ -227,6 +252,7 @@ def call_structured(
         if attempt < LLM_MAX_RETRIES:
             time.sleep(LLM_RETRY_DELAY_SEC * attempt)
 
+    observe_llm_call(agent=agent_name, model=mdl, status="error", duration_s=0.0)
     raise RuntimeError(f"LLM structured call failed after {LLM_MAX_RETRIES} attempts: {last_error}")
 
 

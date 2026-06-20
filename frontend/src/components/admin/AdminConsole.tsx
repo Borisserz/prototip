@@ -4,12 +4,13 @@ import {
   LayoutGrid, Plus, RefreshCw, Building2, Users, Activity, Database,
   ArrowLeft, ChevronRight, Loader2, AlertTriangle, Boxes,
 } from "lucide-react";
+import { MonitoringConsole } from "./MonitoringConsole";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, Tooltip as RTooltip, CartesianGrid,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { adminApi, fmt, type Overview, type OverviewClient } from "@/lib/adminApi";
-import { Sparkline, StatCard, StatusBadge, Meter } from "./widgets";
+import { Sparkline, StatCard, StatusBadge, Meter, ConsoleTabs } from "./widgets";
 import { TenantDetail } from "./TenantDetail";
 import { CreateTenantWizard } from "./CreateTenantWizard";
 
@@ -29,6 +30,7 @@ export const AdminConsole: React.FC<Props> = ({ onBack, onImpersonate }) => {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [tab, setTab] = useState<"blocks" | "monitoring">("blocks");
 
   const load = async () => {
     setLoading(true);
@@ -56,6 +58,11 @@ export const AdminConsole: React.FC<Props> = ({ onBack, onImpersonate }) => {
     );
   }
 
+  // ── Страница «Мониторинг» (Phase 8) ───────────────────────────────────────
+  if (tab === "monitoring") {
+    return <MonitoringConsole onBack={onBack} onTabChange={(id) => setTab(id as "blocks" | "monitoring")} />;
+  }
+
   const s = overview?.summary;
 
   return (
@@ -74,7 +81,15 @@ export const AdminConsole: React.FC<Props> = ({ onBack, onImpersonate }) => {
               <p className="text-sm text-slate-400">Клиенты, которым поставлен продукт — аналитика и управление</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ConsoleTabs
+              current="blocks"
+              onChange={(id) => setTab(id as "blocks" | "monitoring")}
+              tabs={[
+                { id: "blocks", label: "Мои блоки", icon: LayoutGrid },
+                { id: "monitoring", label: "Мониторинг", icon: Activity },
+              ]}
+            />
             <Button variant="ghost" onClick={load} className="text-slate-300" title="Обновить">
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
