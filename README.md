@@ -1,187 +1,114 @@
-# prototip
+# Prototip BI — AI-аналитическая платформа
 
-Локальная мультиагентная BI-платформа (прототип) для налоговой аналитики.  
-Вопрос на русском → SQL по ClickHouse → данные → график → выводы → (опционально) дашборд или презентация `.pptx`.
+Мультиагентная BI-платформа: пользователь задаёт вопрос на естественном языке —
+система генерирует SQL, считает аналитику, строит графики, дашборды, презентации и
+отчёты. Под капотом — оркестратор на **LangGraph**, аналитическое хранилище
+**ClickHouse**, семантический слой на **Qdrant/Chroma** и веб-интерфейс на **React**.
 
-Полностью офлайн через [Ollama](https://ollama.com). Синтетические данные, не для официальной отчётности.
-
-**Репозиторий:** https://github.com/Borisserz/prototip
-
----
-
-## Возможности
-
-| Область | Что умеет |
-|--------|-----------|
-| **Оркестрация** | **LangGraph** оркестрирует Data / Chart / Analyst / Dashboard / Presentation. |
-| **Графики** | 12 типов, spec-first: LLM → `ChartSpec`, рендер — `viz/charts.py` + Recharts на фронтенде |
-| **Стиль** | Гос-оформление: Arial, `#003366`, русские подписи, валюта Br, Okabe-Ito |
-| **UI** | React + Vite + TailwindCSS. Быстрые карточки, drill-down, SSE-стриминг |
-| **RBAC** | Row-Level Security через `user_context` и инъекции `WHERE` в AST (sqlglot) |
-| **RAG** | Векторный поиск внутри ClickHouse (`cosineDistance`) |
-| **Semantic** | Парсинг YAML-слоя данных напрямую в Pydantic-схемы |
-| **Аномалии** | Проактивный поиск отклонений в фоне и Email-уведомления (WatcherService) |
-| **Визуализация**| Live-отображение дебатов агентов и анимация LangGraph графа на клиенте |
-| **Analyst Mode**| Human-in-the-loop: прозрачный просмотр сгенерированного SQL прямо в UI чата |
-| **Тесты** | 150+ автотестов (`pytest -m "not live"`), live e2e с Ollama, SQL Eval Pipeline |
+> Поддерживается мультитенантность (B2B): один экземпляр обслуживает несколько
+> изолированных клиентов, у каждого — свой ClickHouse, своя семантика и свой токен.
 
 ---
 
-## Быстрый старт
-
-Требования: **Python 3.11+**, **Node.js 18+**, **Ollama**, **ClickHouse** (через Docker), ~8 ГБ RAM для `qwen2.5-coder:7b-instruct`.
-
-```bash
-git clone https://github.com/Borisserz/prototip.git
-cd prototip
-
-# 1. Запуск ClickHouse
-docker-compose up -d
-
-# 2. Бэкенд
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Модель
-ollama pull qwen2.5-coder:7b-instruct
-
-# Запуск API
-uvicorn app.main:app --reload
-# → http://127.0.0.1:8000/docs
-
-# 3. Фронтенд (в новом окне терминала)
-cd frontend_web
-npm install
-npm run dev
-# → http://localhost:5173
-```
-
----
-
-## Интерфейс (React/Vite)
-
-- **Чат (Аналитический вопрос)** — диалоговый интерфейс со стримингом через WebSocket (`/ws/chat`). 
-- Потоковая генерация ответа от LangGraph, построение графиков на лету.
-- **Drill-down** — клик по элементу графика (Recharts) → фильтр → уточняющий вопрос с контекстом.
-- **Экспорт** в Excel, PNG.
-
----
-
-## Архитектура
-
-```
-React UI (Vite) / FastAPI / CLI / тесты
-              ↓
-         LangGraph (StateGraph)
-    ask_stream() → потоковая передача статусов
-    dashboard() → DashboardAgent
-    presentation() → PresentationAgent
-              ↓
-    SemanticEngine (парсинг YAML слоя данных)
-              ↓
-    Agent Nodes → data_node | chart_node | analyst_node | …
-              ↓
-    ClickHouse (нативный RAG и SELECT) + RBAC (sqlglot AST) → SQL Eval
-              ↓
-    viz/charts.py → Plotly / PNG / Recharts (frontend)
-```
-
-**Spec-first:** модель не генерирует код графиков — только Pydantic `ChartSpec`. Рендер детерминированный, тестируемый, в едином стиле.
-
-Подробнее: [AGENTS.md](AGENTS.md), [OBZOR.md](OBZOR.md).
-
----
-
-## Данные и Семантика
-
-Синтетический CSV: `data/sample.csv`. Используется `data/semantic_model.yaml` для конфигурации семантического слоя:
-
-- `region`: Регион РБ
-- `tax_type`: Вид налога
-- `accrued`: Начислено, Br
-- ...
-
----
-
-## Структура проекта
+## 📂 Структура репозитория
 
 ```
 prototip/
-├── app/
-│   ├── graph.py         # Главный граф LangGraph
-│   ├── agents/          # Агенты: Data, Chart, Analyst, Dashboard, Presentation
-│   ├── semantic/        # Умный Семантический Движок (catalog.py)
-│   ├── eval/            # SQL Evaluator (защита от галлюцинаций)
-│   ├── orchestrator.py  # Единая точка входа
-│   ├── main.py          # FastAPI
-│   └── utils/           # ClickHouse клиент, RBAC (memory.py)
-├── core/
-│   ├── models.py        # ChartSpec и контракты
-│   └── llm.py           # Ollama structured output
-├── viz/                 # Рендер графиков (Plotly)
-├── frontend_web/        # React + Vite + Tailwind UI
-├── data/                # sample.csv + semantic_model.yaml
-├── showcase/            # Демо для руководства (PNG, HTML, PPTX)
-└── tests/               # 150+ автотестов
+├── frontend/     # React + Vite + Tailwind + nginx   (веб-интерфейс)
+├── backend/      # FastAPI API + LangGraph-агенты      (сервер + работа с агентами)
+│   ├── app/         # веб-слой: роутеры, auth, экспорт, дашборды, админка клиентов
+│   ├── app/agents/  # агенты LangGraph (engine: SQL, графики, отчёты, прогноз…)
+│   ├── app/orchestrator.py, app/graph.py  # оркестрация агентов
+│   ├── core/        # общие сервисы: LLM, хранилище (MinIO), реестр клиентов, SQL-guard
+│   ├── domain/      # бизнес-знания: метрики, playbook графиков, примеры SQL
+│   ├── viz/         # рендеринг графиков
+│   └── scripts/     # ETL/seed/сборка тенантов
+├── db/           # ClickHouse (Dockerfile + init.sql + seed)  — аналитическое хранилище
+├── docs/         # ARCHITECTURE.md, ROADMAP.md
+├── docker-compose.yml             # оркестрация всего стека
+└── docker-compose.tenant.template.yml  # шаблон изолированного клиента (Phase 6)
 ```
+
+Каждая папка-сервис (`frontend`, `backend`, `db`) имеет свой **Dockerfile** и может
+быть собрана/поднята как отдельно, так и вместе через корневой `docker-compose.yml`.
 
 ---
 
-## API
-
-| Метод | Путь | Описание |
-|-------|------|----------|
-| GET | `/health` | Статус сервиса |
-| WS | `/ws/chat` | Основной WebSocket эндпоинт для чата (LangGraph) |
-| POST | `/ask` | REST fallback (без стриминга) |
-| POST | `/search` | RAG поиск по сессиям |
-
-Пример:
+## 🚀 Быстрый старт
 
 ```bash
-curl -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Какая задолженность по регионам?"}'
+# 1. Конфигурация
+cp .env.example .env          # при необходимости отредактируйте
+
+# 2. Поднять весь стек (frontend + backend + ClickHouse + Qdrant + MinIO + Ollama)
+docker compose up -d --build
+
+# 3. Открыть
+#    Frontend:        http://localhost:3000
+#    Backend (API):   http://localhost:8000/docs
+#    MinIO консоль:   http://localhost:9101
 ```
 
----
-
-## Конфигурация
-
-Переменные окружения `PROTOTIP_*`:
-
-| Переменная | По умолчанию | Назначение |
-|------------|--------------|------------|
-| `PROTOTIP_OLLAMA_MODEL` | `qwen2.5-coder:7b-instruct` | Модель Ollama |
-| `PROTOTIP_DATA_PATH` | `data/sample.csv` | Путь к CSV |
-| `PROTOTIP_OUT_DIR` | `out/` | Артефакты (PNG, логи) |
-
----
-
-## Тестирование
+### Запуск отдельных частей
 
 ```bash
-# Быстрый прогон (без live Ollama)
-python -m pytest -m "not live" -q
+docker compose up -d clickhouse qdrant minio   # только базы/хранилища
+docker compose up -d backend                   # только бэкенд
+docker compose up -d frontend                  # только фронтенд
+```
 
-# Полный набор
-python -m pytest -q
+### Опциональные профили
 
-# E2E
-python test_api.py
+```bash
+docker compose --profile auth up -d    # Keycloak (внешняя аутентификация)
+docker compose --profile etl  up -d    # Postgres + Airflow (ETL-пайплайны)
 ```
 
 ---
 
-## Документация
+## 🧩 Сервисы и порты
 
-| Файл | Назначение |
-|------|------------|
-| [README.md](README.md) | Обзор, быстрый старт (этот файл) |
-| **[DOKUMENTACIYA_INDEX.md](DOKUMENTACIYA_INDEX.md)** | **Индекс: кому что читать, статус, навигация** |
-| **[OBZOR.md](OBZOR.md)** | **Обзор для руководства: простыми словами + полная архитектура** |
-| **[ROADMAP.md](ROADMAP.md)** | **Детальный план развития (Enterprise Features)** |
-| **[SRAVNENIE_S_EPSILON_METRICS.md](SRAVNENIE_S_EPSILON_METRICS.md)** | **Сравнение со статьёй Epsilon Metrics (таблицы, логика)** |
+| Сервис      | Порт (хост)        | Назначение                              |
+|-------------|--------------------|-----------------------------------------|
+| frontend    | 3000               | Веб-интерфейс (nginx)                   |
+| backend     | 8000               | FastAPI API + Swagger `/docs`           |
+| clickhouse  | 8123 / 9000        | Аналитическое хранилище                 |
+| qdrant      | 6333 / 6334        | Векторное хранилище (семантика/RAG)     |
+| minio       | 9100 (S3) / 9101   | Объектное хранилище артефактов          |
+| ollama      | 11434              | Локальный LLM (по умолчанию)            |
+| keycloak*   | 8080               | Аутентификация (профиль `auth`)         |
+| airflow*    | 8081               | ETL (профиль `etl`)                     |
+
+\* — опционально, поднимается только с соответствующим профилем.
 
 ---
+
+## 🛠 Локальная разработка (без Docker)
+
+```bash
+# Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# Frontend
+cd frontend
+npm install
+npm run dev          # http://localhost:5173
+```
+
+Подробности — в `backend/README.md`, `frontend/README.md`, `db/README.md`.
+
+---
+
+## 📚 Документация
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — архитектура системы
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — план развития (фазы)
+
+## 🔐 Секреты
+
+Ключи и токены **не коммитятся**. Для Vertex AI положите ключ в
+`backend/secrets/gcp.json` (см. `backend/secrets/README.md`). Все секреты
+конфигурируются через `.env` (шаблон — `.env.example`).
