@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { adminApi, fmt, type TenantStats } from "@/lib/adminApi";
 import { StatCard, StatusBadge, Meter } from "./widgets";
+import { EtlPanel } from "./EtlPanel";
 
 interface Props {
   clientId: string;
@@ -31,7 +32,7 @@ export const TenantDetail: React.FC<Props> = ({ clientId, onBack, onImpersonate,
   const [data, setData] = useState<TenantStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"analytics" | "activity" | "settings">("analytics");
+  const [tab, setTab] = useState<"analytics" | "activity" | "etl" | "settings">("analytics");
   const [copied, setCopied] = useState<string | null>(null);
   const [tokens, setTokens] = useState<{ jwt: string; api: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -166,7 +167,7 @@ export const TenantDetail: React.FC<Props> = ({ clientId, onBack, onImpersonate,
 
         {/* Табы */}
         <div className="mt-6 flex gap-1 rounded-lg border border-slate-700/50 bg-slate-800/40 p-1 w-fit">
-          {([["analytics", "Аналитика"], ["activity", "Активность"], ["settings", "Настройки"]] as const).map(([k, label]) => (
+          {([["analytics", "Аналитика"], ["activity", "Активность"], ["etl", "Данные / ETL"], ["settings", "Настройки"]] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${tab === k ? "bg-sky-500/20 text-sky-300" : "text-slate-400 hover:text-white"}`}>
               {label}
@@ -315,6 +316,10 @@ export const TenantDetail: React.FC<Props> = ({ clientId, onBack, onImpersonate,
         )}
 
         {/* ── НАСТРОЙКИ ──────────────────────────────────────────────────────── */}
+        {tab === "etl" && (
+          <EtlPanel clientId={clientId} client={data.client} onChanged={load} />
+        )}
+
         {tab === "settings" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
             {/* Конфигурация */}

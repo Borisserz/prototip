@@ -18,6 +18,39 @@ export interface TenantConfig {
   client_id_value?: string;
   active: boolean;
   created_at: string;
+  // Phase 9 — ETL-оркестрация
+  pg_configured?: boolean;
+  pg_schema?: string;
+  etl_schedule?: string;
+  etl_enabled?: boolean;
+  max_users?: number;
+  docs_collection?: string;
+  last_etl_status?: string;
+  last_etl_at?: string;
+  last_etl_message?: string;
+}
+
+// ─── Phase 9 — типы ETL ────────────────────────────────────────────────────────
+export interface EtlStatus {
+  client_id: string;
+  status: string;            // idle | running | success | failed
+  last_run_at?: string;
+  message?: string;
+  etl_enabled?: boolean;
+  etl_schedule?: string;
+  pg_configured?: boolean;
+}
+
+export interface EtlRun {
+  dag_run_id: string;
+  state: string;
+  execution_date?: string;
+  note?: string;
+}
+
+export interface TenantDoc {
+  source: string;
+  chunks: number;
 }
 
 // ─── Типы статистики ─────────────────────────────────────────────────────────
@@ -154,6 +187,73 @@ export const adminApi = {
       username: string;
       tenant: TenantConfig;
     }>(`/api/v1/client/login`, { method: "POST", body: JSON.stringify(body) }),
+};
+
+// ─── Phase 9 — ETL-оркестрация (Airflow): кнопочная инициализация клиента ──────
+const T = (id: string) => `/api/v1/admin/tenants/${encodeURIComponent(id)}`;
+
+export const etlApi = {
+  /** Проверить подключение к Postgres ДО создания клиента (визард). */
+  probeConnection: (pg_dsn: string, pg_schema = "public") =>
+    request<{ ok: boolean; tables: string[]; count: number }>(
+      `/api/v1/admin/etl/test-connection`,
+      { method: "POST", body: JSON.stringify({ pg_dsn, pg_schema }) },
+    ),
+
+  /** Проверить read-only доступ к Postgres существующего клиента. */
+  testConnection: (id: string, pg_dsn: string, pg_schema = "public") =>
+    request<{ ok: boolean; tables: string[]; count: number }>(
+      `${T(id)}/etl/test-connection`,
+      { method: "POST", body: JSON.stringify({ pg_dsn, pg_schema }) },
+    ),
+
+  /** Инициализировать инстанс клиента одной кнопкой (PG → ETL). */
+  provision: (id: string, body: Record<string, unknown> = {}) =>
+    request<{ status: string; mode: string; dag_run_id?: string }>(
+      `${T(id)}/provision`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  /** Запустить синхронизацию данных. */
+  run: (id: string, body: Record<string, unknown> = {}) =>
+    request<{ status: string; mode: string; dag_run_id?: string }>(
+      `${T(id)}/etl/run`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  /** Текущий статус ETL клиента. */
+  status: (id: string) => request<EtlStatus>(`${T(id)}/etl/status`),
+
+  /** Последние запуски (Airflow или реестр). */
+  runs: (id: string, limit = 10) =>
+    request<{ source: string; runs: EtlRun[] }>(`${T(id)}/etl/runs?limit=${limit}`),
+
+  /** Настроить cron-расписание и вкл/выкл автосинхронизацию. */
+  setSchedule: (id: string, body: { etl_schedule?: string; etl_enabled?: boolean }) =>
+    request<{ etl_schedule: string; etl_enabled: boolean; airflow_synced: boolean; note: string }>(
+      `${T(id)}/etl/schedule`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  /** Пересобрать только семантический слой. */
+  rebuildSemantics: (id: string) =>
+    request<{ status: string; task: string }>(`${T(id)}/semantics`, { method: "POST" }),
+
+  /** Список документов в персональном RAG клиента. */
+  listDocs: (id: string) =>
+    request<{ collection: string; documents: TenantDoc[]; error?: string }>(`${T(id)}/docs`),
+
+  /** Загрузить документ клиента в его RAG (multipart). */
+  uploadDoc: async (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${API_BASE}${T(id)}/docs`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.detail || `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<{ status: string; filename: string; size: number; note: string }>;
+  },
 };
 
 // ─── Phase 8: системные метрики (страница «Мониторинг») ─────────────────────

@@ -1,0 +1,30 @@
+# Phase 9 — зависимости для кастомного образа Airflow.
+# Эти пакеты нужны, чтобы DAG'и переиспользовали backend-код (app.etl / scripts / core):
+#   • выгрузка из Postgres клиента и заливка в ClickHouse
+#   • генерация семантического слоя (эмбеддинги — та же модель, что в RAG backend)
+#   • загрузка документации клиента в RAG
+#
+# ВАЖНО: модель эмбеддингов (all-MiniLM-L6-v2) ДОЛЖНА совпадать с backend,
+# иначе семантический поиск даст несогласованные результаты.
+
+clickhouse-connect
+psycopg2-binary
+pg8000
+qdrant-client
+pyyaml
+cryptography
+python-jose[cryptography]
+pandas
+
+# RAG / семантика
+langchain
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-huggingface
+sentence-transformers
+
+# Парсеры документов
+pdfplumber
+pypdf
+python-docx

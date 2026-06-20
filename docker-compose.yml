@@ -21,6 +21,50 @@
 #    docker compose up -d backend
 #    docker compose up -d frontend
 # ─────────────────────────────────────────────────────────────────────────────
+# Общие настройки контейнеров Airflow (анкор YAML — не дублируем env/volumes)
+x-airflow-common: &airflow-common
+  build:
+    context: ./backend/airflow
+    dockerfile: Dockerfile
+  image: prototip-airflow:latest
+  profiles: ["etl"]
+  environment: &airflow-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+    # Stable REST API с basic-auth — через неё backend триггерит DAG'и
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    # backend-код для DAG'ов
+    BACKEND_ROOT: /opt/airflow/backend
+    PYTHONPATH: /opt/airflow/backend
+    TENANT_REGISTRY_PATH: /opt/airflow/backend/data/tenants/registry.json
+    # доступ к общему ClickHouse стека (тот же инстанс, что у backend)
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_PORT: "8123"
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_PASSWORD: ""
+    QDRANT_HOST: qdrant
+    QDRANT_PORT: "6333"
+    # ОБЩИЙ ключ шифрования с backend (иначе не расшифровать pg_dsn/пароли)
+    APP_SECRET_ENCRYPTION_KEY: ${APP_SECRET_ENCRYPTION_KEY:-}
+    # почта для алертов о сбоях ETL (через app/services/email_service.py)
+    ETL_ALERT_EMAIL: ${ETL_ALERT_EMAIL:-admin@prototip.local}
+    SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:-no-reply@prototip.local}
+    SMTP_PASS: ${SMTP_PASS:-secret}
+  volumes: &airflow-volumes
+    - ./backend:/opt/airflow/backend           # backend-код (app.etl / scripts / core)
+    - ./backend/airflow/dags:/opt/airflow/dags
+    - ./backend/airflow/logs:/opt/airflow/logs
+    - ./backend/airflow/plugins:/opt/airflow/plugins
+    - tenant_data:/opt/airflow/backend/data/tenants  # ОБЩЕЕ хранилище реестра/слепков с backend
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+
 services:
   # ===================== БАЗЫ ДАННЫХ =====================
   clickhouse:
@@ -147,10 +191,18 @@ services:
       - MEMORY_ENABLED=${MEMORY_ENABLED:-true}
       - MEMORY_RAG_DAYS=${MEMORY_RAG_DAYS:-7}
       - MEMORY_RAG_TOPK=${MEMORY_RAG_TOPK:-5}
+      # Phase 9: ETL-оркестрация (Airflow). Ключ шифрования ОБЯЗАН совпадать с Airflow.
+      - APP_SECRET_ENCRYPTION_KEY=${APP_SECRET_ENCRYPTION_KEY:-}
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL:-http://airflow-webserver:8080/api/v1}
+      - AIRFLOW_USERNAME=${AIRFLOW_USERNAME:-admin}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD:-admin}
+      - ETL_ALERT_EMAIL=${ETL_ALERT_EMAIL:-admin@prototip.local}
     volumes:
       - backend_out:/app/out
       # Ключ сервис-аккаунта GCP для Vertex (положите backend/secrets/gcp.json; read-only)
       - ./backend/secrets:/app/secrets:ro
+      # Phase 9: ОБЩИЙ реестр клиентов и слепки/документы — виден и Airflow
+      - tenant_data:/app/data/tenants
 
   # ===================== FRONTEND (React + Vite + nginx) =====================
   frontend:
@@ -176,7 +228,10 @@ services:
     ports:
       - "8080:8080"
 
-  # ===================== ETL: Postgres + Airflow (опционально) =====================
+  # ===================== ETL: Postgres + Airflow (профиль etl, Phase 9) =====
+  #  Запуск:  docker compose --profile etl up -d --build
+  #  Airflow UI → http://localhost:8081  (admin/admin)
+  #  REST API  → http://localhost:8081/api/v1  (basic auth, дергает backend)
   postgres:
     image: postgres:13
     container_name: genbi_postgres
@@ -189,45 +244,54 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Одноразовая инициализация: миграции БД + создание пользователя admin
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate && \
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@prototip.local || true
+    restart: "no"
 
   airflow-webserver:
-    image: apache/airflow:2.9.1
+    <<: *airflow-common
     container_name: airflow_webserver
-    profiles: ["etl"]
     restart: always
     depends_on:
-      - postgres
-    environment:
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - _AIRFLOW_DB_UPGRADE=True
-      - _AIRFLOW_WWW_USER_CREATE=True
-      - _AIRFLOW_WWW_USER_USERNAME=admin
-      - _AIRFLOW_WWW_USER_PASSWORD=admin
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8080"
-    volumes:
-      - ./backend/airflow/dags:/opt/airflow/dags
-      - ./backend/airflow/logs:/opt/airflow/logs
-      - ./backend/airflow/plugins:/opt/airflow/plugins
     command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
 
   airflow-scheduler:
-    image: apache/airflow:2.9.1
+    <<: *airflow-common
     container_name: airflow_scheduler
-    profiles: ["etl"]
     restart: always
     depends_on:
-      - postgres
-    environment:
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-    volumes:
-      - ./backend/airflow/dags:/opt/airflow/dags
-      - ./backend/airflow/logs:/opt/airflow/logs
-      - ./backend/airflow/plugins:/opt/airflow/plugins
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
     command: scheduler
 
   # ===================== OBSERVABILITY: Prometheus + Grafana (Phase 8) =====
@@ -279,3 +343,4 @@ volumes:
   backend_out:
   prometheus_data:
   grafana_data:
+  tenant_data:        # Phase 9: общий реестр клиентов + слепки/документы (backend ↔ Airflow)
