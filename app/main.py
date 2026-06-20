@@ -146,7 +146,13 @@ def login(form_data: LoginRequest):
         data={"sub": form_data.username, "role": role},
         expires_delta=timedelta(minutes=1440)
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": role,
+        "username": form_data.username,
+        "is_admin": role == "admin",
+    }
 
 
 @app.post("/ask", tags=["orchestrator"])
@@ -792,6 +798,145 @@ def delete_tenant_endpoint(client_id: str):
     if not ok:
         raise HTTPException(404, "Клиент не найден")
     return {"success": True, "client_id": client_id}
+
+
+@app.get("/api/v1/admin/overview", tags=["admin"])
+def admin_overview_endpoint(days: int = 30):
+    """Сводные KPI по всем клиентам + лёгкая статистика на каждую карточку.
+
+    Используется лендингом админ-консоли («Мои блоки»).
+    """
+    from core.tenant import tenant_store
+    from app.services.tenant_stats import compute_overview
+
+    tenants = tenant_store.list_tenants()
+    overview = compute_overview(tenants, days=days)
+    # Прикрепляем публичный конфиг каждого клиента к его агрегатам.
+    by_id = {t.client_id: t.to_public() for t in tenants}
+    for c in overview["clients"]:
+        c["config"] = by_id.get(c["client_id"], {})
+    return overview
+
+
+@app.get("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+def get_tenant_endpoint(client_id: str):
+    """Публичная конфигурация одного клиента."""
+    from core.tenant import tenant_store
+
+    t = tenant_store.get_tenant(client_id)
+    if not t:
+        raise HTTPException(404, "Клиент не найден")
+    return t.to_public()
+
+
+@app.get("/api/v1/admin/tenants/{client_id}/stats", tags=["admin"])
+def tenant_stats_endpoint(client_id: str, days: int = 30):
+    """Развёрнутая аналитика использования по клиенту.
+
+    Live-метрики из личного ClickHouse при доступности, иначе детерминированные
+    представительные данные (помечены полем ``source``).
+    """
+    from core.tenant import tenant_store
+    from app.services.tenant_stats import compute_tenant_stats
+
+    t = tenant_store.get_tenant(client_id)
+    if not t:
+        raise HTTPException(404, "Клиент не найден")
+    stats = compute_tenant_stats(t, days=days)
+    stats["client"] = t.to_public()
+    return stats
+
+
+@app.get("/api/v1/admin/tenants/{client_id}/impersonate", tags=["admin"])
+def impersonate_tenant_endpoint(client_id: str):
+    """Выдаёт админу scoped JWT клиента для входа «от лица заказчика»."""
+    from core.tenant import tenant_store
+
+    t = tenant_store.get_tenant(client_id)
+    if not t:
+        raise HTTPException(404, "Клиент не найден")
+    token = t.jwt_token or create_access_token(
+        data={"sub": f"tenant:{t.client_id}", "role": "client", "client_id": t.client_id},
+        expires_delta=timedelta(days=365),
+    )
+    return {"access_token": token, "client_id": t.client_id, "name": t.name, "tenant": t.to_public()}
+
+
+class TenantUpdateRequest(BaseModel):
+    """Частичное обновление настроек клиента (все поля опциональны)."""
+
+    name: str | None = None
+    allowed_tables: list[str] | None = None
+    enforce_client_id: bool | None = None
+    active: bool | None = None
+    ch_host: str | None = None
+    ch_port: int | None = None
+    ch_database: str | None = None
+
+
+@app.patch("/api/v1/admin/tenants/{client_id}", tags=["admin"])
+def update_tenant_endpoint(client_id: str, payload: TenantUpdateRequest):
+    """Обновляет настройки клиента (название, доступы, изоляцию, статус, ClickHouse)."""
+    from core.tenant import tenant_store
+
+    fields = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "Нет полей для обновления")
+    # ch_* → ключи ClickHouseConfig, понятные update_tenant().
+    for src, dst in (("ch_host", "host"), ("ch_port", "port"), ("ch_database", "database")):
+        if src in fields:
+            fields[dst] = fields.pop(src)
+    t = tenant_store.update_tenant(client_id, **fields)
+    if not t:
+        raise HTTPException(404, "Клиент не найден")
+    return t.to_public()
+
+
+class ClientLoginRequest(BaseModel):
+    """Вход заказчика по API-ключу или личному JWT-токену."""
+
+    api_key: str | None = None
+    token: str | None = None
+
+
+@app.post("/api/v1/client/login", tags=["auth"])
+def client_login_endpoint(payload: ClientLoginRequest):
+    """Аутентификация заказчика. Возвращает scoped JWT и публичный профиль клиента.
+
+    Принимает либо API-ключ клиента, либо его долгоживущий JWT-токен.
+    """
+    from core.tenant import tenant_store
+
+    tenant = None
+    if payload.api_key:
+        tenant = tenant_store.resolve_by_api_key(payload.api_key.strip())
+    elif payload.token:
+        # JWT клиента уже несёт claim client_id и role=client.
+        try:
+            from jose import jwt as _jwt
+            from app.auth import SECRET_KEY, ALGORITHM
+
+            claims = _jwt.decode(payload.token.strip(), SECRET_KEY, algorithms=[ALGORITHM])
+            tenant = tenant_store.get_tenant(claims.get("client_id"))
+        except Exception:  # noqa: BLE001
+            tenant = None
+
+    if not tenant or not tenant.active:
+        raise HTTPException(401, "Неверный ключ/токен клиента или клиент отключён")
+
+    access_token = tenant.jwt_token or create_access_token(
+        data={"sub": f"tenant:{tenant.client_id}", "role": "client", "client_id": tenant.client_id},
+        expires_delta=timedelta(days=365),
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": "client",
+        "is_admin": False,
+        "client_id": tenant.client_id,
+        "username": tenant.name,
+        "tenant": tenant.to_public(),
+    }
 
 
 class PromptUpdateRequest(BaseModel):

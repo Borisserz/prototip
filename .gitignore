@@ -26,6 +26,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Не игнорировать фронтенд-исходники в src/lib (Python-паттерн lib/ задевал их)
+!frontend_web/src/lib/
+!frontend_web/src/lib/**
+
 # PyInstaller
 *.manifest
 *.spec
