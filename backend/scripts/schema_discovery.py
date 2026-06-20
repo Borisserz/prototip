@@ -71,7 +71,7 @@ def discover_schema(host='localhost', port=8123, output_path='data/semantic_mode
                                 keys = list(parsed.keys())
                                 col_desc["description"] = f"JSON поле. Содержит ключи: {', '.join(keys)}. Для доступа используйте JSONExtractString({col_name}, 'key')."
                                 col_desc["is_json"] = True
-                        except:
+                        except Exception:
                             pass
                 except Exception as e:
                     logger.debug(f"JSON check failed for {col_name}: {e}")

@@ -82,7 +82,7 @@ def scan_db():
         q_client.get_collection(collection_name)
         print(f"Collection {collection_name} exists, recreating...")
         q_client.delete_collection(collection_name)
-    except:
+    except Exception:
         pass
         
     q_client.create_collection(

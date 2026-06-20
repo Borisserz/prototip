@@ -19,7 +19,7 @@ class ConversationMemory:
             try:
                 with open(self.file_path, encoding="utf-8") as f:
                     self._history = json.load(f)
-            except:
+            except Exception:
                 pass
 
     def _save(self):

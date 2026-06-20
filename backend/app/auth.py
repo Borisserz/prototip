@@ -13,9 +13,9 @@ from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import requests
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt
+from jose import JWTError, jwt
 
 logger = logging.getLogger("auth")
 
@@ -122,16 +122,20 @@ KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://localhost:8080")
 REALM = os.getenv("KEYCLOAK_REALM", "master")
 JWKS_URL = f"{KEYCLOAK_URL}/realms/{REALM}/protocol/openid-connect/certs"
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+# auto_error=False: токен может прийти не только в Authorization, но и в
+# httpOnly-cookie (P0-5) или query-параметре WebSocket (P0-1).
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+
+# Имя httpOnly-cookie с access-токеном (используется и backend'ом, и WS).
+COOKIE_NAME = "access_token"
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def decode_token(token: str) -> dict:
+    """Валидирует JWT и возвращает {username, role, client_id}.
 
+    Сначала пытается проверить как Keycloak RS256 (через JWKS), затем —
+    как локальный HS256. Бросает ``ValueError`` при невалидном токене.
+    """
     payload: dict | None = None
     try:
         # 1. Попытка проверить токен через Keycloak (RS256).
@@ -145,21 +149,57 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             payload = jwt.decode(token, rsa_key, algorithms=["RS256"], audience="account")
         else:
             raise ValueError("Key not found in JWKS")
-    except (requests.RequestException, KeyError, ValueError, Exception):
+    except (requests.RequestException, KeyError, ValueError, JWTError):
         # 2. Fallback на локальный HS256-JWT (dev/прототип).
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        except Exception:
-            raise credentials_exception
+        except JWTError as exc:
+            raise ValueError("Не удалось валидировать токен") from exc
 
     username = payload.get("sub", payload.get("preferred_username"))
-    role = payload.get("role", "manager")
-    client_id = payload.get("client_id")
-
     if username is None:
-        raise credentials_exception
+        raise ValueError("В токене отсутствует subject (sub)")
 
-    return {"username": username, "role": role, "client_id": client_id}
+    return {
+        "username": username,
+        "role": payload.get("role", "manager"),
+        "client_id": payload.get("client_id"),
+    }
+
+
+def get_user_from_token(token: str | None) -> dict | None:
+    """Безопасный декод токена для WebSocket: возвращает None вместо исключения.
+
+    Используется в `/ws/chat` до `accept()` — позволяет отклонить неавторизованное
+    подключение (P0-1), не роняя соединение исключением.
+    """
+    if not token:
+        return None
+    try:
+        return decode_token(token)
+    except Exception:  # noqa: BLE001 — намеренно не пускаем дальше на WS-хендшейке
+        return None
+
+
+def get_current_user(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
+) -> dict:
+    """Зависимость FastAPI: достаёт токен из заголовка Authorization ИЛИ из
+    httpOnly-cookie (P0-5) и валидирует его."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    raw_token = token or request.cookies.get(COOKIE_NAME)
+    if not raw_token:
+        raise credentials_exception
+    try:
+        return decode_token(raw_token)
+    except ValueError:
+        raise credentials_exception from None
 
 
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:

@@ -29,7 +29,7 @@ x-airflow-common: &airflow-common
   image: prototip-airflow:latest
   profiles: ["etl"]
   environment: &airflow-env
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres/${POSTGRES_DB:-airflow}
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "False"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
@@ -43,7 +43,7 @@ x-airflow-common: &airflow-common
     CLICKHOUSE_HOST: clickhouse
     CLICKHOUSE_PORT: "8123"
     CLICKHOUSE_USER: default
-    CLICKHOUSE_PASSWORD: ""
+    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
     QDRANT_HOST: qdrant
     QDRANT_PORT: "6333"
     # ОБЩИЙ ключ шифрования с backend (иначе не расшифровать pg_dsn/пароли)
@@ -82,8 +82,10 @@ services:
       # end-to-end сценарий (чат → SQL → ClickHouse) падает на первом запросе.
       - CLICKHOUSE_DB=default
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
-      - CLICKHOUSE_PASSWORD=
+      # P0-3: в SaaS-сети пустой пароль + access management = открытый доступ ко всем
+      # тенантам. В prod ОБЯЗАТЕЛЬНО задайте CLICKHOUSE_PASSWORD и CLICKHOUSE_ACCESS_MANAGEMENT=0.
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=${CLICKHOUSE_ACCESS_MANAGEMENT:-1}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
     restart: unless-stopped
     volumes:
       - clickhouse_data:/var/lib/clickhouse
@@ -181,7 +183,7 @@ services:
       - CLICKHOUSE_PORT=8123
       - CLICKHOUSE_DB=default
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       # LLM (Ollama по умолчанию; для Vertex выставить USE_VERTEX=true)
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:7b-instruct}
@@ -220,6 +222,13 @@ services:
       - ./backend/secrets:/app/secrets:ro
       # Phase 9: ОБЩИЙ реестр клиентов и слепки/документы — виден и Airflow
       - tenant_data:/app/data/tenants
+    # P1-4: liveness через /health (Python есть в образе — не зависим от curl).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
 
   # ===================== FRONTEND (React + Vite + nginx) =====================
   frontend:
@@ -235,6 +244,12 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    # P1-4: nginx:alpine содержит wget (busybox) — проверяем отдачу SPA.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     depends_on:
       - backend
 
@@ -245,8 +260,9 @@ services:
     command: start-dev
     profiles: ["auth"]
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # P0-4: дефолтные креды только для dev. В prod задайте KEYCLOAK_ADMIN_* в .env.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
     ports:
       - "8080:8080"
 
@@ -259,9 +275,10 @@ services:
     container_name: genbi_postgres
     profiles: ["etl"]
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
+      # P0-4: дефолты только для dev; в prod задайте POSTGRES_PASSWORD в .env.
+      - POSTGRES_USER=${POSTGRES_USER:-airflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-airflow}
+      - POSTGRES_DB=${POSTGRES_DB:-airflow}
     ports:
       - "5432:5432"
     volumes:
@@ -282,9 +299,9 @@ services:
       - |
         airflow db migrate && \
         airflow users create \
-          --username admin --password admin \
+          --username ${AIRFLOW_USERNAME:-admin} --password ${AIRFLOW_PASSWORD:-admin} \
           --firstname Admin --lastname User \
-          --role Admin --email admin@prototip.local || true
+          --role Admin --email ${ETL_ALERT_EMAIL:-admin@prototip.local} || true
     restart: "no"
 
   airflow-webserver:

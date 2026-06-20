@@ -1,5 +1,15 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/useChatStore';
+import { API_BASE } from '../lib/config';
+
+// WS-URL выводится из API_BASE (http→ws, https→wss), а не хардкодится.
+// P0-1: токен передаётся query-параметром — backend валидирует его до accept().
+function buildChatSocketUrl(): string | null {
+  const token = localStorage.getItem('jwt_token');
+  if (!token) return null; // без токена не подключаемся (бэкенд всё равно отклонит)
+  const wsBase = API_BASE.replace(/^http/, 'ws');
+  return `${wsBase}/ws/chat?token=${encodeURIComponent(token)}`;
+}
 
 export function useChatSocket() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -12,8 +22,14 @@ export function useChatSocket() {
 
   const connectWebSocket = useCallback((retryCount = 0) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    
-    wsRef.current = new WebSocket("ws://localhost:8000/ws/chat");
+
+    const url = buildChatSocketUrl();
+    if (!url) {
+      // Пользователь не залогинен — откладываем подключение.
+      setWsConnected(false);
+      return;
+    }
+    wsRef.current = new WebSocket(url);
     
     wsRef.current.onopen = () => {
       setWsConnected(true);

@@ -17,6 +17,9 @@ from fastapi import (
     FastAPI,
     File,
     HTTPException,
+    Query,
+    Request,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -25,6 +28,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from app.auth import create_access_token, get_current_user, require_admin
 from app.config import config
@@ -50,6 +57,44 @@ app = FastAPI(
     version=config.app_version,
     description="Локальная мультиагентная BI-платформа для налоговой аналитики (прототип).",
 )
+
+# ─── P0-2: Rate limiting (slowapi) ───────────────────────────────────────────
+# Глобальный дефолтный лимит на ВСЕ эндпоинты + строгие лимиты на login/LLM ниже.
+# Ключ — IP клиента (за обратным прокси нужно пробрасывать X-Forwarded-For).
+RATE_LIMIT_DEFAULT = os.getenv("RATE_LIMIT_DEFAULT", "120/minute")
+RATE_LIMIT_LOGIN = os.getenv("RATE_LIMIT_LOGIN", "10/minute")
+RATE_LIMIT_LLM = os.getenv("RATE_LIMIT_LLM", "30/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[RATE_LIMIT_DEFAULT])
+app.state.limiter = limiter
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Слишком много запросов. Повторите позже.", "code": "rate_limited"},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# P0-2: ограничение размера тела запроса (защита от DoS большими payload).
+MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(25 * 1024 * 1024)))  # 25 MB
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Тело запроса слишком большое.", "code": "payload_too_large"},
+                )
+        except ValueError:
+            pass
+    return await call_next(request)
 
 
 # Включаем JSON логирование
@@ -137,11 +182,50 @@ class AskRequest(BaseModel):
 
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
+    """Liveness-проба: процесс жив. НЕ проверяет внешние зависимости."""
     return {
         "status": "ok",
         "phase": config.app_phase,
         "version": config.app_version,
     }
+
+
+@app.get("/readyz", tags=["system"])
+def readyz() -> JSONResponse:
+    """Readiness-проба (P1-4): проверяет доступность ClickHouse и Qdrant.
+
+    Возвращает 200, если все зависимости доступны, иначе 503 с деталями.
+    Используется в healthcheck'е docker-compose и оркестраторах (k8s readinessProbe).
+    """
+    checks: dict[str, str] = {}
+    ready = True
+
+    # ClickHouse
+    try:
+        ch_client.get_client().query("SELECT 1")
+        checks["clickhouse"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        checks["clickhouse"] = f"error: {exc}"
+        ready = False
+
+    # Qdrant (HTTP readiness endpoint)
+    try:
+        import requests as _requests
+
+        qhost = os.getenv("QDRANT_HOST", "localhost")
+        qport = os.getenv("QDRANT_PORT", "6333")
+        resp = _requests.get(f"http://{qhost}:{qport}/readyz", timeout=2)
+        checks["qdrant"] = "ok" if resp.status_code == 200 else f"status {resp.status_code}"
+        if resp.status_code != 200:
+            ready = False
+    except Exception as exc:  # noqa: BLE001
+        checks["qdrant"] = f"error: {exc}"
+        ready = False
+
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"ready": ready, "checks": checks},
+    )
 
 
 @app.get("/", tags=["system"])
@@ -160,8 +244,28 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    """P0-5: кладёт access-токен в httpOnly+SameSite cookie (защита от кражи через XSS).
+
+    Secure включается вне dev (APP_ENV != development), чтобы cookie ходила только по HTTPS.
+    """
+    from app.auth import COOKIE_NAME
+
+    secure = os.getenv("APP_ENV", "development").lower() != "development"
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")) * 60,
+        path="/",
+    )
+
+
 @app.post("/auth/login", tags=["auth"])
-def login(form_data: LoginRequest):
+@limiter.limit(RATE_LIMIT_LOGIN)
+def login(request: Request, form_data: LoginRequest, response: Response):
     # Реальная проверка логина/пароля по bcrypt-хешам (без угадывания роли по имени).
     from app.auth import authenticate_user
 
@@ -178,6 +282,9 @@ def login(form_data: LoginRequest):
         data={"sub": user["username"], "role": role},
         expires_delta=timedelta(minutes=1440),
     )
+    # P0-5: дублируем токен в httpOnly-cookie. Тело ответа сохранено для обратной
+    # совместимости с фронтом, который пока читает access_token из JSON.
+    _set_auth_cookie(response, access_token)
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -187,8 +294,18 @@ def login(form_data: LoginRequest):
     }
 
 
+@app.post("/auth/logout", tags=["auth"])
+def logout(response: Response):
+    """P0-5: чистит httpOnly-cookie с токеном."""
+    from app.auth import COOKIE_NAME
+
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return {"status": "logged_out"}
+
+
 @app.post("/ask", tags=["orchestrator"])
-def ask_endpoint(payload: AskRequest, user: dict = Depends(get_current_user)) -> dict[str, Any]:
+@limiter.limit(RATE_LIMIT_LLM)
+def ask_endpoint(request: Request, payload: AskRequest, user: dict = Depends(get_current_user)) -> dict[str, Any]:
     """Универсальный запрос через PlannerAgent (Обычный JSON-ответ)."""
     cid = new_correlation_id()
     res = get_orchestrator().ask(
@@ -202,7 +319,8 @@ def ask_endpoint(payload: AskRequest, user: dict = Depends(get_current_user)) ->
     return {"result": str(res), "correlation_id": cid}
 
 @app.post("/ask_stream", tags=["orchestrator"])
-async def ask_stream_endpoint(payload: AskRequest, user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_LLM)
+async def ask_stream_endpoint(request: Request, payload: AskRequest, user: dict = Depends(get_current_user)):
     """Streaming (SSE) эндпоинт для чата."""
     cid = new_correlation_id()
     return StreamingResponse(
@@ -269,7 +387,26 @@ def save_user_dashboard(payload: UserDashboardRequest):
     return {"status": "ok"}
 
 @app.websocket("/ws/chat")
-async def chat_websocket(websocket: WebSocket):
+async def chat_websocket(websocket: WebSocket, token: str | None = Query(default=None)):
+    # P0-1: аутентификация ДО accept(). Токен принимается из query-параметра
+    # (?token=...), httpOnly-cookie или заголовка Authorization. Без валидного
+    # токена соединение отклоняется (1008 Policy Violation) — анонимный доступ
+    # к оркестратору (расход LLM, данные тенанта, обход RBAC) закрыт.
+    from app.auth import COOKIE_NAME, get_user_from_token
+
+    header_token = websocket.headers.get("authorization", "")
+    if header_token.lower().startswith("bearer "):
+        header_token = header_token[7:].strip()
+    else:
+        header_token = ""
+    raw_token = token or websocket.cookies.get(COOKIE_NAME) or header_token or None
+
+    ws_user = get_user_from_token(raw_token)
+    if ws_user is None:
+        await websocket.close(code=1008)
+        logger.warning("WS /ws/chat: отклонено неавторизованное подключение")
+        return
+
     await websocket.accept()
     try:
         while True:
@@ -320,7 +457,11 @@ async def chat_websocket(websocket: WebSocket):
             def run_ask():
                 from app.agent_context import debate_context
                 with debate_context(debate_q):
-                    return get_orchestrator().ask(question, drilldown=drilldown_ctx, session_id=session_id)
+                    # P0-1: прокидываем аутентифицированного пользователя в оркестратор
+                    # (роль/client_id), чтобы WS-путь проходил те же проверки тенанта, что REST.
+                    return get_orchestrator().ask(
+                        question, drilldown=drilldown_ctx, session_id=session_id, user=ws_user
+                    )
                     
             ask_task = loop.run_in_executor(None, run_ask)
             
@@ -412,7 +553,8 @@ async def trigger_watcher(background_tasks: BackgroundTasks):
     return {"status": "accepted", "message": "Проактивное сканирование запущено в фоне. Ожидайте письмо."}
 
 @app.post("/generate_dashboard", response_model=DashboardResult, tags=["dashboard"])
-def generate_dashboard(payload: DashboardRequest, user: dict = Depends(get_current_user)) -> DashboardResult:
+@limiter.limit(RATE_LIMIT_LLM)
+def generate_dashboard(request: Request, payload: DashboardRequest, user: dict = Depends(get_current_user)) -> DashboardResult:
     """Явный fast-path дашборда через Orchestrator.dashboard()."""
     cid = new_correlation_id()
     drilldown = None
@@ -429,7 +571,8 @@ def generate_dashboard(payload: DashboardRequest, user: dict = Depends(get_curre
 
 
 @app.post("/generate_presentation", tags=["presentation"])
-def generate_presentation(payload: PresentationRequest, user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_LLM)
+def generate_presentation(request: Request, payload: PresentationRequest, user: dict = Depends(get_current_user)):
     """Генерация презентации через Orchestrator.presentation()."""
     from fastapi.responses import JSONResponse
 
@@ -952,7 +1095,8 @@ class ClientLoginRequest(BaseModel):
 
 
 @app.post("/api/v1/client/login", tags=["auth"])
-def client_login_endpoint(payload: ClientLoginRequest):
+@limiter.limit(RATE_LIMIT_LOGIN)
+def client_login_endpoint(request: Request, payload: ClientLoginRequest):
     """Аутентификация заказчика. Возвращает scoped JWT и публичный профиль клиента.
 
     Принимает либо API-ключ клиента, либо его долгоживущий JWT-токен.

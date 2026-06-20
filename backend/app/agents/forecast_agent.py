@@ -69,7 +69,7 @@ class ForecastAgent(BaseAgent):
                         future_periods.append(f"{curr_y}-{curr_m:02d}")
                 else:
                     future_periods = [f"Прогноз {i}" for i in range(1, 4)]
-            except:
+            except Exception:
                 future_periods = [f"Прогноз {i}" for i in range(1, 4)]
                 
             # Добавляем прогноз в данные (in-place modification)
