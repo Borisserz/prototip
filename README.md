@@ -61,7 +61,7 @@ docker compose up -d frontend                  # только фронтенд
 
 ```bash
 docker compose --profile auth up -d    # Keycloak (внешняя аутентификация)
-docker compose --profile etl  up -d    # Postgres + Airflow (ETL-пайплайны)
+docker compose --profile etl  up -d --build  # Postgres + Airflow (ETL-оркестрация, Phase 9 → backend/airflow/README.md)
 docker compose --profile observability up -d   # Prometheus + Grafana (Phase 8)
 ```
 

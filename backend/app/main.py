@@ -99,6 +99,12 @@ app.add_middleware(
 app.middleware("http")(log_requests_middleware)
 # app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
+# Phase 9: ETL-оркестрация (Airflow) — кнопочная инициализация клиентов
+from app.routers import etl as etl_router  # noqa: E402
+
+app.include_router(etl_router.router)
+app.include_router(etl_router.probe_router)
+
 _orchestrator: Orchestrator | None = None
 
 
@@ -748,6 +754,12 @@ class TenantCreateRequest(BaseModel):
     allowed_tables: list[str] = Field(default_factory=list)
     enforce_client_id: bool = False
     client_id_value: str | None = None
+    # Phase 9: подключение Postgres клиента + расписание ETL + лимит юзеров
+    pg_dsn: str = ""
+    pg_schema: str = "public"
+    etl_schedule: str = "0 3 * * *"
+    etl_enabled: bool = False
+    max_users: int = 0
 
 
 @app.get("/api/v1/admin/tenants", tags=["admin"])
@@ -776,6 +788,11 @@ def create_tenant_endpoint(payload: TenantCreateRequest):
             allowed_tables=payload.allowed_tables,
             enforce_client_id=payload.enforce_client_id,
             client_id_value=payload.client_id_value,
+            pg_dsn=payload.pg_dsn,
+            pg_schema=payload.pg_schema,
+            etl_schedule=payload.etl_schedule,
+            etl_enabled=payload.etl_enabled,
+            max_users=payload.max_users,
         )
     except ValueError as e:
         raise HTTPException(409, str(e))
@@ -879,6 +896,12 @@ class TenantUpdateRequest(BaseModel):
     ch_host: str | None = None
     ch_port: int | None = None
     ch_database: str | None = None
+    # Phase 9: ETL-поля
+    pg_dsn: str | None = None
+    pg_schema: str | None = None
+    etl_schedule: str | None = None
+    etl_enabled: bool | None = None
+    max_users: int | None = None
 
 
 @app.patch("/api/v1/admin/tenants/{client_id}", tags=["admin"])

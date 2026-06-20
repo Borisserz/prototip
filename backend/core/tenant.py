@@ -25,7 +25,11 @@ from typing import Any
 
 logger = logging.getLogger("TenantStore")
 
-REGISTRY_PATH = Path("data/tenants/registry.json")
+# Путь к реестру можно переопределить через env (нужно для Airflow, где cwd=/opt/airflow).
+# По умолчанию — относительный data/tenants/registry.json (поведение backend без изменений).
+import os as _os
+
+REGISTRY_PATH = Path(_os.getenv("TENANT_REGISTRY_PATH", "data/tenants/registry.json"))
 
 
 @dataclass
@@ -55,10 +59,25 @@ class Tenant:
     active: bool = True
     created_at: str = ""
 
+    # ─── Phase 9: ETL-оркестрация (Airflow) ───────────────────────────────
+    pg_dsn_enc: str = ""                  # зашифрованный (Fernet) DSN клиентского Postgres (read-only)
+    pg_schema: str = "public"             # схема Postgres для слепка
+    etl_schedule: str = "0 3 * * *"       # cron-расписание ETL (по умолч. 03:00 ежедневно)
+    etl_enabled: bool = False             # включена ли автосинхронизация по расписанию
+    max_users: int = 0                    # лимит пользователей заказчика (0 = без лимита)
+    docs_collection: str = ""             # коллекция документации клиента в RAG
+    last_etl_status: str = ""             # idle | running | success | failed
+    last_etl_at: str = ""                 # ISO-время последнего запуска ETL
+    last_etl_message: str = ""            # краткий итог/ошибка последнего запуска
+
     def to_public(self) -> dict[str, Any]:
-        """Публичное представление (без зашифрованного пароля)."""
+        """Публичное представление (без зашифрованного пароля и DSN)."""
         d = asdict(self)
         d["clickhouse"] = self.clickhouse.to_public()
+        # секреты наружу не отдаём — только флаг наличия подключения Postgres
+        d.pop("pg_dsn_enc", None)
+        d["pg_configured"] = bool(self.pg_dsn_enc)
+        d["docs_collection"] = self.docs_collection or f"docs_{self.client_id}"
         return d
 
 
@@ -125,6 +144,16 @@ class TenantStore:
             jwt_token=item.get("jwt_token", ""),
             active=item.get("active", True),
             created_at=item.get("created_at", ""),
+            # Phase 9 (поля опциональны — старые реестры читаются без ошибок)
+            pg_dsn_enc=item.get("pg_dsn_enc", ""),
+            pg_schema=item.get("pg_schema", "public"),
+            etl_schedule=item.get("etl_schedule", "0 3 * * *"),
+            etl_enabled=item.get("etl_enabled", False),
+            max_users=item.get("max_users", 0),
+            docs_collection=item.get("docs_collection", ""),
+            last_etl_status=item.get("last_etl_status", ""),
+            last_etl_at=item.get("last_etl_at", ""),
+            last_etl_message=item.get("last_etl_message", ""),
         )
 
     # ─── токены ──────────────────────────────────────────────────────────────
@@ -156,6 +185,13 @@ class TenantStore:
         allowed_tables: list[str] | None = None,
         enforce_client_id: bool = False,
         client_id_value: str | None = None,
+        # ─── Phase 9: параметры ETL ───────────────────────────────────────
+        pg_dsn: str = "",
+        pg_schema: str = "public",
+        etl_schedule: str = "0 3 * * *",
+        etl_enabled: bool = False,
+        max_users: int = 0,
+        docs_collection: str | None = None,
     ) -> Tenant:
         from app.security import encrypt_data
 
@@ -183,6 +219,13 @@ class TenantStore:
                 jwt_token=self._issue_jwt(client_id),
                 active=True,
                 created_at=_utcnow_iso(),
+                pg_dsn_enc=encrypt_data(pg_dsn) if pg_dsn else "",
+                pg_schema=pg_schema or "public",
+                etl_schedule=etl_schedule or "0 3 * * *",
+                etl_enabled=etl_enabled,
+                max_users=max_users or 0,
+                docs_collection=docs_collection or f"docs_{client_id}",
+                last_etl_status="idle",
             )
             self._cache[client_id] = tenant
             self._save()
@@ -223,6 +266,10 @@ class TenantStore:
                 pwd = fields.pop("ch_password")
                 if pwd:
                     t.clickhouse.password_enc = encrypt_data(pwd)
+            # Phase 9: обновление клиентского Postgres DSN (шифруется at-rest)
+            if "pg_dsn" in fields:
+                dsn = fields.pop("pg_dsn")
+                t.pg_dsn_enc = encrypt_data(dsn) if dsn else ""
             for ch_key in ("host", "port", "database", "user"):
                 if ch_key in fields:
                     setattr(t.clickhouse, ch_key, fields.pop(ch_key))
@@ -255,6 +302,34 @@ class TenantStore:
             return False
 
     # ─── ClickHouse клиента ──────────────────────────────────────────────────
+    def get_pg_dsn(self, tenant: Tenant) -> str:
+        """Расшифровывает read-only DSN клиентского Postgres (пусто, если не задан)."""
+        if not tenant.pg_dsn_enc:
+            return ""
+        from app.security import decrypt_data
+
+        try:
+            return decrypt_data(tenant.pg_dsn_enc)
+        except Exception as e:  # noqa: BLE001
+            logger.error("TenantStore: не удалось расшифровать pg_dsn для %s: %s",
+                         tenant.client_id, e)
+            return ""
+
+    def set_etl_status(
+        self, client_id: str, status: str, message: str = "", at: str | None = None
+    ) -> Tenant | None:
+        """Фиксирует статус ETL-запуска (idle | running | success | failed)."""
+        with self._lock:
+            self._load()
+            t = self._cache.get(client_id)
+            if not t:
+                return None
+            t.last_etl_status = status
+            t.last_etl_message = message[:500] if message else ""
+            t.last_etl_at = at or _utcnow_iso()
+            self._save()
+            return t
+
     def get_clickhouse_client(self, tenant: Tenant):
         """Возвращает clickhouse_connect клиент к ПЕРСОНАЛЬНОМУ ClickHouse клиента."""
         from app.security import decrypt_data
