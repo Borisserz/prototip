@@ -5,6 +5,7 @@ import { PromptsAdmin } from './PromptsAdmin';
 import { MemoryAdmin } from './MemoryAdmin';
 import { TenantsAdmin } from './TenantsAdmin';
 import { Button } from '@/components/ui/button';
+import { API_BASE } from "@/lib/config";
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -24,36 +25,36 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) {
       if (activeTab === 'users') {
-        fetch('http://localhost:8000/api/v1/sessions')
+        fetch(`${API_BASE}/api/v1/sessions`)
           .then(res => res.json())
           .then(data => setSessions(data.sessions || []))
           .catch(err => console.error(err));
       } else if (activeTab === 'logs') {
-        fetch('http://localhost:8000/api/v1/sql-logs')
+        fetch(`${API_BASE}/api/v1/sql-logs`)
           .then(res => res.json())
           .then(data => setSqlLogs(data.logs || []))
           .catch(err => console.error(err));
       } else if (activeTab === 'knowledge') {
-        fetch('http://localhost:8000/api/v1/knowledge')
+        fetch(`${API_BASE}/api/v1/knowledge`)
           .then(res => res.json())
           .then(data => setKbDocs(data.documents || []))
           .catch(err => console.error(err));
       } else if (activeTab === 'subscriptions') {
-        fetch('http://localhost:8000/api/v1/subscriptions')
+        fetch(`${API_BASE}/api/v1/subscriptions`)
           .then(res => res.json())
           .then(data => setSubs(data.subscriptions || []))
           .catch(err => console.error(err));
       } else if (activeTab === 'schema') {
-        fetch('http://localhost:8000/api/v1/schema')
+        fetch(`${API_BASE}/api/v1/schema`)
           .then(res => res.json())
           .then(data => setDbSchema(data.schema || ''))
           .catch(err => console.error(err));
-        fetch('http://localhost:8000/api/v1/semantic-rules')
+        fetch(`${API_BASE}/api/v1/semantic-rules`)
           .then(res => res.json())
           .then(data => setSemanticRules(data.rules || []))
           .catch(err => console.error(err));
       } else if (activeTab === 'dropzone') {
-        fetch('http://localhost:8000/api/v1/dropzone')
+        fetch(`${API_BASE}/api/v1/dropzone`)
           .then(res => res.json())
           .then(data => setDropzoneFiles(data.files || []))
           .catch(err => console.error(err));
@@ -67,12 +68,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      await fetch('http://localhost:8000/api/v1/upload_data', {
+      await fetch(`${API_BASE}/api/v1/upload_data`, {
         method: 'POST',
         body: formData
       });
       // Refresh list
-      fetch('http://localhost:8000/api/v1/dropzone')
+      fetch(`${API_BASE}/api/v1/dropzone`)
         .then(res => res.json())
         .then(data => setDropzoneFiles(data.files || []));
     } catch (err) {
@@ -82,7 +83,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
 
   const handleTriggerWatcher = async () => {
     try {
-      await fetch('http://localhost:8000/api/v1/trigger_watcher', { method: 'POST' });
+      await fetch(`${API_BASE}/api/v1/trigger_watcher`, { method: 'POST' });
       alert('Проактивное сканирование запущено.');
     } catch (err) {
       console.error(err);
@@ -306,7 +307,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                           <p className="font-medium text-white truncate" title={doc.source}>{doc.source}</p>
                           <p className="text-sm text-slate-400">Чанков: {doc.chunks}</p>
                           <Button size="sm" variant="destructive" className="mt-2" onClick={() => {
-                            fetch(`http://localhost:8000/api/v1/knowledge?source=${btoa(doc.source)}`, { method: 'DELETE' })
+                            fetch(`${API_BASE}/api/v1/knowledge?source=${btoa(doc.source)}`, { method: 'DELETE' })
                               .then(() => setKbDocs(kbDocs.filter(d => d.source !== doc.source)));
                           }}>Удалить</Button>
                         </div>
@@ -344,7 +345,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                               {sub.active ? 'Active' : 'Paused'}
                             </span>
                             <Button size="sm" variant="outline" className="border-rose-500 text-rose-500 hover:bg-rose-500/10" onClick={() => {
-                              fetch(`http://localhost:8000/api/v1/subscriptions/${sub.id}`, { method: 'DELETE' })
+                              fetch(`${API_BASE}/api/v1/subscriptions/${sub.id}`, { method: 'DELETE' })
                                 .then(() => setSubs(subs.filter(s => s.id !== sub.id)));
                             }}>Удалить</Button>
                           </div>
@@ -413,7 +414,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                             <p className="text-sm text-slate-400">{(f.size / 1024).toFixed(1)} KB • {new Date(f.modified * 1000).toLocaleString()}</p>
                           </div>
                           <Button size="sm" variant="destructive" onClick={() => {
-                            fetch(`http://localhost:8000/api/v1/dropzone/${f.name}`, { method: 'DELETE' })
+                            fetch(`${API_BASE}/api/v1/dropzone/${f.name}`, { method: 'DELETE' })
                               .then(() => setDropzoneFiles(dropzoneFiles.filter(file => file.name !== f.name)));
                           }}>Удалить</Button>
                         </div>

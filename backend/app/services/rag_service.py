@@ -1,10 +1,11 @@
+import json
 import logging
 import os
 import uuid
-import json
 
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.utils.clickhouse_client import ch_client
 
 logger = logging.getLogger(__name__)
@@ -187,7 +188,7 @@ def initialize_dashboard_rag():
     data = []
     for fname in os.listdir(dash_dir):
         if fname.endswith(".json"):
-            with open(os.path.join(dash_dir, fname), 'r', encoding='utf-8') as f:
+            with open(os.path.join(dash_dir, fname), encoding='utf-8') as f:
                 dash = json.load(f)
                 content = f"Title: {dash.get('title')}\nDescription: {dash.get('description')}\nID: {dash.get('id')}"
                 emb = embeddings_model.embed_query(content)

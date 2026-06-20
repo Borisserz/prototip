@@ -1,13 +1,14 @@
 import os
+
 import yaml
 from pydantic import BaseModel
-from typing import Optional
+
 
 class AgentConfig(BaseModel):
     role: str
     goal: str
     rules: str
-    few_shot: Optional[str] = ""
+    few_shot: str | None = ""
 
 class ConfigLoader:
     def __init__(self, config_path: str = None):
@@ -25,7 +26,7 @@ class ConfigLoader:
             
         current_mtime = os.path.getmtime(self.config_path)
         if current_mtime > self._last_mtime or not self._cache:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding='utf-8') as f:
                 self._cache = yaml.safe_load(f)
             self._last_mtime = current_mtime
             

@@ -26,10 +26,11 @@ import logging
 import os
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # корень backend/ в PYTHONPATH (чтобы импортировать scripts.* / app.* / core.*)
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,7 +54,7 @@ ProgressCb = Callable[[str, str], None]  # (step, message)
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass

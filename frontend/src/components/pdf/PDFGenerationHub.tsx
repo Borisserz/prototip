@@ -15,9 +15,9 @@ import { Button } from '../ui/button';
 import { useChatStore, PdfGenerationHistoryItem } from '../../store/useChatStore';
 import { PresentationView } from '../presentation/PresentationView';
 import { exportDashboardToPDF } from '../../utils/dashboardPdfExport';
+import { API_BASE } from "@/lib/config";
 
-const API = 'http://localhost:8000';
-
+const API = API_BASE;
 // ─── Stage Config ──────────────────────────────────────────────────────────
 const PRES_STAGES = [
   { id: 'upload',   label: 'Загрузка файла',     icon: <UploadCloud className="w-4 h-4" />,   detail: 'Передача PDF на сервер...' },

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from app.pipeline_progress import (
+    emit_agent_started,
+    emit_pipeline_stage,
     pipeline_store,
     suppress_pipeline_emit,
-    emit_pipeline_stage,
-    emit_agent_started,
 )
 
 

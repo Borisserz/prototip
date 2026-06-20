@@ -1,13 +1,12 @@
-import os
 from pathlib import Path
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
-from qdrant_client import models
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_qdrant import QdrantVectorStore
+
+from langchain_community.document_loaders import TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_qdrant import FastEmbedSparse, RetrievalMode
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from qdrant_client import QdrantClient, models
+from qdrant_client.models import Distance, VectorParams
+
 
 def init_qdrant():
     docs_dir = Path(__file__).parent.parent / "data" / "docs"

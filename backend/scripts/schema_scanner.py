@@ -1,18 +1,18 @@
-import os
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent))
 
-from pydantic import BaseModel, Field
-from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
-from langchain_huggingface import HuggingFaceEmbeddings
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
-from qdrant_client import models
 from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from pydantic import BaseModel, Field
+from qdrant_client import QdrantClient, models
+from qdrant_client.models import Distance, VectorParams
 
 from app.utils.clickhouse_client import ch_client
 from core.llm import call_structured
+
 
 class TableDescription(BaseModel):
     table_name: str = Field(description="Name of the table")

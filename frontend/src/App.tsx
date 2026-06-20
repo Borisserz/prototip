@@ -28,6 +28,7 @@ import { PDFGenerationHub } from "./components/pdf/PDFGenerationHub"
 import { AdminConsole } from "./components/admin/AdminConsole"
 import { adminApi, isAdminToken } from "./lib/adminApi"
 import { Building2, KeyRound, User as UserIcon } from "lucide-react"
+import { API_BASE } from "@/lib/config";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -145,7 +146,7 @@ const SessionGroup = ({ title, sessions, currentSessionId, setCurrentSessionId, 
                className={cn("p-3 rounded-xl border cursor-pointer transition-all", currentSessionId === s.session_id ? "bg-primary/20 border-primary shadow-[0_0_15px_rgba(56,189,248,0.1)]" : "bg-slate-800/30 border-slate-700/50 hover:bg-slate-800")}
                onClick={() => {
                  setCurrentSessionId(s.session_id);
-                 fetch(`http://localhost:8000/api/v1/sessions/${s.session_id}`)
+                 fetch(`${API_BASE}/api/v1/sessions/${s.session_id}`)
                    .then(res => res.json())
                    .then(data => {
                      if (data && data.messages) {
@@ -235,7 +236,7 @@ export default function App() {
 
   useEffect(() => {
     const fetchSessions = () => {
-      fetch('http://localhost:8000/api/v1/sessions')
+      fetch(`${API_BASE}/api/v1/sessions`)
         .then(res => res.json())
         .then(data => {
           setSessions(data.sessions || []);
@@ -249,7 +250,7 @@ export default function App() {
   }, [token, messages.length])
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/user/dashboard')
+    fetch(`${API_BASE}/api/user/dashboard`)
       .then(r => r.json())
       .then(data => {
         if (data && data.pinned_charts) {
@@ -265,7 +266,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isDashboardLoaded) return;
-    fetch('http://localhost:8000/api/user/dashboard', {
+    fetch(`${API_BASE}/api/user/dashboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pinned_charts: pinnedCharts })
@@ -293,7 +294,7 @@ export default function App() {
 
   const handleLogin = async (u: string, p: string) => {
     try {
-      const res = await fetch("http://localhost:8000/auth/login", {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: u, password: p })
@@ -353,7 +354,7 @@ export default function App() {
     
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/workspace/upload", {
+      const res = await fetch(`${API_BASE}/api/v1/workspace/upload`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` },
         body: formData
@@ -374,7 +375,7 @@ export default function App() {
   const handleTriggerWatcher = async () => {
     setIsScanning(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/trigger_watcher", {
+      const res = await fetch(`${API_BASE}/api/v1/trigger_watcher`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` }
       });

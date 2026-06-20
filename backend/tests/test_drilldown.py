@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from core.models import ChartSpec
+from app.agents.data_agent import DataAgent
+from app.agents.models import DataAgentInput, DrilldownContext
 from app.drilldown import (
     build_detailed_analysis_question,
     build_drilldown_question,
     extract_drilldown_from_point,
 )
-from app.agents.data_agent import DataAgent
-from app.agents.models import DrilldownContext
-from app.agents.models import DataAgentInput
 from app.planner_utils import planner_cache_key as cache_key_fn
+from core.models import ChartSpec
 
 
 def test_extract_drilldown_horizontal_bar():

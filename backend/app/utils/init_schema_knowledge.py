@@ -1,8 +1,9 @@
+import logging
 import os
 import uuid
-import logging
-from app.utils.clickhouse_client import ch_client
+
 from app.semantic.catalog import SemanticCatalog
+from app.utils.clickhouse_client import ch_client
 
 logger = logging.getLogger(__name__)
 

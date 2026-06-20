@@ -4,6 +4,7 @@ import { Mail, Sparkles, Send, Loader2, Trash2, CheckCircle2, ChevronLeft, Calen
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useChatStore } from '../../store/useChatStore';
+import { API_BASE } from "@/lib/config";
 
 interface SubscriptionsViewProps {
   onBackToChat: () => void;
@@ -54,7 +55,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ onBackToCh
   const fetchSubs = async () => {
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:8000/api/v1/subscriptions', {
+      const res = await fetch(`${API_BASE}/api/v1/subscriptions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -115,7 +116,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ onBackToCh
     };
 
     try {
-      await fetch('http://localhost:8000/api/v1/subscriptions', {
+      await fetch(`${API_BASE}/api/v1/subscriptions`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -135,7 +136,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ onBackToCh
 
   const handleDelete = async (id: string) => {
     try {
-      await fetch(`http://localhost:8000/api/v1/subscriptions/${id}`, {
+      await fetch(`${API_BASE}/api/v1/subscriptions/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -147,7 +148,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ onBackToCh
 
   const handleToggle = async (id: string) => {
     try {
-      await fetch(`http://localhost:8000/api/v1/subscriptions/${id}/toggle`, {
+      await fetch(`${API_BASE}/api/v1/subscriptions/${id}/toggle`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });

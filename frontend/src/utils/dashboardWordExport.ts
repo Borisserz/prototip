@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/config";
 /**
  * Dashboard Word (.docx) Export
  *
@@ -6,8 +7,6 @@
  * данные — бэкенд рендерит их через viz/charts и вставляет в .docx. Готовый файл
  * скачивается в браузере.
  */
-
-const API_BASE = 'http://localhost:8000';
 
 /** Безопасное экранирование значения для ячейки Markdown-таблицы. */
 function cell(v: any): string {

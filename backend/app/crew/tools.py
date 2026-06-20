@@ -1,8 +1,8 @@
-import os
 import logging
-from crewai.tools import BaseTool
-from pydantic import Field
+import os
+
 import clickhouse_connect
+from crewai.tools import BaseTool
 
 logger = logging.getLogger("crew_tools")
 
@@ -38,9 +38,10 @@ class QueryClickhouseTool(BaseTool):
             if not (upper_query.strip().startswith("SELECT") or upper_query.strip().startswith("WITH")):
                 return "Ошибка: Запрос должен начинаться с SELECT или WITH."
                 
-            from app.agent_context import get_user_role
             import sqlglot
             from sqlglot import exp
+
+            from app.agent_context import get_user_role
             
             role = get_user_role()
             region_filter = None
@@ -105,8 +106,8 @@ class SearchPastReportsTool(BaseTool):
     
     def _run(self, query: str) -> str:
         try:
+
             from app.services.rag_service import search_dashboards
-            import json
             
             docs = search_dashboards(query, k=1)
             if docs:
@@ -137,7 +138,8 @@ class EmailDeliveryTool(BaseTool):
             # Save mock to disk
             out_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", "out", "mock_emails")
             os.makedirs(out_dir, exist_ok=True)
-            import uuid, json
+            import json
+            import uuid
             file_path = os.path.join(out_dir, f"email_{uuid.uuid4().hex[:8]}.json")
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump({"to": admin_email, "content": payload}, f, ensure_ascii=False, indent=2)

@@ -5,7 +5,8 @@
  * дублировать `http://localhost:8000` по компонентам.
  */
 
-export const API_BASE = "http://localhost:8000";
+import { API_BASE } from "@/lib/config";
+export { API_BASE };
 
 // ─── Типы конфигурации клиента ──────────────────────────────────────────────
 export interface TenantConfig {

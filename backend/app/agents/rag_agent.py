@@ -1,5 +1,4 @@
 import logging
-import os
 
 from app.agents.base_agent import BaseAgent
 from app.agents.models import RagResult
@@ -19,6 +18,7 @@ class RagAgent(BaseAgent):
             
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
+
             from app.utils.clickhouse_client import ch_client
             
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")

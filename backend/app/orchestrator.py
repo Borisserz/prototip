@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 from app.agents.factory import get_executor
 from app.agents.models import AgentResult
@@ -55,10 +55,11 @@ class Orchestrator:
         logger.info(f"[Orchestrator] planner start [{cid}]: question={question[:60]}...")
         run_logger.log_event("ask_start", question=question[:200], correlation_id=cid)
 
-        from app.utils.memory import conversation_memory
-        from app.graph import graph
-        from app.agent_context import user_context
         import uuid
+
+        from app.agent_context import user_context
+        from app.graph import graph
+        from app.utils.memory import conversation_memory
         
         session_id = session_id or "default_session"
         conversation_memory.add_message(session_id, "user", question)
@@ -143,11 +144,10 @@ class Orchestrator:
     ):
         """Async stream for SSE."""
         import json
+
         from app.graph import graph
         
-        cid = correlation_id or get_correlation_id() or new_correlation_id()
-        session_id = "default_session"
-        config_data = {"configurable": {"thread_id": session_id}}
+        correlation_id or get_correlation_id() or new_correlation_id()
         initial_state = {
             "question": question,
             "drilldown": drilldown,

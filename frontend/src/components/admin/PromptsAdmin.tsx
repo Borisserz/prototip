@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save, RefreshCw, Bot, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { API_BASE } from "@/lib/config";
 
-const API = 'http://localhost:8000';
-
+const API = API_BASE;
 type AgentCfg = { role: string; goal: string; rules: string; few_shot?: string };
 
 /**

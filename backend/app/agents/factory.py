@@ -52,10 +52,10 @@ def _build_executor(*, include_planner: bool) -> AgentExecutor:
     from app.agents.chart_agent import ChartAgent
     from app.agents.dashboard_agent import DashboardAgent
     from app.agents.data_agent import DataAgent
+    from app.agents.forecast_analyst_agent import ForecastAnalystAgent
     from app.agents.presentation_agent import PresentationAgent
     from app.agents.rag_agent import RagAgent
     from app.agents.report_docx_agent import ReportDocxAgent
-    from app.agents.forecast_analyst_agent import ForecastAnalystAgent
 
     executor.register(DataAgent())
     executor.register(AnalystAgent())

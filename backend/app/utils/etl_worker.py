@@ -1,12 +1,13 @@
-import os
-import time
-import shutil
 import logging
-from pathlib import Path
-import pandas as pd
+import shutil
 
 # Позволяем импортировать из app, если запущен как модуль
 import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from app.utils.clickhouse_client import ch_client

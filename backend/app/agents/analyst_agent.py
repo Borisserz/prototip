@@ -23,6 +23,7 @@ logger = logging.getLogger("AnalystAgent")
 
 from app.agents.config_loader import get_agent_config
 
+
 class AnalystAgent(BaseAgent):
     """Агент текстового анализа данных (инсайты на русском)."""
 

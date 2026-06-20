@@ -44,6 +44,7 @@ logger = logging.getLogger("DashboardAgent")
 
 from app.agents.config_loader import get_agent_config
 
+
 # Внутренняя схема для structured-вызова LLM (полный состав дашборда)
 class _DashboardComposition(BaseModel):
     """То, что возвращает LLM в одном structured вызове.

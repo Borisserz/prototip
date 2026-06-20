@@ -7,9 +7,9 @@ import {
   ChevronRight, BookOpen, Shield, Cpu, BarChart, LineChart,
   Circle, AlignHorizontalDistributeCenter, Pencil, Check
 } from 'lucide-react';
+import { API_BASE } from "@/lib/config";
 
-const API = 'http://localhost:8000';
-
+const API = API_BASE;
 // ─── Types ─────────────────────────────────────────────────────────────────
 export interface SlideData {
   slide_idx: number;

@@ -1,7 +1,8 @@
-import pandas as pd
-import clickhouse_connect
-from pathlib import Path
 import logging
+from pathlib import Path
+
+import clickhouse_connect
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

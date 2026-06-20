@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Database } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { API_BASE } from "@/lib/config";
 
 interface WorkspaceModalProps {
   isOpen: boolean;
@@ -32,8 +33,8 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ isOpen, onClose 
     try {
       // Determine endpoint based on file type
       const endpoint = file.name.toLowerCase().endsWith('.pdf') 
-        ? 'http://localhost:8000/api/v1/upload-pdf' 
-        : 'http://localhost:8000/api/v1/workspace/upload';
+        ? `${API_BASE}/api/v1/upload-pdf` 
+        : `${API_BASE}/api/v1/workspace/upload`;
         
       const res = await fetch(endpoint, {
         method: 'POST',

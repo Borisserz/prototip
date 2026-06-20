@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from app.presentation_renderer import PresentationRenderer, PresentationTheme
-from core.llm import call_structured
 from core import storage
+from core.llm import call_structured
 
 logger = logging.getLogger("PdfPresentation")
 

@@ -1,9 +1,11 @@
-import os
 import logging
+import os
+
 import clickhouse_connect
 import numpy as np
-from app.utils.memory import conversation_memory
+
 from app.crew.tools import MessengerDeliveryTool
+from app.utils.memory import conversation_memory
 
 logger = logging.getLogger("anomaly_detector")
 

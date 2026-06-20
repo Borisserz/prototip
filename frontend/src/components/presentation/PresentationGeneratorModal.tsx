@@ -9,9 +9,9 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useChatStore } from '../../store/useChatStore';
+import { API_BASE } from "@/lib/config";
 
-const API = 'http://localhost:8000';
-
+const API = API_BASE;
 // ─── Stage Config ─────────────────────────────────────────────────────────────
 interface Stage {
   id: string;

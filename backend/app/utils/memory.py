@@ -5,6 +5,7 @@ logger = logging.getLogger("Memory")
 import json
 import os
 
+
 class ConversationMemory:
     """Хранилище контекста диалога с персистентностью в JSON."""
     
@@ -16,7 +17,7 @@ class ConversationMemory:
     def _load(self):
         if os.path.exists(self.file_path):
             try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
+                with open(self.file_path, encoding="utf-8") as f:
                     self._history = json.load(f)
             except:
                 pass

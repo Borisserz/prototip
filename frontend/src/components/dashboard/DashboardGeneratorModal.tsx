@@ -4,6 +4,7 @@ import { LayoutDashboard, Loader2, X, Sparkles, CheckCircle2 } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useChatStore } from "@/store/useChatStore";
+import { API_BASE } from "@/lib/config";
 
 interface DashboardGeneratorModalProps {
   isOpen: boolean;
@@ -32,7 +33,7 @@ export const DashboardGeneratorModal: React.FC<DashboardGeneratorModalProps> = (
     if (status === 'GENERATING') {
       interval = setInterval(async () => {
         try {
-          const res = await fetch("http://localhost:8000/api/v1/pipeline/status", {
+          const res = await fetch(`${API_BASE}/api/v1/pipeline/status`, {
             headers: { "Authorization": `Bearer ${token}` }
           });
           if (res.ok) {
@@ -65,7 +66,7 @@ export const DashboardGeneratorModal: React.FC<DashboardGeneratorModalProps> = (
     if (status === 'GENERATING') {
       interval = setInterval(async () => {
         try {
-          const res = await fetch("http://localhost:8000/api/v1/pipeline/status");
+          const res = await fetch(`${API_BASE}/api/v1/pipeline/status`);
           if (res.ok) {
             const data = await res.json();
             setPipelineState(data);
@@ -86,7 +87,7 @@ export const DashboardGeneratorModal: React.FC<DashboardGeneratorModalProps> = (
     setPipelineState(null);
     setErrorMessage("");
     try {
-      const res = await fetch("http://localhost:8000/generate_dashboard", {
+      const res = await fetch(`${API_BASE}/generate_dashboard`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
