@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogOut, Menu, Settings, Database, FolderUp, Mail, MessageSquarePlus } from "lucide-react";
+import { LogOut, Menu, Settings, Database, FolderUp, Mail, MessageSquarePlus, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/App";
 import { useChatStore } from "../../store/useChatStore";
@@ -15,9 +15,11 @@ interface HeaderProps {
   onNewChat: () => void;
   onProfileClick: () => void;
   onSubscriptionsClick: () => void;
+  isAdmin?: boolean;
+  onAdminClick?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ isSidebarOpen, setSidebarOpen, wsConnected, username, setAdminOpen, handleLogout, onNewChat, onProfileClick, onSubscriptionsClick }) => {
+export const Header: React.FC<HeaderProps> = ({ isSidebarOpen, setSidebarOpen, wsConnected, username, setAdminOpen, handleLogout, onNewChat, onProfileClick, onSubscriptionsClick, isAdmin, onAdminClick }) => {
   const isAnalystMode = useChatStore((state) => state.isAnalystMode);
   const setAnalystMode = useChatStore((state) => state.setAnalystMode);
 
@@ -47,6 +49,17 @@ export const Header: React.FC<HeaderProps> = ({ isSidebarOpen, setSidebarOpen, w
           <span className="text-sm font-medium hidden md:inline">Новый чат</span>
         </Button>
         
+        {isAdmin && (
+          <Button
+            variant="ghost"
+            onClick={onAdminClick}
+            className="flex items-center gap-2 text-sky-400 hover:text-white hover:bg-sky-500/20 transition-colors"
+          >
+            <LayoutGrid className="w-4 h-4" />
+            <span className="text-sm font-medium hidden md:inline">Мои блоки</span>
+          </Button>
+        )}
+
         <Button 
           variant="ghost" 
           onClick={onSubscriptionsClick} 

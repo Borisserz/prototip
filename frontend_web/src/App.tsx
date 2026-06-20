@@ -25,20 +25,32 @@ import { UserProfile } from "./components/profile/UserProfile"
 import { SubscriptionsView } from "./components/subscriptions/SubscriptionsView"
 import { WorkspaceDBView } from "./components/workspace/WorkspaceDBView"
 import { PDFGenerationHub } from "./components/pdf/PDFGenerationHub"
+import { AdminConsole } from "./components/admin/AdminConsole"
+import { adminApi, isAdminToken } from "./lib/adminApi"
+import { Building2, KeyRound, User as UserIcon } from "lucide-react"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-const LoginScreen = ({ onLogin }: { onLogin: (u: string, p: string) => Promise<void> }) => {
+const LoginScreen = ({
+  onLogin,
+  onClientLogin,
+}: {
+  onLogin: (u: string, p: string) => Promise<void>
+  onClientLogin: (apiKey: string) => Promise<void>
+}) => {
+  const [mode, setMode] = useState<"staff" | "client">("staff")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [apiKey, setApiKey] = useState("")
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    await onLogin(username, password)
+    if (mode === "staff") await onLogin(username, password)
+    else await onClientLogin(apiKey)
     setLoading(false)
   }
 
@@ -46,8 +58,8 @@ const LoginScreen = ({ onLogin }: { onLogin: (u: string, p: string) => Promise<v
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-background">
       <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-primary/20 blur-[120px]" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-accent/20 blur-[120px]" />
-      
-      <motion.div 
+
+      <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
@@ -61,28 +73,49 @@ const LoginScreen = ({ onLogin }: { onLogin: (u: string, p: string) => Promise<v
             <CardDescription className="text-slate-400 mt-2">Enterprise Analytics Platform</CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Переключатель режима входа */}
+            <div className="mb-5 flex gap-1 rounded-lg border border-slate-700/50 bg-slate-900/50 p-1">
+              <button type="button" onClick={() => setMode("staff")}
+                className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium transition-colors",
+                  mode === "staff" ? "bg-primary/20 text-primary" : "text-slate-400 hover:text-white")}>
+                <UserIcon className="h-4 w-4" /> Сотрудник
+              </button>
+              <button type="button" onClick={() => setMode("client")}
+                className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium transition-colors",
+                  mode === "client" ? "bg-primary/20 text-primary" : "text-slate-400 hover:text-white")}>
+                <Building2 className="h-4 w-4" /> Заказчик
+              </button>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Username</label>
-                <Input 
-                  value={username} 
-                  onChange={e => setUsername(e.target.value)} 
-                  className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600 h-11 focus-visible:ring-primary" 
-                  placeholder="FederalAnalyst" 
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Password</label>
-                <Input 
-                  type="password" 
-                  value={password} 
-                  onChange={e => setPassword(e.target.value)} 
-                  className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600 h-11 focus-visible:ring-primary" 
-                  placeholder="••••••••" 
-                />
-              </div>
+              {mode === "staff" ? (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Username</label>
+                    <Input value={username} onChange={e => setUsername(e.target.value)}
+                      className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600 h-11 focus-visible:ring-primary"
+                      placeholder="admin / FederalAnalyst" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Password</label>
+                    <Input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                      className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600 h-11 focus-visible:ring-primary"
+                      placeholder="••••••••" />
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-1">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    <KeyRound className="h-3.5 w-3.5" /> API-ключ клиента
+                  </label>
+                  <Input value={apiKey} onChange={e => setApiKey(e.target.value)}
+                    className="bg-slate-900/50 border-slate-700 text-white placeholder:text-slate-600 h-11 focus-visible:ring-primary"
+                    placeholder="Вставьте API-ключ заказчика" />
+                  <p className="pt-1 text-[11px] text-slate-600">Ключ выдаётся администратором при создании блока.</p>
+                </div>
+              )}
               <Button type="submit" className="w-full h-11 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white font-medium text-lg rounded-xl shadow-lg shadow-primary/20" disabled={loading}>
-                {loading ? "Authenticating..." : "Sign In"}
+                {loading ? "Вход…" : mode === "staff" ? "Войти" : "Войти как заказчик"}
               </Button>
             </form>
           </CardContent>
@@ -144,6 +177,7 @@ const SessionGroup = ({ title, sessions, currentSessionId, setCurrentSessionId, 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem("jwt_token"))
   const [username, setUsername] = useState(localStorage.getItem("username") || "")
+  const [isAdmin, setIsAdmin] = useState<boolean>(isAdminToken(localStorage.getItem("jwt_token")))
   
   // Zustand Store
   const messages = useChatStore(state => state.messages)
@@ -171,7 +205,7 @@ export default function App() {
   const [isSidebarOpen, setSidebarOpen] = useState(true)
   const [isAdminOpen, setAdminOpen] = useState(false)
   const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard'|'generation'|'workspace_db'|'history'|'pdf'>('generation');
-  const [mainView, setMainView] = useState<'chat' | 'ai_dashboard' | 'presentation' | 'profile' | 'subscriptions' | 'workspace_db'>('chat');
+  const [mainView, setMainView] = useState<'chat' | 'ai_dashboard' | 'presentation' | 'profile' | 'subscriptions' | 'workspace_db' | 'admin'>('chat');
   const [sessions, setSessions] = useState<any[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [isDashboardLoaded, setIsDashboardLoaded] = useState(false)
@@ -268,16 +302,45 @@ export default function App() {
       const data = await res.json()
       setToken(data.access_token)
       setUsername(u)
+      setIsAdmin(!!data.is_admin)
       localStorage.setItem("jwt_token", data.access_token)
       localStorage.setItem("username", u)
+      if (data.is_admin) setMainView('admin')
     } catch (err) {
       alert("Ошибка аутентификации. Доступ запрещен.")
     }
   }
 
+  // Вход заказчика по API-ключу (Phase 6)
+  const handleClientLogin = async (apiKey: string) => {
+    try {
+      const data = await adminApi.clientLogin({ api_key: apiKey })
+      setToken(data.access_token)
+      setUsername(data.username)
+      setIsAdmin(false)
+      localStorage.setItem("jwt_token", data.access_token)
+      localStorage.setItem("username", data.username)
+      setMainView('chat')
+    } catch (err: any) {
+      alert(err?.message || "Неверный ключ клиента.")
+    }
+  }
+
+  // Вход «от лица заказчика» из админ-консоли
+  const handleImpersonate = (clientToken: string, name: string) => {
+    setToken(clientToken)
+    setUsername(name)
+    setIsAdmin(false)
+    localStorage.setItem("jwt_token", clientToken)
+    localStorage.setItem("username", name)
+    setMessages([{ role: "assistant", content: `Вы вошли как заказчик «${name}». Готов помочь с аналитикой.` }])
+    setMainView('chat')
+  }
+
   const handleLogout = () => {
     setToken(null)
     setUsername("")
+    setIsAdmin(false)
     localStorage.removeItem("jwt_token")
     localStorage.removeItem("username")
   }
@@ -356,7 +419,7 @@ export default function App() {
   }
 
   if (!token) {
-    return <LoginScreen onLogin={handleLogin} />
+    return <LoginScreen onLogin={handleLogin} onClientLogin={handleClientLogin} />
   }
 
   return (
@@ -582,6 +645,8 @@ export default function App() {
           }}
           onProfileClick={() => setMainView('profile')}
           onSubscriptionsClick={() => setMainView('subscriptions')}
+          isAdmin={isAdmin}
+          onAdminClick={() => setMainView('admin')}
         />
 
         {/* Admin Modal */}
@@ -592,7 +657,11 @@ export default function App() {
         <PresentationGeneratorModal isOpen={isPresModalOpen} onClose={() => setPresModalOpen(false)} token={token} />
 
         {/* Main Content Area */}
-        {mainView === 'subscriptions' ? (
+        {mainView === 'admin' ? (
+          <div className="flex-1 overflow-hidden">
+            <AdminConsole onBack={() => setMainView('chat')} onImpersonate={handleImpersonate} />
+          </div>
+        ) : mainView === 'subscriptions' ? (
           <div className="flex-1 overflow-y-auto bg-slate-900/30 custom-scrollbar relative">
             <SubscriptionsView onBackToChat={() => setMainView('chat')} />
           </div>
