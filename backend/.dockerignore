@@ -1,0 +1,18 @@
+# Контекст сборки = ./backend
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+out/
+chroma_db/
+data/*.duckdb
+data/tenants/
+data/dropzone/
+data/archive/
+tests/
+*.md
+secrets/

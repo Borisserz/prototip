@@ -1,7 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Prototip BI — оркестрация всего стека
+#
+#  Папки-сервисы:
+#    frontend/  — React + Vite + nginx
+#    backend/   — FastAPI API + LangGraph-агенты (in-process)
+#    db/        — ClickHouse (+ init.sql); векторное хранилище — Qdrant
+#
+#  Запуск ядра (frontend + backend + базы + LLM):
+#    docker compose up -d --build
+#
+#  Опциональные профили:
+#    docker compose --profile auth up -d     # Keycloak
+#    docker compose --profile etl  up -d     # Postgres + Airflow (ETL)
+#
+#  Каждый сервис можно поднять отдельно, напр.:
+#    docker compose up -d clickhouse qdrant minio
+#    docker compose up -d backend
+#    docker compose up -d frontend
+# ─────────────────────────────────────────────────────────────────────────────
 services:
   # ===================== БАЗЫ ДАННЫХ =====================
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    image: prototip-clickhouse:latest
     container_name: genbi_clickhouse
     ports:
       - "8123:8123"
@@ -27,28 +50,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    container_name: genbi_keycloak
-    command: start-dev
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-    ports:
-      - "8080:8080"
-
-  postgres:
-    image: postgres:13
-    container_name: genbi_postgres
-    environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
 
   # ===================== ОБЪЕКТНОЕ ХРАНИЛИЩЕ (Phase 1) =====================
   minio:
@@ -97,8 +98,9 @@ services:
   # ===================== BACKEND (FastAPI + LangGraph) =====================
   backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
+    image: prototip-backend:latest
     container_name: genbi_backend
     ports:
       - "8000:8000"
@@ -138,30 +140,57 @@ services:
       - MINIO_SECURE=false
       - MINIO_BUCKET=artifacts
       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9100}
-      # Долгосрочная память (Phase 4) — хранилище в ClickHouse, эмбеддинги all-MiniLM-L6-v2
+      # Долгосрочная память (Phase 4)
       - MEMORY_ENABLED=${MEMORY_ENABLED:-true}
       - MEMORY_RAG_DAYS=${MEMORY_RAG_DAYS:-7}
       - MEMORY_RAG_TOPK=${MEMORY_RAG_TOPK:-5}
     volumes:
       - backend_out:/app/out
-      # Ключ сервис-аккаунта GCP для Vertex (положите secrets/gcp.json; read-only)
-      - ./secrets:/app/secrets:ro
+      # Ключ сервис-аккаунта GCP для Vertex (положите backend/secrets/gcp.json; read-only)
+      - ./backend/secrets:/app/secrets:ro
 
   # ===================== FRONTEND (React + Vite + nginx) =====================
   frontend:
     build:
-      context: ./frontend_web
+      context: ./frontend
       dockerfile: Dockerfile
+    image: prototip-frontend:latest
     container_name: genbi_frontend
     ports:
       - "3000:80"
     depends_on:
       - backend
 
-  # ===================== AIRFLOW (ETL) =====================
+  # ===================== AUTH (опционально) =====================
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: genbi_keycloak
+    command: start-dev
+    profiles: ["auth"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+
+  # ===================== ETL: Postgres + Airflow (опционально) =====================
+  postgres:
+    image: postgres:13
+    container_name: genbi_postgres
+    profiles: ["etl"]
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   airflow-webserver:
     image: apache/airflow:2.9.1
     container_name: airflow_webserver
+    profiles: ["etl"]
     restart: always
     depends_on:
       - postgres
@@ -176,14 +205,15 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
+      - ./backend/airflow/dags:/opt/airflow/dags
+      - ./backend/airflow/logs:/opt/airflow/logs
+      - ./backend/airflow/plugins:/opt/airflow/plugins
     command: webserver
 
   airflow-scheduler:
     image: apache/airflow:2.9.1
     container_name: airflow_scheduler
+    profiles: ["etl"]
     restart: always
     depends_on:
       - postgres
@@ -192,9 +222,9 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
     volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
+      - ./backend/airflow/dags:/opt/airflow/dags
+      - ./backend/airflow/logs:/opt/airflow/logs
+      - ./backend/airflow/plugins:/opt/airflow/plugins
     command: scheduler
 
 volumes:
