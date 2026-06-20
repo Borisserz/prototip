@@ -62,6 +62,7 @@ docker compose up -d frontend                  # только фронтенд
 ```bash
 docker compose --profile auth up -d    # Keycloak (внешняя аутентификация)
 docker compose --profile etl  up -d    # Postgres + Airflow (ETL-пайплайны)
+docker compose --profile observability up -d   # Prometheus + Grafana (Phase 8)
 ```
 
 ---
@@ -78,8 +79,41 @@ docker compose --profile etl  up -d    # Postgres + Airflow (ETL-пайплай�
 | ollama      | 11434              | Локальный LLM (по умолчанию)            |
 | keycloak*   | 8080               | Аутентификация (профиль `auth`)         |
 | airflow*    | 8081               | ETL (профиль `etl`)                     |
+| prometheus* | 9090               | Сбор метрик (профиль `observability`)   |
+| grafana*    | 3001               | Дашборды метрик (профиль `observability`) |
 
 \* — опционально, поднимается только с соответствующим профилем.
+
+---
+
+## 📈 Observability (Phase 8)
+
+Метрики собираются на бэкенде (`prometheus_fastapi_instrumentator` + кастомные
+`prototip_*`) и доступны двумя способами:
+
+1. **Внутри приложения** — раздел **«Мониторинг»** в админке (нативная страница на
+   `recharts`): RPS, латентность LLM (avg/p95/p99), error-rate, расход токенов и
+   разбивка по агентам. Источник — эндпоинт `GET /api/v1/admin/metrics`
+   (живые агрегаты из ClickHouse `system_audit_logs`).
+2. **Grafana + Prometheus** (профиль `observability`):
+   ```bash
+   docker compose --profile observability up -d
+   # Grafana    → http://localhost:3001  (admin/admin, см. GRAFANA_* в .env)
+   # Prometheus → http://localhost:9090
+   ```
+   Преднастроенный дашборд **«Prototip BI — Observability»** грузится автоматически
+   (provisioning из `ops/grafana/`). Scrape-конфиг — `ops/prometheus/prometheus.yml`.
+
+**Кастомные бизнес-метрики бэкенда:**
+
+| Метрика                                      | Тип        | Где собирается                |
+|----------------------------------------------|------------|-------------------------------|
+| `prototip_llm_call_duration_seconds`         | Histogram  | `core/llm.py`                 |
+| `prototip_llm_calls_total`                   | Counter    | `core/llm.py`                 |
+| `prototip_llm_prompt_tokens_total`           | Counter    | `core/llm.py`                 |
+| `prototip_llm_completion_tokens_total`       | Counter    | `core/llm.py`                 |
+| `prototip_sql_validation_errors_total`       | Counter    | `core/sql_guard.py`           |
+| `prototip_langgraph_node_duration_seconds`   | Histogram  | `app/graph.py` (узлы графа)   |
 
 ---
 

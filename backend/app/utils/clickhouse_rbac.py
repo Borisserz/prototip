@@ -1,3 +1,4 @@
+import os
 import logging
 import clickhouse_connect
 
@@ -7,7 +8,12 @@ def apply_rbac_policies():
     """Применение политик Row-Level Security и Data Masking в ClickHouse."""
     logger.info("Applying Native ClickHouse RBAC policies...")
     try:
-        client = clickhouse_connect.get_client(host='localhost', port=8123)
+        client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        )
 
         # 1. Row-Level Security: Минский пользователь видит только Минск
         # В ClickHouse предварительно нужно создать пользователя (например: CREATE USER IF NOT EXISTS minsk_user IDENTIFIED WITH no_password)

@@ -91,3 +91,30 @@ export const Meter: React.FC<{ value: number; color?: string }> = ({ value, colo
     <div className={cn("h-full rounded-full", color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
   </div>
 );
+
+/** Сегментированный переключатель вкладок админ-консоли. */
+export const ConsoleTabs: React.FC<{
+  current: string;
+  tabs: { id: string; label: string; icon?: LucideIcon }[];
+  onChange: (id: string) => void;
+}> = ({ current, tabs, onChange }) => (
+  <div className="inline-flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-800/40 p-1">
+    {tabs.map((t) => {
+      const active = t.id === current;
+      const Icon = t.icon;
+      return (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            active ? "bg-sky-500 text-white shadow shadow-sky-500/20" : "text-slate-400 hover:text-white",
+          )}
+        >
+          {Icon && <Icon className="h-4 w-4" />}
+          {t.label}
+        </button>
+      );
+    })}
+  </div>
+);

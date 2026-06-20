@@ -1,0 +1,14 @@
+# Grafana dashboard provisioning (Phase 8): автозагрузка дашбордов из файлов.
+apiVersion: 1
+
+providers:
+  - name: prototip
+    orgId: 1
+    folder: Prototip BI
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -26,6 +26,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("SqlGuard")
 
+# Phase 8: бизнес-метрики Prometheus (импорт защищён)
+try:
+    from app.observability.metrics import record_sql_validation_error
+except Exception:  # pragma: no cover
+    def record_sql_validation_error(reason: str = "unknown"):  # type: ignore
+        return None
+
 # Узлы, которые НИКОГДА не должны встречаться в пользовательском запросе
 _FORBIDDEN_NODES = (
     exp.Drop, exp.Delete, exp.Insert, exp.Update, exp.Alter, exp.Create,
@@ -131,7 +138,27 @@ def secure_sql(
     extra_filters: dict[str, str] | None = None,
     default_limit: int = 500,
 ) -> str:
-    """Валидирует и «укрепляет» SQL под политику клиента. Бросает SqlSecurityError."""
+    """Валидирует и «укрепляет» SQL под политику клиента. Бросает SqlSecurityError.
+
+    Тонкая обёртка над ``_secure_sql_impl``: при любом нарушении политики
+    инкрементирует Prometheus-счётчик ``prototip_sql_validation_errors_total``.
+    """
+    try:
+        return _secure_sql_impl(
+            sql, tenant, extra_filters=extra_filters, default_limit=default_limit
+        )
+    except SqlSecurityError as exc:
+        record_sql_validation_error(str(exc))
+        raise
+
+
+def _secure_sql_impl(
+    sql: str,
+    tenant: Tenant | None = None,
+    *,
+    extra_filters: dict[str, str] | None = None,
+    default_limit: int = 500,
+) -> str:
     sql = (sql or "").strip().rstrip(";")
     if not sql:
         raise SqlSecurityError("Пустой SQL-запрос.")

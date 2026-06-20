@@ -9,7 +9,12 @@ def generate_semantic_model():
     """Сканирует ClickHouse, извлекает схему и ENUM-значения, и сохраняет в semantic_model.yaml"""
     logger.info("Сканирование ClickHouse и генерация семантической модели...")
     try:
-        client = clickhouse_connect.get_client(host='localhost', port=8123)
+        client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        )
         
         # Получаем все пользовательские таблицы
         tables_query = """

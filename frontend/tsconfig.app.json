@@ -22,9 +22,10 @@
       ]
     },
 
-    /* Linting */
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    /* Linting — проверку неиспользуемых объявлений делегируем ESLint
+       (eslint.config.js), чтобы они не ломали production-сборку (npm run build). */
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },

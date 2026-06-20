@@ -156,6 +156,72 @@ export const adminApi = {
     }>(`/api/v1/client/login`, { method: "POST", body: JSON.stringify(body) }),
 };
 
+// ─── Phase 8: системные метрики (страница «Мониторинг») ─────────────────────
+export interface MetricsSummary {
+  total_calls: number;
+  errors: number;
+  error_rate: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  p99_latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  active_agents: number;
+  rps: number;
+  calls_per_min: number;
+}
+
+export interface MetricsPoint {
+  time: string;
+  calls: number;
+  latency_ms: number;
+  errors: number;
+  tokens: number;
+  rpm: number;
+}
+
+export interface MetricsAgent {
+  agent: string;
+  calls: number;
+  avg_latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  tokens: number;
+  errors: number;
+  error_rate: number;
+}
+
+export interface MetricsModel {
+  model: string;
+  calls: number;
+  tokens: number;
+  avg_latency_ms: number;
+}
+
+export interface MetricsError {
+  time: string;
+  agent: string;
+  model: string;
+  error: string;
+}
+
+export interface SystemMetrics {
+  source: "live" | "demo";
+  window_hours: number;
+  bucket_minutes: number;
+  generated_at: string;
+  summary: MetricsSummary;
+  timeseries: MetricsPoint[];
+  by_agent: MetricsAgent[];
+  by_model: MetricsModel[];
+  recent_errors: MetricsError[];
+}
+
+export const metricsApi = {
+  get: (hours = 24) => request<SystemMetrics>(`/api/v1/admin/metrics?hours=${hours}`),
+};
+
 // ─── JWT helpers ─────────────────────────────────────────────────────────────
 export interface JwtClaims {
   sub?: string;

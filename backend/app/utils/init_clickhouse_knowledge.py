@@ -1,3 +1,4 @@
+import os
 import logging
 import clickhouse_connect
 
@@ -5,7 +6,12 @@ logger = logging.getLogger("InitClickhouseKnowledge")
 
 def init_knowledge_base():
     try:
-        client = clickhouse_connect.get_client(host='localhost', port=8123)
+        client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        )
         
         # Создаем таблицу с поддержкой векторного хранения
         client.command("""

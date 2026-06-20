@@ -1,3 +1,4 @@
+import os
 import logging
 from crewai.tools import BaseTool
 from pydantic import Field
@@ -13,7 +14,12 @@ class QueryClickhouseTool(BaseTool):
         """Execute query in ClickHouse."""
         import re
         try:
-            client = clickhouse_connect.get_client(host='localhost', port=8123)
+            client = clickhouse_connect.get_client(
+            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+            username=os.getenv("CLICKHOUSE_USER", "default"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        )
             logger.info(f"Executing SQL via CrewAI Tool: {sql_query}")
             
             # Строгая защита от SQL-инъекций и деструктивных действий (Харденинг)
