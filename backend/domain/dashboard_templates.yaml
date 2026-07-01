@@ -1,0 +1,86 @@
+# Шаблоны дашбордов — demo prototip
+# Связь: DashboardAgent, ui_brief (layout), use_case_card (триггер UC)
+
+version: "0.1"
+
+templates:
+  - id: dash-regional-overview
+    name: Обзор по регионам
+    description: KPI + сравнение регионов + динамика
+    trigger_phrases:
+      - сводк
+      - обзор по регион
+      - по регионам
+    layout: kpi_row_plus_grid_2x2
+    kpi_cards:
+      - metric_id: total_accrued
+        label: Всего начислено
+      - metric_id: total_paid
+        label: Всего уплачено
+      - metric_id: total_debt
+        label: Общая задолженность
+      - metric_id: collection_rate
+        label: Уровень сбора
+    charts:
+      - chart_rule: ranking_debt
+        title: Топ регионов по задолженности
+      - chart_rule: time_series
+        title: Динамика начислений
+      - chart_rule: structure_share
+        title: Структура по видам налогов
+      - chart_rule: multi_series_compare
+        title: Сравнение регионов по начислениям
+
+  - id: dash-debt-focus
+    name: Фокус на задолженности
+    description: Задолженность, рейтинги, доля на плательщика
+    trigger_phrases:
+      - задолженност
+      - долг
+      - дебитор
+    layout: kpi_row_plus_main_chart
+    kpi_cards:
+      - metric_id: total_debt
+        label: Суммарная задолженность
+      - metric_id: debt_per_taxpayer
+        label: На одного плательщика
+    charts:
+      - chart_rule: ranking_debt
+        title: Рейтинг регионов по задолженности
+      - chart_rule: time_series
+        title: Динамика задолженности по месяцам
+
+  - id: dash-tax-type-mix
+    name: Структура налогов
+    trigger_phrases:
+      - структур
+      - виды налог
+      - доли
+    layout: main_chart_plus_insights
+    kpi_cards:
+      - metric_id: income_tax_share
+        label: Доля подоходного налога
+    charts:
+      - chart_rule: structure_share
+        title: Доли видов налогов
+      - chart_rule: matrix_heatmap
+        title: Регион × период (начисления)
+
+# Описание layout-типов (для ui_brief и UI)
+layout_types:
+  kpi_row_plus_grid_2x2:
+    description: "4 KPI сверху, ниже сетка 2×2 графиков"
+    kpi_position: top
+    chart_grid: "2x2"
+
+  kpi_row_plus_main_chart:
+    description: "2–3 KPI сверху, один крупный график, второй меньше"
+    kpi_position: top
+    chart_grid: "1+1"
+
+  main_chart_plus_insights:
+    description: "Один основной график, выводы справа или снизу"
+    kpi_position: optional_top
+    chart_grid: "1"
+
+# При продукте: добавить template per UC-ID из use_case_card

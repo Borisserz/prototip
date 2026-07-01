@@ -1,0 +1,350 @@
+version: '1.0'
+models:
+- name: dashboard_knowledge
+  description: Таблица dashboard_knowledge. Авто-генерация.
+  columns:
+  - name: id
+    type: String
+    description: Нет описания.
+  - name: title
+    type: String
+    description: 'Нет описания. Возможные значения: Ключевые финансовые показатели
+      за Q3 2024, Задолженность по регионам.'
+    enum_values:
+    - Ключевые финансовые показатели за Q3 2024
+    - Задолженность по регионам
+  - name: description
+    type: String
+    description: 'Нет описания. Возможные значения: Сводный дашборд по финансовым
+      результатам: динамика начислений и топ налогов., Сводный дашборд по долгам во
+      всех областях Республики Беларусь..'
+    enum_values:
+    - 'Сводный дашборд по финансовым результатам: динамика начислений и топ налогов.'
+    - Сводный дашборд по долгам во всех областях Республики Беларусь.
+  - name: full_json
+    type: String
+    description: Нет описания.
+  - name: embedding
+    type: Array(Float32)
+    description: Нет описания.
+- name: ecommerce_sales
+  description: 'Демо-таблица продаж e-commerce (НЕ налоговые данные). Регионы здесь — города (Минск, Варшава, Вильнюс, Алматы). Использовать только для вопросов про продажи/заказы/категории, не для налогов и долгов.'
+  columns:
+  - name: transaction_id
+    type: UUID
+    description: Нет описания.
+  - name: date
+    type: Date
+    description: Нет описания.
+  - name: order_id
+    type: String
+    description: Нет описания.
+  - name: client_id
+    type: String
+    description: Нет описания.
+  - name: category
+    type: String
+    description: 'Нет описания. Возможные значения: Продукты, Спорттовары, Электроника,
+      Одежда.'
+    enum_values:
+    - Продукты
+    - Спорттовары
+    - Электроника
+    - Одежда
+  - name: amount
+    type: Float32
+    description: Нет описания.
+  - name: region
+    type: String
+    description: 'Город продажи в демо-таблице e-commerce. Возможные значения: Минск, Варшава, Вильнюс, Алматы. ВНИМАНИЕ: это НЕ налоговые регионы — для налогов/долгов используй region из enterprise_taxes/tax_data (области РБ).'
+    enum_values:
+    - Вильнюс
+    - Минск
+    - Алматы
+    - Варшава
+  - name: discount_applied
+    type: UInt8
+    description: Нет описания.
+- name: enterprise_taxes
+  description: 'Основная таблица налоговых транзакций (DWH). Используй её для вопросов про налоги, начисления, долги, регионы РБ. Колонка region — ОБЛАСТИ Республики Беларусь + г. Минск.'
+  columns:
+  - name: transaction_id
+    type: UUID
+    description: Нет описания.
+  - name: date
+    type: Date
+    description: Нет описания.
+  - name: taxpayer_inn
+    type: String
+    description: Нет описания.
+  - name: taxpayer_name
+    type: String
+    description: 'Нет описания. Возможные значения: ЗАО ''Компани-89'', ОАО ''Компани-5'',
+      ОАО ''Компани-49'', ЗАО ''Компани-1'', ЗАО ''Компани-93'', ОАО ''Компани-34'',
+      ЗАО ''Компани-15'', ООО ''Компани-44'', ЗАО ''Компани-40'', ООО ''Компани-41''.'
+    enum_values:
+    - ЗАО 'Компани-89'
+    - ОАО 'Компани-5'
+    - ОАО 'Компани-49'
+    - ЗАО 'Компани-1'
+    - ЗАО 'Компани-93'
+    - ОАО 'Компани-34'
+    - ЗАО 'Компани-15'
+    - ООО 'Компани-44'
+    - ЗАО 'Компани-40'
+    - ООО 'Компани-41'
+  - name: region
+    type: String
+    description: 'Область Республики Беларусь (или г. Минск). Точные значения: Брестская область, Витебская область, Гомельская область, Гродненская область, Минская область, Могилёвская область, г. Минск. Фильтруй по полному названию области (например "Гродненская область", НЕ "г. Гродно").'
+    enum_values:
+    - Брестская область
+    - Витебская область
+    - Гомельская область
+    - Гродненская область
+    - Минская область
+    - Могилевская область
+    - г. Минск
+  - name: city
+    type: String
+    description: 'Нет описания. Возможные значения: Барановичи, Брест, Витебск, Орша,
+      Мозырь, Жлобин, Слоним, Лида, Солигорск, Борисов.'
+    enum_values:
+    - Барановичи
+    - Брест
+    - Витебск
+    - Орша
+    - Мозырь
+    - Жлобин
+    - Слоним
+    - Лида
+    - Солигорск
+    - Борисов
+  - name: tax_type
+    type: String
+    description: 'Нет описания. Возможные значения: Налог на недвижимость, НДС, Подоходный
+      налог, Экологический налог, Налог на прибыль.'
+    enum_values:
+    - Налог на недвижимость
+    - НДС
+    - Подоходный налог
+    - Экологический налог
+    - Налог на прибыль
+  - name: amount
+    type: Float32
+    description: Нет описания.
+  - name: status
+    type: String
+    description: 'Нет описания. Возможные значения: Взыскание, Оплачено, Просрочка.'
+    enum_values:
+    - Взыскание
+    - Оплачено
+    - Просрочка
+  - name: risk_score
+    type: UInt8
+    description: Нет описания.
+  - name: has_audit
+    type: UInt8
+    description: Нет описания.
+  - name: fine_amount
+    type: Float32
+    description: Нет описания.
+  - name: industry
+    type: String
+    description: 'Нет описания. Возможные значения: Агропром, Производство, Ритейл,
+      Строительство, IT, Транспорт, Финансы.'
+    enum_values:
+    - Агропром
+    - Производство
+    - Ритейл
+    - Строительство
+    - IT
+    - Транспорт
+    - Финансы
+- name: saas_metrics
+  description: Таблица saas_metrics. Авто-генерация.
+  columns:
+  - name: transaction_id
+    type: UUID
+    description: Нет описания.
+  - name: date
+    type: Date
+    description: Нет описания.
+  - name: company_name
+    type: String
+    description: 'Нет описания. Возможные значения: Client-2, Client-6, Client-22,
+      Client-24, Client-25, Client-26, Client-33, Client-35, Client-36, Client-39.'
+    enum_values:
+    - Client-2
+    - Client-6
+    - Client-22
+    - Client-24
+    - Client-25
+    - Client-26
+    - Client-33
+    - Client-35
+    - Client-36
+    - Client-39
+  - name: plan_tier
+    type: String
+    description: 'Нет описания. Возможные значения: Basic, Enterprise, Pro.'
+    enum_values:
+    - Basic
+    - Enterprise
+    - Pro
+  - name: mrr
+    type: Float32
+    description: Нет описания.
+  - name: seats
+    type: UInt16
+    description: Нет описания.
+  - name: is_churned
+    type: UInt8
+    description: Нет описания.
+- name: schema_knowledge
+  description: Таблица schema_knowledge. Авто-генерация.
+  columns:
+  - name: id
+    type: String
+    description: Нет описания.
+  - name: name
+    type: String
+    description: 'Нет описания. Возможные значения: system_audit_logs, schema_knowledge,
+      tax_data, ecommerce_sales, dashboard_knowledge, saas_metrics, enterprise_taxes.'
+    enum_values:
+    - system_audit_logs
+    - schema_knowledge
+    - tax_data
+    - ecommerce_sales
+    - dashboard_knowledge
+    - saas_metrics
+    - enterprise_taxes
+  - name: description
+    type: String
+    description: 'Нет описания. Возможные значения: Таблица system_audit_logs. Авто-генерация.,
+      Таблица schema_knowledge. Авто-генерация., Таблица tax_data. Авто-генерация.,
+      Таблица ecommerce_sales. Авто-генерация., Таблица dashboard_knowledge. Авто-генерация.,
+      Таблица saas_metrics. Авто-генерация., Таблица enterprise_taxes. Авто-генерация..'
+    enum_values:
+    - Таблица system_audit_logs. Авто-генерация.
+    - Таблица schema_knowledge. Авто-генерация.
+    - Таблица tax_data. Авто-генерация.
+    - Таблица ecommerce_sales. Авто-генерация.
+    - Таблица dashboard_knowledge. Авто-генерация.
+    - Таблица saas_metrics. Авто-генерация.
+    - Таблица enterprise_taxes. Авто-генерация.
+  - name: content
+    type: String
+    description: Нет описания.
+  - name: embedding
+    type: Array(Float32)
+    description: Нет описания.
+- name: system_audit_logs
+  description: Таблица system_audit_logs. Авто-генерация.
+  columns:
+  - name: timestamp
+    type: DateTime
+    description: Нет описания.
+  - name: agent_name
+    type: String
+    description: 'Нет описания. Возможные значения: data_agent, dashboard_agent, planner_agent,
+      sql_evaluator, analyst_agent, chart_agent, supervisor_node, TaskDecompositionAgent,
+      presentation_agent, reviewer_agent.'
+    enum_values:
+    - data_agent
+    - dashboard_agent
+    - planner_agent
+    - sql_evaluator
+    - analyst_agent
+    - chart_agent
+    - supervisor_node
+    - TaskDecompositionAgent
+    - presentation_agent
+    - reviewer_agent
+  - name: model
+    type: String
+    description: 'Нет описания. Возможные значения: pipeline, qwen2.5-coder:7b-instruct,
+      gemini-3.5-flash.'
+    enum_values:
+    - pipeline
+    - qwen2.5-coder:7b-instruct
+    - gemini-3.5-flash
+  - name: prompt_tokens
+    type: Int32
+    description: Нет описания.
+  - name: completion_tokens
+    type: Int32
+    description: Нет описания.
+  - name: duration_ms
+    type: Int32
+    description: Нет описания.
+  - name: error_status
+    type: String
+    description: "Нет описания. Возможные значения: [running] LLM генерирует безопасный\
+      \ SELECT..., [running] Загрузка данных для дашборда..., [done] SQL сформирован\
+      \ (100 символов), [done] SQL сформирован (60 символов), [done] ok, [done] SQL\
+      \ сформирован (170 символов), [done] SQL сформирован (124 символов), [running]\
+      \ ClickHouse выполняет запрос к БД..., [error] Ошибка генерации или выполнения\
+      \ SQL (Error: 1 validation error for SqlResult\nstep_by_step_planning\n  Field\
+      \ required [type=missing, input_value={'sql': \"SELECT region, S...LIMIT). Строк:\
+      \ 5.'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/missing)."
+    enum_values:
+    - '[running] LLM генерирует безопасный SELECT...'
+    - '[running] Загрузка данных для дашборда...'
+    - '[done] SQL сформирован (100 символов)'
+    - '[done] SQL сформирован (60 символов)'
+    - '[done] ok'
+    - '[done] SQL сформирован (170 символов)'
+    - '[done] SQL сформирован (124 символов)'
+    - '[running] ClickHouse выполняет запрос к БД...'
+    - "[error] Ошибка генерации или выполнения SQL (Error: 1 validation error for\
+      \ SqlResult\nstep_by_step_planning\n  Field required [type=missing, input_value={'sql':\
+      \ \"SELECT region, S...LIMIT). Строк: 5.'}, input_type=dict]\n    For further\
+      \ information visit https://errors.pydantic.dev/2.12/v/missing)"
+  - name: user_role
+    type: String
+    description: 'Нет описания. Возможные значения: system, manager.'
+    enum_values:
+    - system
+    - manager
+- name: tax_data
+  description: Таблица tax_data. Авто-генерация.
+  columns:
+  - name: period
+    type: Date
+    description: Нет описания.
+  - name: region
+    type: LowCardinality(String)
+    description: 'Область Республики Беларусь (или г. Минск) — легаси налоговая таблица. Точные значения: Брестская область, Витебская область, Гомельская область, Гродненская область, Минская область, Могилёвская область, г. Минск. Фильтруй по полному названию области.'
+    enum_values:
+    - Брестская область
+    - Витебская область
+    - Гомельская область
+    - Гродненская область
+    - Минская область
+    - Могилёвская область
+    - г. Минск
+  - name: tax_type
+    type: LowCardinality(String)
+    description: 'Нет описания. Возможные значения: Акцизы, Имущественные налоги,
+      НДС, Налог на прибыль, Подоходный налог.'
+    enum_values:
+    - Акцизы
+    - Имущественные налоги
+    - НДС
+    - Налог на прибыль
+    - Подоходный налог
+  - name: accrued
+    type: Float32
+    description: Нет описания.
+  - name: paid
+    type: Float32
+    description: Нет описания.
+  - name: debt
+    type: Float32
+    description: Нет описания.
+  - name: taxpayers
+    type: UInt32
+    description: Нет описания.
+  - name: penalties
+    type: Float32
+    description: Нет описания.

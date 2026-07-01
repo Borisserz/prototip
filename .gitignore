@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Виртуальные окружения
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Тесты / типы / линтеры
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter / pyenv
+.ipynb_checkpoints
+.python-version
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ВАЖНО: Python-паттерн lib/ выше задевал бы frontend/src/lib — не игнорируем его
+!frontend/src/lib/
+!frontend/src/lib/**
+
+# Runtime / сгенерированные артефакты (НЕ коммитим)
+out/
+pres_slide_*.png
+*.patch
+run.log
+*.log
+
+# Локальное состояние backend (создаётся в рантайме)
+backend/data/tenants/
+backend/data/dropzone/
+backend/data/archive/
+backend/data/sessions.json
+backend/data/subscriptions.json
+backend/data/user_dashboards.json
+backend/data/user_subscriptions.json
+backend/out/
+
+# Векторная БД (локальные файлы Chroma/Qdrant)
+**/chroma.sqlite3
+chroma_db/
+
+# Секреты (НЕ коммитить!)
+backend/secrets/*
+!backend/secrets/README.md
+vertex-creds.json
+*.pem
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+backend/airflow/logs/scheduler/

@@ -1,0 +1,59 @@
+# Скелет chart playbook — правила выбора типа графика
+# Синхронизировано с FEW_SHOT_CHART в app/agents/chart_agent.py
+
+version: "0.1"
+
+rules:
+  - id: time_series
+    triggers: [динамика, тренд, по месяцам, период, временн]
+    chart_type: line
+    defaults:
+      x: period
+      color: region
+    rationale: "Временной ряд → line"
+
+  - id: ranking_debt
+    triggers: [топ, наибольш, задолженност, рейтинг, лидер]
+    chart_type: horizontal_bar
+    defaults:
+      x: region
+      y: debt
+    rationale: "Рейтинг категорий → horizontal_bar"
+
+  - id: structure_share
+    triggers: [доля, структур, процент, состав]
+    chart_type: donut
+    defaults:
+      x: tax_type
+      y: accrued
+    rationale: "Доли → donut"
+
+  - id: multi_series_compare
+    triggers: [сравнен, нескольк, по видам, групп]
+    chart_type: grouped_bar
+    defaults:
+      x: region
+      y: accrued
+      color: tax_type
+    rationale: "Несколько серий → grouped_bar"
+
+  - id: matrix_heatmap
+    triggers: [матриц, теплов, регион и период]
+    chart_type: heatmap
+    defaults:
+      x: period
+      y: region
+      color: accrued
+    rationale: "Две оси категорий → heatmap"
+
+  - id: single_kpi
+    triggers: [итог, всего, суммарн, один показатель]
+    chart_type: kpi
+    defaults:
+      y: debt
+    rationale: "Один ключевой показатель → kpi"
+
+negative_examples:
+  - bad: "bar для топа регионов по задолженности"
+    good: horizontal_bar
+    reason: "Рейтинги читаются горизонтально"

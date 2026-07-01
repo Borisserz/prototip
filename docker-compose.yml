@@ -1,0 +1,370 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Prototip BI — оркестрация всего стека
+#
+#  Папки-сервисы:
+#    frontend/  — React + Vite + nginx
+#    backend/   — FastAPI API + LangGraph-агенты (in-process)
+#    db/        — ClickHouse (+ init.sql); векторное хранилище знаний — поверх ClickHouse
+#
+#  Запуск ядра (frontend + backend + базы + LLM):
+#    docker compose up -d --build
+#
+#  Опциональные профили:
+#    docker compose --profile auth up -d            # Keycloak
+#    docker compose --profile etl  up -d            # Postgres + Airflow (ETL)
+#    docker compose --profile observability up -d   # Prometheus + Grafana
+#       Grafana   → http://localhost:3001  (admin/admin, см. GRAFANA_* в .env)
+#       Prometheus→ http://localhost:9090
+#
+#  Каждый сервис можно поднять отдельно, напр.:
+#    docker compose up -d clickhouse minio
+#    docker compose up -d backend
+#    docker compose up -d frontend
+# ─────────────────────────────────────────────────────────────────────────────
+# Общие настройки контейнеров Airflow (анкор YAML — не дублируем env/volumes)
+x-airflow-common: &airflow-common
+  build:
+    context: ./backend/airflow
+    dockerfile: Dockerfile
+  image: prototip-airflow:latest
+  profiles: ["etl"]
+  environment: &airflow-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres/${POSTGRES_DB:-airflow}
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+    # Stable REST API с basic-auth — через неё backend триггерит DAG'и
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    # backend-код для DAG'ов
+    BACKEND_ROOT: /opt/airflow/backend
+    PYTHONPATH: /opt/airflow/backend
+    TENANT_REGISTRY_PATH: /opt/airflow/backend/data/tenants/registry.json
+    # доступ к общему ClickHouse стека (тот же инстанс, что у backend)
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_PORT: "8123"
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    # ОБЩИЙ ключ шифрования с backend (иначе не расшифровать pg_dsn/пароли)
+    APP_SECRET_ENCRYPTION_KEY: ${APP_SECRET_ENCRYPTION_KEY:-}
+    # почта для алертов о сбоях ETL (через app/services/email_service.py)
+    ETL_ALERT_EMAIL: ${ETL_ALERT_EMAIL:-admin@prototip.local}
+    SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:-no-reply@prototip.local}
+    SMTP_PASS: ${SMTP_PASS:-secret}
+  volumes: &airflow-volumes
+    - ./backend:/opt/airflow/backend           # backend-код (app.etl / scripts / core)
+    - ./backend/airflow/dags:/opt/airflow/dags
+    - ./backend/airflow/logs:/opt/airflow/logs
+    - ./backend/airflow/plugins:/opt/airflow/plugins
+    - tenant_data:/opt/airflow/backend/data/tenants  # ОБЩЕЕ хранилище реестра/слепков с backend
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+
+services:
+  # ===================== БАЗЫ ДАННЫХ =====================
+  clickhouse:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    image: prototip-clickhouse:latest
+    container_name: genbi_clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      # init.sql создаёт все таблицы в БД `default`, и backend-код жёстко
+      # обращается к default.tax_data. Имя БД ДОЛЖНО быть `default`, иначе
+      # end-to-end сценарий (чат → SQL → ClickHouse) падает на первом запросе.
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      # P0-3: в SaaS-сети пустой пароль + access management = открытый доступ ко всем
+      # тенантам. В prod ОБЯЗАТЕЛЬНО задайте CLICKHOUSE_PASSWORD и CLICKHOUSE_ACCESS_MANAGEMENT=0.
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=${CLICKHOUSE_ACCESS_MANAGEMENT:-1}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+    restart: unless-stopped
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ===================== ОБЪЕКТНОЕ ХРАНИЛИЩЕ =====================
+  minio:
+    image: minio/minio:latest
+    container_name: genbi_minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9100:9000"   # S3 API (хост 9100, т.к. 9000 занят ClickHouse)
+      - "9101:9001"   # Веб-консоль MinIO
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Одноразовый сервис: создаёт бакеты при старте
+  minio-init:
+    image: minio/mc:latest
+    container_name: genbi_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin} &&
+      mc mb -p local/artifacts &&
+      mc mb -p local/templates &&
+      echo 'MinIO buckets ready' || exit 0
+      "
+    restart: "no"
+
+  # ===================== LLM (Ollama) =====================
+  # ОПЦИОНАЛЬНО. По умолчанию стек работает на Vertex (USE_VERTEX=true),
+  # поэтому Ollama вынесена в профиль `ollama` и НЕ стартует автоматически —
+  # стек не ждёт ненужный контейнер. Локальная модель:
+  #   docker compose --profile ollama up -d ollama
+  #   docker compose --profile ollama exec ollama ollama pull qwen2.5-coder:7b-instruct
+  ollama:
+    image: ollama/ollama:latest
+    container_name: genbi_ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # ===================== BACKEND (FastAPI + LangGraph) =====================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: prototip-backend:latest
+    container_name: genbi_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # Ollama НЕ в зависимостях: по умолчанию используется Vertex (USE_VERTEX=true),
+    # а сам клиент ollama импортируется лениво только при USE_VERTEX=false.
+    # Если запускаете локальную LLM — поднимите профиль `ollama` отдельно.
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # ClickHouse
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      # LLM (Ollama по умолчанию; для Vertex выставить USE_VERTEX=true)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:7b-instruct}
+      # По умолчанию стек работает на Vertex AI. Для локальной Ollama выставьте
+      # USE_VERTEX=false в .env и поднимите профиль `ollama`.
+      - USE_VERTEX=${USE_VERTEX:-true}
+      # Убеждаемся, что сессии не сбрасываются при перезапуске
+      - SECRET_KEY=${SECRET_KEY:-my-super-secret-key-1234567890abcdef}
+      # Vertex / Gemini (используется при USE_VERTEX=true)
+      - AI_MODEL=${AI_MODEL:-gemini-3.5-flash}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-/app/secrets/gcp.json}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-global}
+      # Объектное хранилище
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-minio}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECURE=false
+      - MINIO_BUCKET=artifacts
+      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9100}
+      # Долгосрочная память
+      - MEMORY_ENABLED=${MEMORY_ENABLED:-true}
+      - MEMORY_RAG_DAYS=${MEMORY_RAG_DAYS:-7}
+      - MEMORY_RAG_TOPK=${MEMORY_RAG_TOPK:-5}
+      # ETL-оркестрация (Airflow). Ключ шифрования ОБЯЗАН совпадать с Airflow.
+      - APP_SECRET_ENCRYPTION_KEY=${APP_SECRET_ENCRYPTION_KEY:-}
+      - AIRFLOW_API_URL=${AIRFLOW_API_URL:-http://airflow-webserver:8080/api/v1}
+      - AIRFLOW_USERNAME=${AIRFLOW_USERNAME:-admin}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD:-admin}
+      - ETL_ALERT_EMAIL=${ETL_ALERT_EMAIL:-admin@prototip.local}
+    volumes:
+      - backend_out:/app/out
+      # Ключ сервис-аккаунта GCP для Vertex (положите backend/secrets/gcp.json; read-only)
+      - ./backend/secrets:/app/secrets:ro
+      # ОБЩИЙ реестр клиентов и слепки/документы — виден и Airflow
+      - tenant_data:/app/data/tenants
+    # P1-4: liveness через /health (Python есть в образе — не зависим от curl).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ===================== FRONTEND (React + Vite + nginx) =====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # VITE_* встраиваются в бандл на этапе `npm run build`, поэтому базовый
+      # URL API нужно прокинуть как build-arg (иначе в образ зашьётся fallback).
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+    image: prototip-frontend:latest
+    container_name: genbi_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    # P1-4: nginx:alpine содержит wget (busybox). Используем 127.0.0.1 (IPv4),
+    # т.к. в Alpine Linux localhost резолвится в ::1 (IPv6), а nginx слушает только IPv4.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - backend
+
+  # ===================== AUTH (опционально) =====================
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: genbi_keycloak
+    command: start-dev
+    profiles: ["auth"]
+    environment:
+      # P0-4: дефолтные креды только для dev. В prod задайте KEYCLOAK_ADMIN_* в .env.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "8080:8080"
+
+  # ===================== ETL: Postgres + Airflow (профиль etl) =====
+  #  Запуск:  docker compose --profile etl up -d --build
+  #  Airflow UI → http://localhost:8081  (admin/admin)
+  #  REST API  → http://localhost:8081/api/v1  (basic auth, дергает backend)
+  postgres:
+    image: postgres:13
+    container_name: genbi_postgres
+    profiles: ["etl"]
+    environment:
+      # P0-4: дефолты только для dev; в prod задайте POSTGRES_PASSWORD в .env.
+      - POSTGRES_USER=${POSTGRES_USER:-airflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-airflow}
+      - POSTGRES_DB=${POSTGRES_DB:-airflow}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Одноразовая инициализация: миграции БД + создание пользователя admin
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate && \
+        airflow users create \
+          --username ${AIRFLOW_USERNAME:-admin} --password ${AIRFLOW_PASSWORD:-admin} \
+          --firstname Admin --lastname User \
+          --role Admin --email ${ETL_ALERT_EMAIL:-admin@prototip.local} || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    command: scheduler
+
+  # ===================== OBSERVABILITY: Prometheus + Grafana =====
+  # Запуск: docker compose --profile observability up -d
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: genbi_prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: genbi_grafana
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true            # для iframe-встраивания в админке
+      - GF_AUTH_ANONYMOUS_ENABLED=true              # просмотр дашбордов без логина (iframe)
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  clickhouse_data:
+  postgres_data:
+  minio_data:
+  ollama_data:
+  backend_out:
+  prometheus_data:
+  grafana_data:
+  tenant_data:        # общий реестр клиентов + слепки/документы (backend ↔ Airflow)

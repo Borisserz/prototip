@@ -1,0 +1,75 @@
+# Скелет schema registry — demo prototip (data/sample.csv)
+# При продукте: заменить на реальные таблицы, FK, grain.
+# Версия: demo-0.1
+
+version: "0.1"
+dataset: sample_tax_demo
+description: Синтетические налоговые данные РБ для прототипа
+
+tables:
+  - name: df
+    source: data/sample.csv
+    engine: duckdb_in_memory
+    grain: "period × region × tax_type"
+    row_count_approx: 420
+    columns:
+      - name: period
+        type: string
+        format: "YYYY-MM"
+        business_name: Период
+        description: Календарный месяц
+        example: "2024-01"
+
+      - name: region
+        type: string
+        business_name: Регион
+        description: Субъект РБ (7 регионов)
+        example: "г. Минск"
+
+      - name: tax_type
+        type: string
+        business_name: Вид налога
+        description: Тип налога (5 видов)
+        example: "НДС"
+
+      - name: accrued
+        type: float
+        business_name: Начислено
+        unit: Br
+        description: Сумма начислений
+
+      - name: paid
+        type: float
+        business_name: Уплачено
+        unit: Br
+        description: Сумма уплат
+
+      - name: debt
+        type: float
+        business_name: Задолженность
+        unit: Br
+        description: Неуплаченный остаток
+
+      - name: taxpayers
+        type: integer
+        business_name: Налогоплательщики
+        unit: шт
+        description: Число плательщиков в группе
+
+      - name: penalties
+        type: float
+        business_name: Штрафы и пени
+        unit: Br
+        description: 5–18% от debt (синтетика)
+
+# Правила фильтрации по периоду (для промптов DataAgent)
+period_rules:
+  year_filter: "period LIKE '{year}-%'"
+  forbidden:
+    - "period = '2024'"
+    - "YEAR(period)"
+    - "EXTRACT(YEAR FROM period)"
+
+# Расширение для продукта:
+# joins: []
+# rls_filters: []

@@ -1,0 +1,87 @@
+{
+  "table_name": "tax_data",
+  "description": "Основная таблица налоговой отчетности, содержащая данные по начислениям, выплатам и задолженностям налогоплательщиков.",
+  "columns": [
+    {
+      "name": "id",
+      "type": "UInt32",
+      "business_term": "Идентификатор",
+      "description": "Уникальный номер записи в системе."
+    },
+    {
+      "name": "taxpayer_id",
+      "type": "UInt32",
+      "business_term": "УНП",
+      "description": "Учетный номер плательщика. Уникальный код организации или физлица."
+    },
+    {
+      "name": "taxpayer_type",
+      "type": "String",
+      "business_term": "Форма собственности",
+      "description": "Тип налогоплательщика: ООО, ЗАО, ОАО, ИП, Физлицо."
+    },
+    {
+      "name": "industry",
+      "type": "String",
+      "business_term": "Отрасль / Сфера",
+      "description": "Сфера деятельности: IT, Строительство, Торговля, Сельское хозяйство, Услуги, Производство."
+    },
+    {
+      "name": "region",
+      "type": "String",
+      "business_term": "Область / Регион",
+      "description": "Территориальная принадлежность (Минск, Гомельская область и т.д.)."
+    },
+    {
+      "name": "tax_type",
+      "type": "String",
+      "business_term": "Вид налога",
+      "description": "Тип налога: НДС, Налог на прибыль, Подоходный налог, Налог на недвижимость, Земельный налог, Акцизы."
+    },
+    {
+      "name": "accrued",
+      "type": "Float32",
+      "business_term": "Начислено",
+      "description": "Сумма налога, подлежащая уплате по декларации."
+    },
+    {
+      "name": "paid",
+      "type": "Float32",
+      "business_term": "Уплачено / Оплачено",
+      "description": "Фактически поступившая сумма налога в бюджет."
+    },
+    {
+      "name": "debt",
+      "type": "Float32",
+      "business_term": "Задолженность / Долг",
+      "description": "Неуплаченный остаток. Вычисляется как accrued - paid."
+    },
+    {
+      "name": "penalty",
+      "type": "Float32",
+      "business_term": "Пеня / Штраф",
+      "description": "Начисленная пеня за просрочку платежа."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "business_term": "Статус",
+      "description": "Статус оплаты: Оплачено, Задолженность."
+    },
+    {
+      "name": "period",
+      "type": "Date",
+      "business_term": "Период / Дата",
+      "description": "Дата возникновения налогового обязательства (YYYY-MM-DD)."
+    }
+  ],
+  "relationships": [],
+  "metrics": [
+    {
+      "name": "collection_rate",
+      "business_term": "Уровень сборов / Эффективность взыскания",
+      "calculation": "sum(paid) / sum(accrued) * 100",
+      "description": "Отношение собранных налогов к начисленным в процентах."
+    }
+  ]
+}

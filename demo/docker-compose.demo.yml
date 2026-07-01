@@ -1,0 +1,50 @@
+# Демо-PostgreSQL для Prototip BI
+# Имитирует базу данных клиента (МНС Гродненской области)
+#
+# Запуск:
+#   cd prototip
+#   docker compose -f demo/docker-compose.demo.yml up -d
+#
+# DSN для AdminPanel → CreateTenantWizard:
+#   postgresql://demo_user:demo_pass@localhost:5435/demo_mns
+
+services:
+  demo-postgres:
+    image: postgres:16-alpine
+    container_name: prototip_demo_postgres
+    environment:
+      POSTGRES_DB:       demo_mns
+      POSTGRES_USER:     demo_user
+      POSTGRES_PASSWORD: demo_pass
+    ports:
+      - "5435:5432"
+    volumes:
+      - ./postgres/init-demo.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - demo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo_user -d demo_mns"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # pgAdmin для наглядности 
+  demo-pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: prototip_demo_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    admin@prototip.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - demo_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      demo-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  demo_postgres_data:
+  demo_pgadmin_data:
