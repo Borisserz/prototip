@@ -82,3 +82,7 @@ Thumbs.db
 .idea/
 .vscode/
 backend/airflow/logs/scheduler/
+
+# Local agent scratch
+.agents/
+*.tmp
