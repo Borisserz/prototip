@@ -39,17 +39,13 @@
     </g>
   </g>
 
-  <!-- pipeline card -->
   <g transform="translate(740 40)">
     <rect width="404" height="280" rx="24" fill="#14181F" stroke="#2A303A" stroke-width="1.5"/>
-
     <text x="24" y="36" fill="#8B93A7" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="650" letter-spacing="1.6">PIPELINE</text>
 
-    <!-- prompt chip -->
     <rect x="24" y="56" width="356" height="44" rx="12" fill="#0F1319" stroke="#2E3642"/>
     <text x="40" y="84" fill="#FFE566" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" font-weight="600">"Debt by region, 2024"</text>
 
-    <!-- steps -->
     <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="650">
       <rect x="24" y="118" width="100" height="34" rx="17" fill="#1A1F28"/>
       <text x="74" y="140" text-anchor="middle" fill="#D7DEEA">Parse</text>
@@ -61,7 +57,6 @@
       <text x="330" y="140" text-anchor="middle" fill="#D7DEEA">Chart</text>
     </g>
 
-    <!-- mini chart -->
     <g transform="translate(48 178)">
       <rect x="0" y="48" width="28" height="40" rx="4" fill="url(#bar)" opacity="0.55"/>
       <rect x="44" y="28" width="28" height="60" rx="4" fill="url(#bar)" opacity="0.75"/>
@@ -75,6 +70,6 @@
 
     <rect x="24" y="232" width="356" height="28" rx="8" fill="#0F1319"/>
     <rect x="24" y="232" width="220" height="28" rx="8" fill="url(#accent)" opacity="0.9"/>
-    <text x="202" y="251" text-anchor="middle" fill="#1A1400" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700">ClickHouse  ·  SQL guard  ·  RAG</text>
+    <text x="202" y="251" text-anchor="middle" fill="#1A1400" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700">ClickHouse  |  SQL guard  |  RAG</text>
   </g>
 </svg>
